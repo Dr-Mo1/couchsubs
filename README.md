@@ -2,6 +2,11 @@
 
 # CouchSubs
 
+> **Arabic fork (CouchSubs عربي).** This is a modified version of [CouchSubs](https://github.com/yorulmazsinan/couchsubs)
+> by Sinan Yorulmaz, modified on 2026-11-19 by [Dr-Mo1](https://github.com/Dr-Mo1): it translates English game subtitles
+> into Egyptian Arabic and shows them right-to-left on an LG webOS TV (Windows app only). All credit for CouchSubs goes to
+> its author. Report problems with this fork here, not upstream. Licensed under the AGPL-3.0 like the original.
+
 **PS5 oyunlarına Türkçe yama: Türkçe dil desteği olmayan oyunları Türkçe altyazıyla oynayın.**
 
 Site, kurulum rehberi ve SSS: **[couchsubs.enmeraapps.com](https://couchsubs.enmeraapps.com)**

@@ -535,6 +535,27 @@ public class AiTranslatorTests
                      System(provider, "  Translate swear words without softening them.\n"));
     }
 
+    /// <summary>Arabic fork: target "ar" sends the Egyptian Arabic prompt end to end; the default stays Turkish.</summary>
+    [Fact]
+    public async Task ArabicTargetSendsTheEgyptianPrompt()
+    {
+        var fake = new FakeAi();
+        var translator = new AiTranslator(AiProvider.Gemini, Secret, null, new FakeLocal(), new HttpClient(fake),
+                                          budget: new RequestBudget(1000), instruction: "Keep it short.", target: "ar");
+        await translator.TranslateAsync("We go now.");
+        var json = JsonNode.Parse(fake.Requests[0].Body)!;
+        Assert.Equal(AiRequest.ArabicSystemPrompt + "\n\nKeep it short.", json["systemInstruction"]!["parts"]![0]!["text"]!.GetValue<string>());
+        var user = json["contents"]![0]!["parts"]![0]!["text"]!.GetValue<string>();
+        Assert.Contains("into Egyptian Arabic", user);
+        Assert.DoesNotContain("Turkish", user);
+
+        var context = AiRequest.UserMessage(["Run!"], [new AiContextLine("Hi.", "أهلاً.")], names: ["Price"], target: "ar");
+        Assert.Contains("Egyptian Arabic: أهلاً.", context);
+        Assert.Contains("Arabic letters", context);
+        Assert.Contains("into Turkish", AiRequest.UserMessage(["Run!"], []));
+        Assert.Equal(AiRequest.SystemPrompt, AiRequest.SystemPromptWith(null));
+    }
+
     [Fact]
     public void InstructionIsLimited()
     {

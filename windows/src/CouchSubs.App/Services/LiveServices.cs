@@ -16,6 +16,12 @@ namespace CouchSubs.App.Services;
 /// <summary>Uygulama denetleyicisinin gerçek dünya bağlantıları (PS5, PSN, TV, OCR, çeviri).</summary>
 public sealed class LiveServices : IAppServices
 {
+    /// <summary>
+    /// Arabic fork: this build translates into Arabic. <see cref="FileSettingsStore"/> pins the setting to it.
+    /// ponytail: the target is fixed per build; pass settings.TargetLanguage through IAppServices if a target picker is added.
+    /// </summary>
+    public const string TargetLanguage = "ar";
+
     public IXboxService? Xbox { get; } = new XboxService();
     public ITranslationModel Translation { get; } = new MarianModel();
 
@@ -29,19 +35,20 @@ public sealed class LiveServices : IAppServices
     // Ek talimat aynı önbellekte kalır; anahtar talimatın etiketiyle ayrılır (bkz. AiTranslator.CacheKey).
     public ITextTranslator? MakeAiTranslator(AiProvider provider, string key, string model, ITextTranslator? fallback, Func<string?>? game,
                                              string? instruction = null) =>
-        new AiTranslator(provider, key, model, fallback, cache: TranslationCache.Shared(AppPaths.Translations, provider.EngineId(model), "en", "tr"),
-                         game: game, instruction: instruction);
+        new AiTranslator(provider, key, model, fallback, cache: TranslationCache.Shared(AppPaths.Translations, provider.EngineId(model), "en", TargetLanguage),
+                         game: game, instruction: instruction, target: TargetLanguage);
 
-    public Task<AiTestResult> TestAiKeyAsync(AiProvider provider, string key, string model) => AiTranslator.TestAsync(provider, key, model);
+    public Task<AiTestResult> TestAiKeyAsync(AiProvider provider, string key, string model) =>
+        AiTranslator.TestAsync(provider, key, model, target: TargetLanguage);
 
     // Yerel model: önbellekte sunucu ve model ayrı tutulur ("local:localhost:11434/qwen2.5:7b").
     public ITextTranslator? MakeLocalAiTranslator(LocalAiServer server, string key, ITextTranslator? fallback, Func<string?>? game,
                                                   string? instruction = null) =>
-        new AiTranslator(AiProvider.Local, key, server.Model, fallback, cache: TranslationCache.Shared(AppPaths.Translations, server.EngineId, "en", "tr"),
-                         server: server, game: game, instruction: instruction);
+        new AiTranslator(AiProvider.Local, key, server.Model, fallback, cache: TranslationCache.Shared(AppPaths.Translations, server.EngineId, "en", TargetLanguage),
+                         server: server, game: game, instruction: instruction, target: TargetLanguage);
 
     public Task<AiTestResult> TestLocalAiAsync(LocalAiServer server, string key) =>
-        AiTranslator.TestAsync(AiProvider.Local, key, server.Model, server: server);
+        AiTranslator.TestAsync(AiProvider.Local, key, server.Model, server: server, target: TargetLanguage);
     public IDubbingModel? Dubbing { get; } = PocketDubbingModel.EngineBundled ? new PocketDubbingModel() : null;
     private readonly AdvancedOcrModel advancedOcr = new();
     public IOcrModel? AdvancedOcr => advancedOcr;
@@ -508,7 +515,9 @@ public sealed class FileSettingsStore : ISettingsStore
 {
     private static readonly string FilePath = Path.Combine(AppPaths.Data, "settings.json");
 
-    public UserSettings Load()
+    public UserSettings Load() => Read() with { TargetLanguage = LiveServices.TargetLanguage };
+
+    private static UserSettings Read()
     {
         try { return JsonSerializer.Deserialize<UserSettings>(File.ReadAllText(FilePath)) ?? new UserSettings(); }
         catch (Exception error) when (error is IOException or JsonException or UnauthorizedAccessException) { return new UserSettings(); }

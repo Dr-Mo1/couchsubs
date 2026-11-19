@@ -14,3 +14,7 @@ requires you to, among other things:
     (section 5a);
   - license the whole work under the AGPL-3.0 and provide its source code
     (sections 5c and 6).
+
+Arabic fork: modified by Dr-Mo1 (https://github.com/Dr-Mo1/couchsubs), modified on 2026-11-19.
+Changes: English-to-Egyptian-Arabic AI translation, right-to-left TV subtitles, updates from the fork,
+and the shared line pool kept for the Turkish target only.

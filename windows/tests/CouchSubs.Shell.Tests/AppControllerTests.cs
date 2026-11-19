@@ -1511,6 +1511,23 @@ public class AppControllerRunTests
         controller.Dispose();
     }
 
+    /// <summary>Arabic fork: English→Arabic runs on the AI engines only (DeepL is wired for Turkish) and needs no model download.</summary>
+    [Fact]
+    public async Task ArabicTargetUsesTheAiEnginesOnly()
+    {
+        var (controller, _, _) = Ready();
+        controller.Settings = controller.Settings.WithEngine(TranslationEngine.Local) with { TargetLanguage = "ar" };
+        Assert.True(controller.OnlineTranslationActive);
+        Assert.True(controller.ModelInstalled);
+
+        await controller.SetDeepLKeyAsync("key:fx");
+        Assert.Equal(TranslationEngine.DeepL, controller.Settings.Engine);
+        Assert.False(controller.OnlineTranslationActive);
+        controller.Settings = controller.Settings with { TargetLanguage = "tr" };
+        Assert.True(controller.OnlineTranslationActive);
+        controller.Dispose();
+    }
+
     /// Yerel model anahtarsız hazırdır; "Bağlantıyı dene" ayardaki adres ve modelle gider, yazılan anahtarı yalnız sunucu
     /// kabul ederse saklar; çevirmene sunucu ve anahtar gider; anahtar kaldırılınca yerel model seçili kalır.
     [Fact]

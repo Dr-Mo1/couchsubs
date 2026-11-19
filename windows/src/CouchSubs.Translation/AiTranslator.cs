@@ -43,6 +43,23 @@ public static class AiRequest
         "translate it so that it reads as that continuation. " +
         "Reply with only the translation, no explanations, notes or quotes.";
 
+    /// <summary>Arabic fork: the system prompt for target "ar" (Egyptian colloquial Arabic).</summary>
+    public const string ArabicSystemPrompt =
+        "You translate English video game subtitles into natural, spoken Egyptian Arabic (Masri), the way people in Cairo " +
+        "really talk, written in Arabic script. Use everyday Egyptian words and grammar (\"عايز\", \"دلوقتي\", \"إيه\", " +
+        "\"مش\", \"ليه\"), not Modern Standard Arabic, unless the line is clearly formal (a letter, a sign, a news report). " +
+        "Keep speaker labels such as \"ATREUS:\" exactly as they are. Write character names and place names in Arabic " +
+        "letters by how they sound (\"Lucia\" -> \"لوسيا\"); never translate their meaning. " +
+        "Keep line breaks. Keep the meaning and tone; do not add or leave out anything. " +
+        "The text is read from the screen by OCR and may have misread or missing letters (\"Y u ave to ask?\", " +
+        "\"Doesn't 00k good.\"); translate the line the speaker clearly meant. " +
+        "A subtitle may continue the previous one (it starts in lowercase or with a word like \"and\"); " +
+        "translate it so that it reads as that continuation. " +
+        "Reply with only the translation, no explanations, notes or quotes.";
+
+    /// <summary>Arabic fork: the target language as named in the prompt ("tr" and anything else stays Turkish).</summary>
+    public static string LanguageName(string target) => target == "ar" ? "Egyptian Arabic" : "Turkish";
+
     /// <summary>Kullanıcının ek talimatında en çok bu kadar karakter gider (fazlası kesilir).</summary>
     public const int MaxInstructionLength = 1000;
 
@@ -58,8 +75,11 @@ public static class AiRequest
     /// Sistem talimatı: kullanıcının ek talimatı varsa sona eklenir (#306; ör. küfrü yumuşatmadan çevir). Boşsa
     /// <see cref="SystemPrompt"/> olduğu gibi gider.
     /// </summary>
-    public static string SystemPromptWith(string? instruction) =>
-        Instruction(instruction) is { } extra ? SystemPrompt + "\n\n" + extra : SystemPrompt;
+    public static string SystemPromptWith(string? instruction, string target = "tr")
+    {
+        var prompt = target == "ar" ? ArabicSystemPrompt : SystemPrompt;
+        return Instruction(instruction) is { } extra ? prompt + "\n\n" + extra : prompt;
+    }
 
     /// <summary>
     /// Ek talimatın önbellek etiketi: talimat değişince eski çeviriler dönmesin diye anahtarın başına girer. Talimat
@@ -76,25 +96,28 @@ public static class AiRequest
     /// etiketlerinden öğrenilip cümlelerde geçen adlar; model "Price"ı "Fiyat" diye çevirmesin diye adıyla söylenir (#287).
     /// </summary>
     public static string UserMessage(IReadOnlyList<string> sentences, IReadOnlyList<AiContextLine> context, string? game = null,
-                                     IReadOnlyList<string>? names = null)
+                                     IReadOnlyList<string>? names = null, string target = "tr")
     {
+        var language = LanguageName(target);
         var parts = new List<string>();
         if (!string.IsNullOrEmpty(game)) parts.Add($"Game: {game}");
         if (names is { Count: > 0 })
-            parts.Add($"Character names (keep them exactly as written, do not translate them): {string.Join(", ", names)}");
+            parts.Add(target == "ar"
+                ? $"Character names (write them in Arabic letters by how they sound, do not translate their meaning): {string.Join(", ", names)}"
+                : $"Character names (keep them exactly as written, do not translate them): {string.Join(", ", names)}");
         if (context.Count > 0)
         {
             var lines = new List<string> { "Previous subtitles, for context only (do not translate them again):" };
             foreach (var line in context)
             {
                 lines.Add($"English: {line.Source}");
-                if (line.Translation is { } translation) lines.Add($"Turkish: {translation}");
+                if (line.Translation is { } translation) lines.Add($"{language}: {translation}");
             }
             parts.Add(string.Join("\n", lines));
         }
         var list = new JsonArray([.. sentences.Select(s => (JsonNode?)JsonValue.Create(s))]).ToJsonString(Compact);
-        parts.Add($"Translate each string in this JSON array into Turkish. Reply with only a JSON array of {sentences.Count} " +
-                  $"Turkish strings in the same order.\n{list}");
+        parts.Add($"Translate each string in this JSON array into {language}. Reply with only a JSON array of {sentences.Count} " +
+                  $"{language} strings in the same order.\n{list}");
         return string.Join("\n\n", parts);
     }
 
@@ -115,11 +138,11 @@ public static class AiRequest
     public static HttpRequestMessage Build(AiProvider provider, string key, AiModel model, IReadOnlyList<string> sentences,
                                            IReadOnlyList<AiContextLine> context, string? game = null, LocalAiServer? server = null,
                                            int maxOutputTokens = MaxOutputTokens, bool thinkingOff = true,
-                                           IReadOnlyList<string>? names = null, string? instruction = null)
+                                           IReadOnlyList<string>? names = null, string? instruction = null, string target = "tr")
     {
         key = key.Trim();
-        var user = UserMessage(sentences, context, game, names);
-        var system = SystemPromptWith(instruction);
+        var user = UserMessage(sentences, context, game, names, target);
+        var system = SystemPromptWith(instruction, target);
         HttpRequestMessage request;
         JsonObject body;
         switch (provider)
@@ -481,6 +504,8 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
     private readonly string? _instruction;
     /// <summary>Ek talimatın önbellek etiketi; talimat yoksa null (anahtar eskisi gibi).</summary>
     private readonly string? _instructionTag;
+    /// <summary>Arabic fork: target language of the prompt ("tr" or "ar").</summary>
+    private readonly string _target;
     private DateTimeOffset _pausedUntil = DateTimeOffset.MinValue;
     /// <summary>Bekleme hizmetin 429 yanıtından mı (dakikalık sınır); öyleyse yerel yedek olmasa da istek gönderilmez.</summary>
     private bool _pauseRateLimited;
@@ -500,9 +525,10 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
     /// <param name="instruction">Ayarlardaki "Ek talimat": sistem talimatının sonuna eklenir; boşsa hiçbir şey değişmez.</param>
     public AiTranslator(AiProvider provider, string key, string? model, ITextTranslator? fallback, HttpClient? http = null,
                         TranslationCache? cache = null, RequestBudget? budget = null, LocalAiServer? server = null,
-                        Func<string?>? game = null, string? instruction = null)
+                        Func<string?>? game = null, string? instruction = null, string target = "tr")
     {
         _game = game;
+        _target = target;
         _instruction = AiRequest.Instruction(instruction);
         _instructionTag = AiRequest.InstructionTag(_instruction);
         Provider = provider;
@@ -684,7 +710,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
             {
                 var sentences = chunk.Select(i => texts[i]).ToList();
                 var translated = await PerformAsync(thinkingOff => AiRequest.Build(Provider, _key, Model, sentences, [], game, Server,
-                    maxOutputTokens: AiRequest.ScreenOutputTokens, thinkingOff: thinkingOff, instruction: _instruction), _screenHttp, sentences.Count, cancellationToken).ConfigureAwait(false);
+                    maxOutputTokens: AiRequest.ScreenOutputTokens, thinkingOff: thinkingOff, instruction: _instruction, target: _target), _screenHttp, sentences.Count, cancellationToken).ConfigureAwait(false);
                 Report(null);
                 for (var i = 0; i < chunk.Count; i++)
                 {
@@ -774,7 +800,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
     private Task<string[]> RequestAsync(List<string> sentences, List<AiContextLine> context, string? game,
                                         IReadOnlyList<string> names, CancellationToken cancellationToken) =>
         PerformAsync(thinkingOff => AiRequest.Build(Provider, _key, Model, sentences, context, game, Server, thinkingOff: thinkingOff, names: names,
-                                                       instruction: _instruction),
+                                                       instruction: _instruction, target: _target),
                      _http, sentences.Count, cancellationToken);
 
     /// <summary>Düşünmeyi kapatan alanları reddeden Ollama sunucuları; uygulama açık kaldıkça hatırlanır.</summary>
@@ -834,14 +860,14 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
     /// </summary>
     public static async Task<AiTestResult> TestAsync(AiProvider provider, string key, string? model, HttpClient? http = null,
                                                      CancellationToken cancellationToken = default, LocalAiServer? server = null,
-                                                     string? instruction = null)
+                                                     string? instruction = null, string target = "tr")
     {
         key = key.Trim();
         if (key.Length == 0 && !provider.IsLocal()) return new(OnlineKeyState.Invalid);
         http ??= provider.IsLocal() ? LocalTestClient.Value : SharedClient.Value;
         // Deneme tek istektir; çeviri hattının dakikalık hakkından yemez.
         var translator = new AiTranslator(provider, key, model, new FailingTranslator(), http, budget: new RequestBudget(int.MaxValue),
-                                          server: server, instruction: instruction);
+                                          server: server, instruction: instruction, target: target);
         try
         {
             return new(OnlineKeyState.Valid, await translator.TranslateAsync(Sample, cancellationToken).ConfigureAwait(false));

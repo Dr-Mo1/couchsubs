@@ -13,7 +13,8 @@ namespace CouchSubs.App.Services;
 /// </summary>
 internal sealed class Updater : IUpdater
 {
-    private const string Repository = "https://github.com/yorulmazsinan/couchsubs";
+    // Arabic fork: updates come from the fork, never from the Turkish upstream (an upstream update would replace this build).
+    private const string Repository = "https://github.com/Dr-Mo1/couchsubs";
     private readonly UpdateManager manager = new(new GithubSource(Repository, null, false));
     private UpdateInfo? pending;
 
@@ -42,7 +43,7 @@ internal sealed class Updater : IUpdater
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             http.DefaultRequestHeaders.UserAgent.ParseAdd("CouchSubs");
             using var document = System.Text.Json.JsonDocument.Parse(
-                await http.GetStringAsync("https://api.github.com/repos/yorulmazsinan/couchsubs/releases/latest"));
+                await http.GetStringAsync("https://api.github.com/repos/Dr-Mo1/couchsubs/releases/latest"));
             var tag = document.RootElement.GetProperty("tag_name").GetString()?.TrimStart('v');
             return tag is not null && AppVersion.IsNewer(tag, AppVersion.Current(typeof(Updater).Assembly)) ? tag : null;
         }

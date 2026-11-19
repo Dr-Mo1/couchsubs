@@ -318,3 +318,8 @@ body.band #subtitle-cover { border-radius: 0; }
 /* Doğru girişte de siyahsa ne yapılacağı: düğmelerin altında, küçük ve ikincil renkte (düğmelerin alt boşluğuyla 24 px). */
 #no-picture #no-picture-help { margin-top: 14px; font-size: 24px; line-height: 1.45; color: #A9A59C; }
 #no-picture .button.focused { background: #F5B83D; border-color: #FFFFFF; color: #17181B; }
+
+/* Arabic fork: each line takes its direction from its first letter, so Arabic reads right-to-left and an English
+   speaker label or untranslated text stays left-to-right; left-aligned boxes start on the text's own side. */
+#subtitle-text, #subtitle-prev-text, #subtitle-prev2-text, #screen .item, #regions .region { unicode-bidi: plaintext; }
+#screen .item.paragraphs, #regions .region { text-align: start; }

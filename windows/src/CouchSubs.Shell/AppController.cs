@@ -374,7 +374,12 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     /// <summary>Bu oyun dilinden hedef dile çeviri modeli var mı (ayarlarda listelenecek diller).</summary>
     public bool SupportsLanguage(string source) => services.Translation.IsSupported(source, settings.TargetLanguage);
 
-    public bool ModelInstalled => services.Translation.IsInstalled(settings.SourceLanguage, settings.TargetLanguage);
+    /// <summary>
+    /// Arabic fork: when the free model has no English→target pair at all (Arabic for now), there is nothing to download,
+    /// so the wizard's model step passes and the main screen's download card stays hidden.
+    /// </summary>
+    public bool ModelInstalled => !services.Translation.IsSupported("en", settings.TargetLanguage)
+                                  || services.Translation.IsInstalled(settings.SourceLanguage, settings.TargetLanguage);
     public bool ModelDownloading { get => modelDownloading; private set => Set(ref modelDownloading, value); }
     public double ModelProgress { get => modelProgress; private set => Set(ref modelProgress, value); }
     public string? ModelError { get => modelError; private set => Set(ref modelError, value); }
@@ -1969,7 +1974,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     /// <summary>Pakette olmayan İngilizce satır havuza önerilir (paketler kapalıysa da yalnız hiçbir pakette olmayanlar).</summary>
     private void OfferToPool(string text)
     {
-        if (settings.SourceLanguage != "en" || services.Pool is not { } pool) return;
+        // Arabic fork: the pool feeds the Turkish packs, so nothing is sent for other targets.
+        if (settings.SourceLanguage != "en" || settings.TargetLanguage != "tr" || services.Pool is not { } pool) return;
         if (!PacksActive && services.FindInPacks(text) is not null) return;
         pool.Offer(text);
     }
@@ -2147,8 +2153,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     }
 
     /// <summary>Çevrimiçi çeviri yalnız İngilizce→Türkçe için ve seçili motor hazırsa açılır.</summary>
+    /// <remarks>Arabic fork: also English→Arabic, but only with the AI engines (DeepL is wired for Turkish only).</remarks>
     public bool OnlineTranslationActive =>
-        settings.OnlineTranslation && settings.SourceLanguage == "en" && settings.TargetLanguage == "tr" && IsReady(settings.OnlineEngine);
+        settings.OnlineTranslation && settings.SourceLanguage == "en" && IsReady(settings.OnlineEngine)
+        && (settings.TargetLanguage == "tr" || (settings.TargetLanguage == "ar" && settings.OnlineEngine != TranslationEngine.DeepL));
 
     /// <summary>
     /// Motor kullanılabilir mi: bulut motorlarında anahtar kayıtlıdır; yerel modelde anahtar gerekmez, adres ve model adı
