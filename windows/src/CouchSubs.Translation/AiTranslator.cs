@@ -105,15 +105,26 @@ public static class AiRequest
     {
         try
         {
-            var violations = (JsonNode.Parse(body)?["error"]?["details"] as JsonArray ?? new JsonArray())
+            var violations = (ErrorOf(body)?["details"] as JsonArray ?? new JsonArray())
                 .SelectMany(d => d?["violations"] as IEnumerable<JsonNode?> ?? []).OfType<JsonNode>()
                 .Select(v => $"{v["quotaId"]}={v["quotaValue"]}").ToList();
             if (violations.Count > 0) return string.Join(",", violations);
-            var message = JsonNode.Parse(body)?["error"]?["message"]?.ToString() ?? "";
+            var message = ErrorOf(body)?["message"]?.ToString() ?? "";
             return "no-details: " + (message.Length > 100 ? message[..100] : message);
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException) { return "unreadable"; }
     }
+
+    /// <summary>
+    /// Arabic fork: the "error" object of a failed reply. Google's OpenAI-compatible endpoint (used through the Local engine)
+    /// wraps it in an array: [{"error": {...}}]; indexing that array by name used to throw past the error handling.
+    /// </summary>
+    internal static JsonNode? ErrorOf(string body) => JsonNode.Parse(body) switch
+    {
+        JsonArray { Count: > 0 } list => list[0] is JsonObject first ? first["error"] : null,
+        JsonObject root => root["error"],
+        _ => null,
+    };
 
     private static readonly JsonSerializerOptions Compact = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
@@ -415,7 +426,7 @@ public static class AiRequest
     {
         if ((int)status != 429) return null;
         JsonArray? details;
-        try { details = JsonNode.Parse(body)?["error"]?["details"] as JsonArray; }
+        try { details = ErrorOf(body)?["details"] as JsonArray; }
         catch (JsonException) { return null; }
         if (details is null) return null;
         try

@@ -597,6 +597,9 @@ public class AiTranslatorTests
         await Assert.ThrowsAsync<TranslatorException>(() => chain.TranslateAsync("Hide!"));
         Assert.Equal(5, fake.Requests.Count);
         Assert.StartsWith("no-details: Resource exhausted", AiRequest.QuotaSummary("""{"error":{"message":"Resource exhausted."}}"""));
+        // Google's OpenAI-compatible endpoint wraps the error in an array.
+        Assert.Equal("no-details: Invalid Auth key.", AiRequest.QuotaSummary("""[{"error":{"code":400,"message":"Invalid Auth key."}}]"""));
+        Assert.NotNull(AiRequest.RateLimit(HttpStatusCode.TooManyRequests, "[" + RateLimitBody(PerMinute, "15", "1s") + "]"));
     }
 
     [Fact]

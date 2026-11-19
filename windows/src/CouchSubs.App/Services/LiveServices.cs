@@ -44,13 +44,15 @@ public sealed class LiveServices : IAppServices
         AiTranslator.TestAsync(provider, AiKeyChain.First(key), model, target: TargetLanguage);
 
     // Yerel model: önbellekte sunucu ve model ayrı tutulur ("local:localhost:11434/qwen2.5:7b").
+    // Arabic fork: comma-separated keys chain here too (Google's OpenAI-compatible endpoint used as the "local" server).
     public ITextTranslator? MakeLocalAiTranslator(LocalAiServer server, string key, ITextTranslator? fallback, Func<string?>? game,
                                                   string? instruction = null) =>
-        new AiTranslator(AiProvider.Local, key, server.Model, fallback, cache: TranslationCache.Shared(AppPaths.Translations, server.EngineId, "en", TargetLanguage),
-                         server: server, game: game, instruction: instruction, target: TargetLanguage);
+        AiKeyChain.Build(key, AiProvider.Local, AiProvider.Local.Model(server.Model), fallback, (link, next, _) =>
+            new AiTranslator(AiProvider.Local, link, server.Model, next, cache: TranslationCache.Shared(AppPaths.Translations, server.EngineId, "en", TargetLanguage),
+                             server: server, game: game, instruction: instruction, target: TargetLanguage));
 
     public Task<AiTestResult> TestLocalAiAsync(LocalAiServer server, string key) =>
-        AiTranslator.TestAsync(AiProvider.Local, key, server.Model, server: server, target: TargetLanguage);
+        AiTranslator.TestAsync(AiProvider.Local, AiKeyChain.First(key), server.Model, server: server, target: TargetLanguage);
     public IDubbingModel? Dubbing { get; } = PocketDubbingModel.EngineBundled ? new PocketDubbingModel() : null;
     private readonly AdvancedOcrModel advancedOcr = new();
     public IOcrModel? AdvancedOcr => advancedOcr;
