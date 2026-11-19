@@ -613,6 +613,14 @@ public class AiTranslatorTests
         Assert.Contains("English: Run!", last.Body);
         Assert.DoesNotContain("English: Hide!", last.Body);
         Assert.Contains("Saklan!", last.Body);
+
+        // A reviewed fix is shown as written (any case or punctuation), without a request.
+        var fixes = AiRequest.ParseCorrections("# fixes\nI'm still wired. = أعصابي لسه مشدودة\nno separator here");
+        Assert.Single(fixes);
+        var sent = fake.Requests.Count;
+        var fixedChain = new AiTranslator(AiProvider.Gemini, "scene-k2", null, null, new HttpClient(fake), target: "ar", corrections: fixes);
+        Assert.Equal("أعصابي لسه مشدودة", await fixedChain.TranslateAsync("I'M STILL WIRED"));
+        Assert.Equal(sent, fake.Requests.Count);
     }
 
     /// <summary>Arabic fork: Google's overload 429 has no quota details; a paused chain must not re-send the line at every link.</summary>

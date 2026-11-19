@@ -145,6 +145,23 @@ public static class AiRequest
                                                         && (" " + other.Key + " ").Contains(" " + hit.Key + " ", StringComparison.Ordinal))).Take(12)];
     }
 
+    /// <summary>
+    /// Arabic fork: reviewed line fixes, "english line = السطر المصري" per line (# comments), keyed by the pack canon so
+    /// case, punctuation and accents do not matter. A fixed line is shown as written, without asking the engine.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> ParseCorrections(string text)
+    {
+        var fixes = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var line in text.Split('\n').Select(line => line.Trim()).Where(line => line.Length > 0 && !line.StartsWith('#')))
+        {
+            var at = line.IndexOf(" = ", StringComparison.Ordinal);
+            if (at <= 0) continue;
+            var (english, arabic) = (PackKey.Canon(line[..at]), line[(at + 3)..].Trim());
+            if (english.Length > 0 && arabic.Length > 0) fixes[english] = arabic;
+        }
+        return fixes;
+    }
+
     private static string SlangText(string text) =>
         System.Text.RegularExpressions.Regex.Replace(text.ToLowerInvariant().Replace('\u2019', '\''), "[^a-z0-9']+", " ").Trim();
 
@@ -590,6 +607,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
     private readonly AiContextLog _log;
     private readonly Func<string, string?>? _reference;
     private readonly IReadOnlyList<KeyValuePair<string, string>>? _glossary;
+    private readonly IReadOnlyDictionary<string, string>? _corrections;
     private readonly Func<string?>? _game;
     /// <summary>Ayarlardaki "Ek talimat" (sınırlanmış); yoksa null.</summary>
     private readonly string? _instruction;
@@ -620,13 +638,15 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
                         TranslationCache? cache = null, RequestBudget? budget = null, LocalAiServer? server = null,
                         Func<string?>? game = null, string? instruction = null, string target = "tr",
                         AiContextLog? context = null, Func<string, string?>? reference = null,
-                        IReadOnlyList<KeyValuePair<string, string>>? glossary = null)
+                        IReadOnlyList<KeyValuePair<string, string>>? glossary = null,
+                        IReadOnlyDictionary<string, string>? corrections = null)
     {
         _game = game;
         _target = target;
         _log = context ?? new AiContextLog();
         _reference = reference;
         _glossary = glossary;
+        _corrections = corrections;
         _instruction = AiRequest.Instruction(instruction);
         _instructionTag = AiRequest.InstructionTag(_instruction);
         Provider = provider;
@@ -679,6 +699,8 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         var game = _game?.Invoke()?.Trim();
         // Bağlam, bu satırdan önce gösterilenlerdir; satırın kendisi bağlama girmez.
         var context = ContextBeforeShowing(text, game);
+        // Arabic fork: a reviewed fix for this exact line wins over the cache and the engine.
+        if (_corrections is { Count: > 0 } fixes && fixes.TryGetValue(PackKey.Canon(text), out var fixedLine)) return Remember(fixedLine, text, game);
         if (_cache.TryGet(CacheKey(text, game), out var cached)) return Remember(cached, text, game);
 
         var pieces = SubtitleSegmenter.Split(text);

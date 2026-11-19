@@ -37,11 +37,11 @@ public sealed class LiveServices : IAppServices
                                              string? instruction = null)
     {
         // Arabic fork: several keys separated by commas or spaces become a chain (AiKeyChain); one key behaves as before.
-        var (log, glossary) = (new AiContextLog(), Glossary());
+        var (log, glossary, fixes) = (new AiContextLog(), Glossary(), Corrections());
         return AiKeyChain.Build(key, provider, provider.Model(model), fallback, (link, next, budget) =>
             new AiTranslator(provider, link, model, next, cache: TranslationCache.Shared(AppPaths.Translations, provider.EngineId(model), "en", CacheTarget),
                              budget: budget, game: game, instruction: instruction, target: TargetLanguage,
-                             context: log, reference: PackReference, glossary: glossary));
+                             context: log, reference: PackReference, glossary: glossary, corrections: fixes));
     }
 
     public Task<AiTestResult> TestAiKeyAsync(AiProvider provider, string key, string model) =>
@@ -53,14 +53,14 @@ public sealed class LiveServices : IAppServices
     public ITextTranslator? MakeLocalAiTranslator(LocalAiServer server, string key, ITextTranslator? fallback, Func<string?>? game,
                                                   string? instruction = null)
     {
-        var (log, glossary, next) = (new AiContextLog(), Glossary(), fallback);
+        var (log, glossary, fixes, next) = (new AiContextLog(), Glossary(), Corrections(), fallback);
         foreach (var name in Enumerable.Reverse(AiKeyChain.Keys(server.Model)))
         {
             var each = LocalAiServer.Create(server.BaseUrl.ToString(), name)!;
             next = AiKeyChain.Build(key, AiProvider.Local, AiProvider.Local.Model(name), next, (link, after, _) =>
                 new AiTranslator(AiProvider.Local, link, name, after, cache: TranslationCache.Shared(AppPaths.Translations, each.EngineId, "en", CacheTarget),
                                  server: each, game: game, instruction: instruction, target: TargetLanguage,
-                                 context: log, reference: PackReference, glossary: glossary));
+                                 context: log, reference: PackReference, glossary: glossary, corrections: fixes));
         }
         return next;
     }
@@ -77,6 +77,13 @@ public sealed class LiveServices : IAppServices
     {
         try { return AiRequest.ParseGlossary(File.ReadAllText(Path.Combine(AppPaths.Data, "glossary-ar.txt"))); }
         catch (IOException) { return []; }
+    }
+
+    /// <summary>Arabic fork: reviewed line fixes ("english line = السطر المصري"), read when translation starts.</summary>
+    private static IReadOnlyDictionary<string, string> Corrections()
+    {
+        try { return AiRequest.ParseCorrections(File.ReadAllText(Path.Combine(AppPaths.Data, "corrections-ar.txt"))); }
+        catch (IOException) { return new Dictionary<string, string>(); }
     }
 
     /// <summary>Arabic fork: the Turkish pack line for a subtitle (exact, then OCR-tolerant in the chosen game's pack).</summary>
