@@ -6,7 +6,7 @@
   'use strict';
 
   // TV uygulamasının sürümü: appinfo.json, tv-tizen/config.xml ve tv-android/app/build.gradle ile aynı tutulur.
-  var APP_VERSION = '0.9.25';
+  var APP_VERSION = '0.9.26';
   var t = window.t;
   var config = window.COUCHSUBS_CONFIG || {};
   var platform = window.COUCHSUBS_PLATFORM;
@@ -30,7 +30,7 @@
   // üstünde küçük ve soluk olarak bir süre daha kalır, sonra solarak kalkar. Üç kişi art arda konuşursa iki önceki satır
   // da en üstte daha soluk durur; ekranda en çok üç satır olur.
   var STACK_WITHIN_MS = 1500;
-  var PREVIOUS_HOLD_MS = 1500;
+  var PREVIOUS_HOLD_MS = 3500; // Arabic fork: DocMo reads slowly; the previous line stays above longer.
   var PREVIOUS_FADE_MS = 400;
   // Yeni satırla yer değiştirmedikçe hiçbir satır bundan kısa görünmez.
   var MIN_VISIBLE_MS = 1200;
@@ -47,7 +47,7 @@
 
   // Bilgisayarın "temizle" olayı satırı bundan erken kaldırmaz: oyundaki satır çeviri gelirken kalkmışsa yazı TV'de
   // bir an görünüp kayboluyordu. Süre, bilgisayarın okuma süresi kuralıyla aynıdır; üst sınırı daha kısadır.
-  var HOLD_MAX_MS = 5000;
+  var HOLD_MAX_MS = 9000; // Arabic fork: was 5000.
   var holdUntil = 0;
   // Bağlantı bir an koptuğunda yazı silinmez; ancak bu süre içinde geri gelmezse silinir.
   var DROP_HIDE_MS = 6000;
@@ -474,17 +474,17 @@
     }
     shownAt = now;
     shownParagraphs = !!paragraphs;
-    holdUntil = shownAt + Math.min(HOLD_MAX_MS, 2000 + text.length * 60);
+    holdUntil = shownAt + Math.min(HOLD_MAX_MS, 2500 + text.length * 90); // Arabic fork: was 2000 + 60/char.
     currentBox = validBox(box);
     setLineText('subtitle-text', text, paragraphs, fontBase);
-    $('subtitle-text').style.textAlign = paragraphs ? 'left' : '';
+    $('subtitle-text').style.textAlign = paragraphs ? 'start' : ''; // Arabic fork: right side for RTL paragraphs.
     $('subtitle').className = '';
     layout();
     setStatus('st-last', text.length > 40 ? text.slice(0, 40) + '…' : text);
     notePlace();
     clearTimeout(hideTimer);
     // Geçersiz ya da çok kısa süre yazıyı gösterir göstermez kaldırmasın.
-    var ms = duration > 0 ? Math.max(MIN_VISIBLE_MS, duration) : Math.min(8000, 2000 + text.length * 60);
+    var ms = duration > 0 ? Math.max(MIN_VISIBLE_MS, duration) : Math.min(12000, 2500 + text.length * 90); // Arabic fork: was min(8000, 2000 + 60/char).
     hideTimer = setTimeout(function () { hideSubtitle('timer'); }, ms);
   }
 
