@@ -108,7 +108,9 @@ public static class AiRequest
             var violations = (JsonNode.Parse(body)?["error"]?["details"] as JsonArray ?? new JsonArray())
                 .SelectMany(d => d?["violations"] as IEnumerable<JsonNode?> ?? []).OfType<JsonNode>()
                 .Select(v => $"{v["quotaId"]}={v["quotaValue"]}").ToList();
-            return violations.Count > 0 ? string.Join(",", violations) : "no-details";
+            if (violations.Count > 0) return string.Join(",", violations);
+            var message = JsonNode.Parse(body)?["error"]?["message"]?.ToString() ?? "";
+            return "no-details: " + (message.Length > 100 ? message[..100] : message);
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException) { return "unreadable"; }
     }
@@ -620,7 +622,9 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         // beklemede yerel çeviri yoksa (inmemiş, açılamadı) satır düşmesin: hizmet yine denenir. 429 beklemesi kalır.
         if (sources.Count > 0 && DateTimeOffset.UtcNow < _pausedUntil)
         {
-            if (_pauseRateLimited) return Remember(await FallbackAsync(text, cancellationToken).ConfigureAwait(false), text, game);
+            // Arabic fork: a paused AiKeyChain link hands the line to the next key and never re-sends it itself; retrying
+            // here re-ran the whole rest of the chain at every level (up to 15 requests per line with 4 keys).
+            if (_pauseRateLimited || _fallback is AiTranslator) return Remember(await FallbackAsync(text, cancellationToken).ConfigureAwait(false), text, game);
             if (await TryFallbackAsync(text, cancellationToken).ConfigureAwait(false) is { } offline) return Remember(offline, text, game);
         }
         // Dakikalık hak bittiyse satır sessizce yerel çeviriyle çevrilir (hata değildir). Hak uygulamanın temkinli

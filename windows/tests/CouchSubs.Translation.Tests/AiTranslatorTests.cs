@@ -583,6 +583,22 @@ public class AiTranslatorTests
         Assert.Equal(8, AiRequest.KeyTag("chain-k1").Length);
     }
 
+    /// <summary>Arabic fork: Google's overload 429 has no quota details; a paused chain must not re-send the line at every link.</summary>
+    [Fact]
+    public async Task PausedKeyChainSendsOneRequestPerLine()
+    {
+        var fake = new FakeAi((_, _) => Json("""{"error":{"code":429,"message":"Resource exhausted.","status":"RESOURCE_EXHAUSTED"}}""",
+                                             HttpStatusCode.TooManyRequests));
+        var chain = AiKeyChain.Build("s1,s2,s3,s4", AiProvider.Gemini, AiProvider.Gemini.Model(null), null, (key, next, budget) =>
+            new AiTranslator(AiProvider.Gemini, key, null, next, new HttpClient(fake), budget: budget, target: "ar"));
+
+        await Assert.ThrowsAsync<TranslatorException>(() => chain.TranslateAsync("Run!"));
+        Assert.Equal(4, fake.Requests.Count);
+        await Assert.ThrowsAsync<TranslatorException>(() => chain.TranslateAsync("Hide!"));
+        Assert.Equal(5, fake.Requests.Count);
+        Assert.StartsWith("no-details: Resource exhausted", AiRequest.QuotaSummary("""{"error":{"message":"Resource exhausted."}}"""));
+    }
+
     [Fact]
     public void InstructionIsLimited()
     {
