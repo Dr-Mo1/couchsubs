@@ -121,7 +121,8 @@ test('TV ekran çevirisi: ' + width + '×' + height, {skip: !browser && 'Chrome/
     assert.equal(r.edge[0].text, scenarios.edge[0].text);
   });
   await t.test('paragraf hizası ve tam metin korunur', () => {
-    assert.equal(r.paragraph[0].align, 'left');
+    // Arabic fork: start, so a right-to-left paragraph begins on the right.
+    assert.equal(r.paragraph[0].align, 'start');
     assert.equal(r.paragraph[0].text, scenarios.paragraph[0].text);
     assert.ok(r.paragraph[0].scrollHeight <= r.paragraph[0].clientHeight + 1);
     assert.ok(r.paragraph[0].bottom < r.paragraph[1].top);
