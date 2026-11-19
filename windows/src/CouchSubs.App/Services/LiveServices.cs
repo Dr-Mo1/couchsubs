@@ -45,14 +45,24 @@ public sealed class LiveServices : IAppServices
 
     // Yerel model: önbellekte sunucu ve model ayrı tutulur ("local:localhost:11434/qwen2.5:7b").
     // Arabic fork: comma-separated keys chain here too (Google's OpenAI-compatible endpoint used as the "local" server).
+    // Several model names ("a,b") are tried in that order, each with every key: a model's day quota is its own.
     public ITextTranslator? MakeLocalAiTranslator(LocalAiServer server, string key, ITextTranslator? fallback, Func<string?>? game,
-                                                  string? instruction = null) =>
-        AiKeyChain.Build(key, AiProvider.Local, AiProvider.Local.Model(server.Model), fallback, (link, next, _) =>
-            new AiTranslator(AiProvider.Local, link, server.Model, next, cache: TranslationCache.Shared(AppPaths.Translations, server.EngineId, "en", TargetLanguage),
-                             server: server, game: game, instruction: instruction, target: TargetLanguage));
+                                                  string? instruction = null)
+    {
+        var next = fallback;
+        foreach (var name in Enumerable.Reverse(AiKeyChain.Keys(server.Model)))
+        {
+            var each = LocalAiServer.Create(server.BaseUrl.ToString(), name)!;
+            next = AiKeyChain.Build(key, AiProvider.Local, AiProvider.Local.Model(name), next, (link, after, _) =>
+                new AiTranslator(AiProvider.Local, link, name, after, cache: TranslationCache.Shared(AppPaths.Translations, each.EngineId, "en", TargetLanguage),
+                                 server: each, game: game, instruction: instruction, target: TargetLanguage));
+        }
+        return next;
+    }
 
     public Task<AiTestResult> TestLocalAiAsync(LocalAiServer server, string key) =>
-        AiTranslator.TestAsync(AiProvider.Local, AiKeyChain.First(key), server.Model, server: server, target: TargetLanguage);
+        AiTranslator.TestAsync(AiProvider.Local, AiKeyChain.First(key), AiKeyChain.First(server.Model),
+                               server: LocalAiServer.Create(server.BaseUrl.ToString(), AiKeyChain.First(server.Model)), target: TargetLanguage);
     public IDubbingModel? Dubbing { get; } = PocketDubbingModel.EngineBundled ? new PocketDubbingModel() : null;
     private readonly AdvancedOcrModel advancedOcr = new();
     public IOcrModel? AdvancedOcr => advancedOcr;

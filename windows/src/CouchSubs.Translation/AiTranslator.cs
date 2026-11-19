@@ -464,7 +464,8 @@ public static class AiRequest
 /// </summary>
 /// <param name="RetryAfter">Hizmetin önerdiği bekleme ("retryDelay"); yoksa null.</param>
 /// <param name="RequestsPerMinute">Hizmetin bildirdiği dakikalık istek sınırı ("quotaValue"); yoksa null.</param>
-public sealed record AiRateLimit(TimeSpan? RetryAfter = null, int? RequestsPerMinute = null);
+/// <param name="Daily">Arabic fork: the key's day limit; the key rests for <see cref="AiTranslator.DayPause"/>.</param>
+public sealed record AiRateLimit(TimeSpan? RetryAfter = null, int? RequestsPerMinute = null, bool Daily = false);
 
 /// <summary>Hizmet dakikalık sınırın aşıldığını bildirdi; kullanıcıya hata olarak gösterilmez.</summary>
 internal sealed class AiRateLimitedException(AiRateLimit limit) : Exception("AI translation rate limited")
@@ -496,6 +497,13 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
     internal TimeSpan ErrorPause { get; init; }
     /// <summary>Dakikalık sınır aşılınca en çok bu kadar beklenir (hizmet bekleme önermezse de bu kadar).</summary>
     public static readonly TimeSpan RateLimitPause = TimeSpan.FromSeconds(20);
+    /// <summary>Arabic fork: a key that hit its day limit is tried again only after this (the chain moves on meanwhile).</summary>
+    public static readonly TimeSpan DayPause = TimeSpan.FromMinutes(15);
+
+    private static TimeSpan PauseFor(AiRateLimit limit) =>
+        limit.Daily ? DayPause
+        : limit.RetryAfter is { } retry && retry < RateLimitPause ? (retry < TimeSpan.FromSeconds(1) ? TimeSpan.FromSeconds(1) : retry)
+        : RateLimitPause;
     /// <summary>Denemede çevrilen örnek satır.</summary>
     public const string Sample = "KRATOS: We go now. Stay close, boy.";
 
@@ -658,8 +666,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         {
             // Dakikalık sınır: kısa beklenir, ana ekranda uyarı çıkmaz; hizmet daha düşük sınır bildirdiyse ona inilir.
             if (limited.Limit.RequestsPerMinute is { } perMinute) _budget?.Lower(perMinute);
-            var pause = limited.Limit.RetryAfter is { } retry && retry < RateLimitPause ? retry : RateLimitPause;
-            if (pause < TimeSpan.FromSeconds(1)) pause = TimeSpan.FromSeconds(1);
+            var pause = PauseFor(limited.Limit);
             LastLineWasRateLimited = true;
             _pausedUntil = DateTimeOffset.UtcNow + pause;
             _pauseRateLimited = true;
@@ -763,8 +770,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
             catch (AiRateLimitedException limited) when (!cancellationToken.IsCancellationRequested)
             {
                 if (limited.Limit.RequestsPerMinute is { } perMinute) _budget?.Lower(perMinute);
-                var pause = limited.Limit.RetryAfter is { } retry && retry < RateLimitPause ? retry : RateLimitPause;
-                if (pause < TimeSpan.FromSeconds(1)) pause = TimeSpan.FromSeconds(1);
+                var pause = PauseFor(limited.Limit);
                 LastLineWasRateLimited = true;
                 _pausedUntil = DateTimeOffset.UtcNow + pause;
                 _pauseRateLimited = true;
@@ -902,6 +908,10 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
                 ? $"limit: {AiRequest.QuotaSummary(body)} key#{_keyTag} {Model.Id}"
                 : $"api-hata: HTTP {(int)response.StatusCode} key#{_keyTag} {Model.Id}");
             if (AiRequest.RateLimit(response.StatusCode, body) is { } limit) throw new AiRateLimitedException(limit);
+            // Arabic fork: any other 429 (day limit, Google's no-details "Resource has been exhausted") only rests this key;
+            // the line goes to the next key at once and the resting key is not retried line after line.
+            if ((int)response.StatusCode == 429 && _target == "ar")
+                throw new AiRateLimitedException(new AiRateLimit(Daily: body.Contains("PerDay", StringComparison.Ordinal)));
             throw new AiException(AiRequest.Failure(response.StatusCode, body));
         }
         return AiRequest.Translations(AiRequest.Text(Provider, body), count);
