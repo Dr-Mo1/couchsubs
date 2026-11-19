@@ -62,6 +62,8 @@ public class SubtitleBlockTests
     [InlineData("PHOTO MODE L1 + R1", true)]
     [InlineData("PHOTO MODE [L1] + [R3]", true)]
     [InlineData("Hand me the L1.", false)]
+    [InlineData("PHOTO STUDIO fi)", true)]  // Arabic fork: the button icon read as "fi)"
+    [InlineData("Talk to me (ok)", false)]
     public void ButtonAtTheEndIsAPrompt(string line, bool prompt) => Assert.Equal(prompt, ButtonPrompts.IsPrompt(line));
 
     [Theory]
@@ -83,6 +85,7 @@ public class SubtitleBlockTests
     [InlineData("A TURN ON")]
     [InlineData("BEAST")]
     [InlineData("BENCH PRESS")]
+    [InlineData("TAKE AMMO PACK (013) TAKE EXP.")]  // Arabic fork: two labels read as one line
     public void ActionLabelIsNotASubtitle(string label)
     {
         Assert.True(ButtonPrompts.IsActionLabel(label));

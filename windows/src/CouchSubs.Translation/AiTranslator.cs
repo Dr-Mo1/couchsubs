@@ -96,6 +96,23 @@ public static class AiRequest
         ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(extra)))[..16].ToLowerInvariant()
         : null;
 
+    /// <summary>Arabic fork: a short, irreversible tag naming a key in logs and budgets (the key itself is never logged).</summary>
+    public static string KeyTag(string key) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(key.Trim())))[..8].ToLowerInvariant();
+
+    /// <summary>Arabic fork: the quota ids Google named in a 429 ("GenerateRequestsPerMinute...=15"), for altyazi.log.</summary>
+    public static string QuotaSummary(string body)
+    {
+        try
+        {
+            var violations = (JsonNode.Parse(body)?["error"]?["details"] as JsonArray ?? new JsonArray())
+                .SelectMany(d => d?["violations"] as IEnumerable<JsonNode?> ?? []).OfType<JsonNode>()
+                .Select(v => $"{v["quotaId"]}={v["quotaValue"]}").ToList();
+            return violations.Count > 0 ? string.Join(",", violations) : "no-details";
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException) { return "unreadable"; }
+    }
+
     private static readonly JsonSerializerOptions Compact = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
     /// <summary>
@@ -513,6 +530,8 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
     private readonly string? _instructionTag;
     /// <summary>Arabic fork: target language of the prompt ("tr" or "ar").</summary>
     private readonly string _target;
+    /// <summary>Arabic fork: <see cref="AiRequest.KeyTag"/> of this translator's key, for altyazi.log.</summary>
+    private readonly string _keyTag;
     private DateTimeOffset _pausedUntil = DateTimeOffset.MinValue;
     /// <summary>Bekleme hizmetin 429 yanıtından mı (dakikalık sınır); öyleyse yerel yedek olmasa da istek gönderilmez.</summary>
     private bool _pauseRateLimited;
@@ -543,6 +562,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         Model = provider.Model(model);
         Server = provider.IsLocal() ? server ?? LocalAiServer.Create(LocalAiServer.OllamaUrl, Model.Id) : null;
         _key = key.Trim();
+        _keyTag = _key.Length == 0 ? "-" : AiRequest.KeyTag(_key)[..4];
         _fallback = fallback;
         _http = http ?? ClientFor(provider);
         _screenHttp = http ?? (provider.IsLocal() ? LocalTestClient.Value : ScreenClient.Value);
@@ -744,6 +764,13 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
                 failed = true;
             }
         }
+        // Arabic fork: the next key of an AiKeyChain translates the rest together (one request), not line by line.
+        var rest = Enumerable.Range(0, texts.Count).Where(i => results[i] is null).ToList();
+        if (rest.Count > 0 && _fallback is AiTranslator next)
+        {
+            var more = await next.TranslateAllAsync([.. rest.Select(i => texts[i])], cancellationToken).ConfigureAwait(false);
+            for (var j = 0; j < rest.Count; j++) results[rest[j]] = more[j];
+        }
         for (var i = 0; i < texts.Count; i++)
         {
             if (results[i] is not null) continue;
@@ -855,6 +882,10 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
     {
         if (!response.IsSuccessStatusCode)
         {
+            // Arabic fork: which limit Google hit, and on which key (by tag), so the session report can tell.
+            SubtitleLog.Write((int)response.StatusCode == 429
+                ? $"limit: {AiRequest.QuotaSummary(body)} key#{_keyTag} {Model.Id}"
+                : $"api-hata: HTTP {(int)response.StatusCode} key#{_keyTag} {Model.Id}");
             if (AiRequest.RateLimit(response.StatusCode, body) is { } limit) throw new AiRateLimitedException(limit);
             throw new AiException(AiRequest.Failure(response.StatusCode, body));
         }

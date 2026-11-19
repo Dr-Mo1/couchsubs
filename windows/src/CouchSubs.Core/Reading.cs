@@ -224,8 +224,16 @@ public static class ButtonPrompts
         // "Press ✕ to jump", "Hold R2 to aim"
         if (Verbs.Contains(first) && tokens.Count is >= 2 and <= 10)
             return Buttons.Contains(tokens[1]) || Lookalikes.Contains(tokens[1]);
+        // Arabic fork: "PHOTO STUDIO fi)": the bracketed button icon is read as a short lowercase token after an
+        // all-caps label (GTA 6 photo mode). Real speech has lowercase letters before it.
+        if (tokens.Count is >= 2 and <= 5 && tokens[^1].Length <= 2 && tokens[^1].All(char.IsLower) && line.TrimEnd().EndsWith(')') &&
+            tokens.Take(tokens.Count - 1).All(token => !token.Any(char.IsLower)) && tokens.Take(tokens.Count - 1).Any(token => token.Any(char.IsUpper)))
+            return true;
         return false;
     }
+
+    /// <summary>Arabic fork: a counted item such as "(013)" or "(0/3)".</summary>
+    private static readonly System.Text.RegularExpressions.Regex CountedItem = new(@"\(\s*\d+(\s*/\s*\d+)?\s*\)");
 
     /// <summary>
     /// Etkileşim/HUD etiketi: en çok üç sözcük, hiç küçük harf yok (en az bir büyük harf var), cümle sonu noktalaması
@@ -239,6 +247,9 @@ public static class ButtonPrompts
     {
         var words = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Count(word => word.Any(char.IsLetter));
         return words is >= 1 and <= 3 && line.Any(char.IsUpper) && !line.Any(char.IsLower) &&
-            !SubtitleStabilizer.EndsSentence(line);
+            !SubtitleStabilizer.EndsSentence(line)
+            // Arabic fork: all-caps HUD with a counted item, even when two labels were read as one line with a period
+            // ("TAKE AMMO PACK (013) TAKE EXP.").
+            || words >= 1 && line.Any(char.IsUpper) && !line.Any(char.IsLower) && CountedItem.IsMatch(line);
     }
 }

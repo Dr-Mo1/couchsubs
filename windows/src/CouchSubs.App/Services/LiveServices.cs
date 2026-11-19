@@ -35,11 +35,13 @@ public sealed class LiveServices : IAppServices
     // Ek talimat aynı önbellekte kalır; anahtar talimatın etiketiyle ayrılır (bkz. AiTranslator.CacheKey).
     public ITextTranslator? MakeAiTranslator(AiProvider provider, string key, string model, ITextTranslator? fallback, Func<string?>? game,
                                              string? instruction = null) =>
-        new AiTranslator(provider, key, model, fallback, cache: TranslationCache.Shared(AppPaths.Translations, provider.EngineId(model), "en", TargetLanguage),
-                         game: game, instruction: instruction, target: TargetLanguage);
+        // Arabic fork: several keys separated by commas or spaces become a chain (AiKeyChain); one key behaves as before.
+        AiKeyChain.Build(key, provider, provider.Model(model), fallback, (link, next, budget) =>
+            new AiTranslator(provider, link, model, next, cache: TranslationCache.Shared(AppPaths.Translations, provider.EngineId(model), "en", TargetLanguage),
+                             budget: budget, game: game, instruction: instruction, target: TargetLanguage));
 
     public Task<AiTestResult> TestAiKeyAsync(AiProvider provider, string key, string model) =>
-        AiTranslator.TestAsync(provider, key, model, target: TargetLanguage);
+        AiTranslator.TestAsync(provider, AiKeyChain.First(key), model, target: TargetLanguage);
 
     // Yerel model: önbellekte sunucu ve model ayrı tutulur ("local:localhost:11434/qwen2.5:7b").
     public ITextTranslator? MakeLocalAiTranslator(LocalAiServer server, string key, ITextTranslator? fallback, Func<string?>? game,

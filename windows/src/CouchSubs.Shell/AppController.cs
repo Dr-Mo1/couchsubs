@@ -1239,6 +1239,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                 screenShownUntil = DateTime.UtcNow.AddMilliseconds(ScreenTranslation.DisplayMilliseconds(shown));
             }, work.Token);
             server.Clear();
+            // Arabic fork: Num 9 shows up in altyazi.log (session report).
+            SubtitleLog.Write($"ekran çevirisi: {items.Count} parça");
             if (items.Count == 0)
             {
                 server.SendSubtitle(text["No text found on the screen."], 2500);
@@ -1252,6 +1254,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         }
         catch (TranslatorException error)
         {
+            SubtitleLog.Write($"ekran çevirisi hata: {error.Status}");
             post(() => TranslatorStatus = error.Status);
             ShowScreenFailure(error, translator);
             return ScreenOutcome.TranslatorUnavailable;

@@ -556,6 +556,33 @@ public class AiTranslatorTests
         Assert.Equal(AiRequest.SystemPrompt, AiRequest.SystemPromptWith(null));
     }
 
+    /// <summary>
+    /// Arabic fork (AiKeyChain): a first key at its per-minute limit hands the line, and the rest of a screen, to the
+    /// second key; nothing is lost and the screen still goes as one request. One key needs no chain.
+    /// </summary>
+    [Fact]
+    public async Task SecondKeyTranslatesWhenTheFirstIsLimited()
+    {
+        static string KeyOf(HttpRequestMessage request) => request.Headers.GetValues("x-goog-api-key").Single();
+        var fake = new FakeAi((request, body) => KeyOf(request) == "chain-k1"
+            ? Json(RateLimitBody(PerMinute, "15", "1s"), HttpStatusCode.TooManyRequests)
+            : Echo(request, body));
+        var chain = AiKeyChain.Build(" chain-k1, chain-k2 ", AiProvider.Gemini, AiProvider.Gemini.Model(null), null, (key, next, budget) =>
+            new AiTranslator(AiProvider.Gemini, key, null, next, new HttpClient(fake), budget: budget, target: "ar"));
+
+        Assert.Equal("[tr] Run!", await chain.TranslateAsync("Run!"));
+        Assert.Equal(new[] { "chain-k1", "chain-k2" }, fake.Requests.Select(r => KeyOf(r.Request)));
+
+        var screen = await ((AiTranslator)chain).TranslateAllAsync(["Hide!", "Go left."]);
+        Assert.Equal(new[] { "[tr] Hide!", "[tr] Go left." }, screen);
+        Assert.Equal("chain-k2", KeyOf(fake.Requests[^1].Request));
+        Assert.Equal(1, fake.Requests.Skip(2).Count(r => KeyOf(r.Request) == "chain-k2"));
+
+        Assert.Equal("chain-k1", AiKeyChain.First(" chain-k1 , chain-k2 "));
+        Assert.Single(AiKeyChain.Keys("only-one"));
+        Assert.Equal(8, AiRequest.KeyTag("chain-k1").Length);
+    }
+
     [Fact]
     public void InstructionIsLimited()
     {
