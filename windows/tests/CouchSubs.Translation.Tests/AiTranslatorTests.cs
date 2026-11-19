@@ -583,6 +583,36 @@ public class AiTranslatorTests
         Assert.Equal(8, AiRequest.KeyTag("chain-k1").Length);
     }
 
+    /// <summary>Arabic fork: glossary hits and the Turkish pack line travel with the line; the scene is shared by a chain's keys.</summary>
+    [Fact]
+    public async Task ArabicLineCarriesGlossaryReferenceAndSharedScene()
+    {
+        var glossary = AiRequest.ParseGlossary("# comment\nlay low = نختفي شوية\nMy Guy = يا صاحبي\nbroken line\n");
+        Assert.Equal(2, glossary.Count);
+        var hits = AiRequest.SlangIn(glossary, ["We gotta LAY LOW, my guy."]);
+        Assert.Equal(new[] { "lay low", "my guy" }, hits.Select(hit => hit.Key));
+        Assert.Empty(AiRequest.SlangIn(glossary, ["Play lowkey."]));
+        var user = AiRequest.UserMessage(["We gotta lay low."], [], target: "ar", slang: hits, reference: "Bir süre saklanmalıyız.");
+        Assert.Contains("\"lay low\" = \"نختفي شوية\"", user);
+        Assert.Contains("Bir süre saklanmalıyız.", user);
+
+        static string KeyOf(HttpRequestMessage request) => request.Headers.GetValues("x-goog-api-key").Single();
+        var fake = new FakeAi((request, body) => KeyOf(request) == "scene-k1" && body.Contains("Hide!")
+            ? Json(RateLimitBody(PerMinute, "15", "1s"), HttpStatusCode.TooManyRequests)
+            : Echo(request, body));
+        var log = new AiContextLog();
+        var chain = AiKeyChain.Build("scene-k1,scene-k2", AiProvider.Gemini, AiProvider.Gemini.Model(null), null, (key, next, budget) =>
+            new AiTranslator(AiProvider.Gemini, key, null, next, new HttpClient(fake), budget: budget, target: "ar", context: log,
+                             reference: line => line == "Hide!" ? "Saklan!" : null, glossary: glossary));
+        await chain.TranslateAsync("Run!");
+        await chain.TranslateAsync("Hide!");
+        var last = fake.Requests[^1];
+        Assert.Equal("scene-k2", KeyOf(last.Request));
+        Assert.Contains("English: Run!", last.Body);
+        Assert.DoesNotContain("English: Hide!", last.Body);
+        Assert.Contains("Saklan!", last.Body);
+    }
+
     /// <summary>Arabic fork: Google's overload 429 has no quota details; a paused chain must not re-send the line at every link.</summary>
     [Fact]
     public async Task PausedKeyChainSendsOneRequestPerLine()

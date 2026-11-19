@@ -34,11 +34,15 @@ public sealed class LiveServices : IAppServices
     // Her model kendi önbelleğini kullanır ("gemini:gemini-3.5-flash-lite"); model değişince eski çeviriler karışmaz.
     // Ek talimat aynı önbellekte kalır; anahtar talimatın etiketiyle ayrılır (bkz. AiTranslator.CacheKey).
     public ITextTranslator? MakeAiTranslator(AiProvider provider, string key, string model, ITextTranslator? fallback, Func<string?>? game,
-                                             string? instruction = null) =>
+                                             string? instruction = null)
+    {
         // Arabic fork: several keys separated by commas or spaces become a chain (AiKeyChain); one key behaves as before.
-        AiKeyChain.Build(key, provider, provider.Model(model), fallback, (link, next, budget) =>
-            new AiTranslator(provider, link, model, next, cache: TranslationCache.Shared(AppPaths.Translations, provider.EngineId(model), "en", TargetLanguage),
-                             budget: budget, game: game, instruction: instruction, target: TargetLanguage));
+        var (log, glossary) = (new AiContextLog(), Glossary());
+        return AiKeyChain.Build(key, provider, provider.Model(model), fallback, (link, next, budget) =>
+            new AiTranslator(provider, link, model, next, cache: TranslationCache.Shared(AppPaths.Translations, provider.EngineId(model), "en", CacheTarget),
+                             budget: budget, game: game, instruction: instruction, target: TargetLanguage,
+                             context: log, reference: PackReference, glossary: glossary));
+    }
 
     public Task<AiTestResult> TestAiKeyAsync(AiProvider provider, string key, string model) =>
         AiTranslator.TestAsync(provider, AiKeyChain.First(key), model, target: TargetLanguage);
@@ -49,13 +53,14 @@ public sealed class LiveServices : IAppServices
     public ITextTranslator? MakeLocalAiTranslator(LocalAiServer server, string key, ITextTranslator? fallback, Func<string?>? game,
                                                   string? instruction = null)
     {
-        var next = fallback;
+        var (log, glossary, next) = (new AiContextLog(), Glossary(), fallback);
         foreach (var name in Enumerable.Reverse(AiKeyChain.Keys(server.Model)))
         {
             var each = LocalAiServer.Create(server.BaseUrl.ToString(), name)!;
             next = AiKeyChain.Build(key, AiProvider.Local, AiProvider.Local.Model(name), next, (link, after, _) =>
-                new AiTranslator(AiProvider.Local, link, name, after, cache: TranslationCache.Shared(AppPaths.Translations, each.EngineId, "en", TargetLanguage),
-                                 server: each, game: game, instruction: instruction, target: TargetLanguage));
+                new AiTranslator(AiProvider.Local, link, name, after, cache: TranslationCache.Shared(AppPaths.Translations, each.EngineId, "en", CacheTarget),
+                                 server: each, game: game, instruction: instruction, target: TargetLanguage,
+                                 context: log, reference: PackReference, glossary: glossary));
         }
         return next;
     }
@@ -63,6 +68,20 @@ public sealed class LiveServices : IAppServices
     public Task<AiTestResult> TestLocalAiAsync(LocalAiServer server, string key) =>
         AiTranslator.TestAsync(AiProvider.Local, AiKeyChain.First(key), AiKeyChain.First(server.Model),
                                server: LocalAiServer.Create(server.BaseUrl.ToString(), AiKeyChain.First(server.Model)), target: TargetLanguage);
+
+    // Arabic fork: translations made with the meaning-first prompt, glossary and pack reference are cached apart from older ones.
+    private const string CacheTarget = TargetLanguage + "-v2";
+
+    /// <summary>Arabic fork: DocMo's slang glossary ("english = مصري" per line), read when translation starts.</summary>
+    private static IReadOnlyList<KeyValuePair<string, string>> Glossary()
+    {
+        try { return AiRequest.ParseGlossary(File.ReadAllText(Path.Combine(AppPaths.Data, "glossary-ar.txt"))); }
+        catch (IOException) { return []; }
+    }
+
+    /// <summary>Arabic fork: the Turkish pack line for a subtitle (exact, then OCR-tolerant in the chosen game's pack).</summary>
+    private string? PackReference(string text) => FindInPacks(text)?.Text;
+
     public IDubbingModel? Dubbing { get; } = PocketDubbingModel.EngineBundled ? new PocketDubbingModel() : null;
     private readonly AdvancedOcrModel advancedOcr = new();
     public IOcrModel? AdvancedOcr => advancedOcr;
