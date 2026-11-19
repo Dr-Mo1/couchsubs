@@ -126,16 +126,11 @@ public static class AiRequest
         catch (Exception error) when (error is JsonException or InvalidOperationException) { return "unreadable"; }
     }
 
-    /// <summary>
-    /// Arabic fork: the "error" object of a failed reply. Google's OpenAI-compatible endpoint (used through the Local engine)
-    /// wraps it in an array: [{"error": {...}}]; indexing that array by name used to throw past the error handling.
-    /// </summary>
     /// <summary>Arabic fork: "english phrase = مصري" lines (# comments); keys lowercased like <see cref="SlangIn"/> reads lines.</summary>
     public static IReadOnlyList<KeyValuePair<string, string>> ParseGlossary(string text) =>
-        [.. text.Split('
-').Select(line => line.Trim()).Where(line => line.Length > 0 && !line.StartsWith('#'))
+        [.. text.Split('\n').Select(line => line.Trim()).Where(line => line.Length > 0 && !line.StartsWith('#'))
             .Select(line => line.Split('=', 2)).Where(pair => pair.Length == 2)
-            .Select(pair => KeyValuePair.Create(SlangText(pair[0]).Trim(), pair[1].Trim()))
+            .Select(pair => KeyValuePair.Create(SlangText(pair[0]), pair[1].Trim()))
             .Where(pair => pair.Key.Length > 0 && pair.Value.Length > 0)
             .DistinctBy(pair => pair.Key)];
 
@@ -144,12 +139,19 @@ public static class AiRequest
     {
         if (glossary is not { Count: > 0 }) return [];
         var text = " " + SlangText(string.Join(" ", lines)) + " ";
-        return [.. glossary.Where(entry => text.Contains(" " + entry.Key + " ", StringComparison.Ordinal)).Take(12)];
+        var hits = glossary.Where(entry => text.Contains(" " + entry.Key + " ", StringComparison.Ordinal)).ToList();
+        // "come on down" wins over "come on": a hit inside a longer hit is left out.
+        return [.. hits.Where(hit => !hits.Any(other => other.Key.Length > hit.Key.Length
+                                                        && (" " + other.Key + " ").Contains(" " + hit.Key + " ", StringComparison.Ordinal))).Take(12)];
     }
 
     private static string SlangText(string text) =>
-        System.Text.RegularExpressions.Regex.Replace(text.ToLowerInvariant().Replace('’', '''), "[^a-z0-9']+", " ").Trim();
+        System.Text.RegularExpressions.Regex.Replace(text.ToLowerInvariant().Replace('\u2019', '\''), "[^a-z0-9']+", " ").Trim();
 
+    /// <summary>
+    /// Arabic fork: the "error" object of a failed reply. Google's OpenAI-compatible endpoint (used through the Local engine)
+    /// wraps it in an array: [{"error": {...}}]; indexing that array by name used to throw past the error handling.
+    /// </summary>
     internal static JsonNode? ErrorOf(string body) => JsonNode.Parse(body) switch
     {
         JsonArray { Count: > 0 } list => list[0] is JsonObject first ? first["error"] : null,
