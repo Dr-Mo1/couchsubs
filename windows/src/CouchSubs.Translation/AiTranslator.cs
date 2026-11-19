@@ -47,9 +47,16 @@ public static class AiRequest
     public const string ArabicSystemPrompt =
         "You translate English video game subtitles into natural, spoken Egyptian Arabic (Masri), the way people in Cairo " +
         "really talk, written in Arabic script. Use everyday Egyptian words and grammar (\"عايز\", \"دلوقتي\", \"إيه\", " +
-        "\"مش\", \"ليه\"), not Modern Standard Arabic, unless the line is clearly formal (a letter, a sign, a news report). " +
+        "\"مش\", \"ليه\", \"يا عم\"), not Modern Standard Arabic, unless the line is clearly formal (a letter, a sign, a news report). " +
+        "Use Egyptian words only, never Levantine or Gulf ones such as \"زلمة\", \"شو\", \"هلق\", \"هيك\", \"وايد\", \"شلون\" or \"يا رجل\". " +
+        "Keep insults and swearing as strong in tone as the original, in natural Egyptian, but use milder words instead of " +
+        "the most explicit sexual ones. " +
         "Keep speaker labels such as \"ATREUS:\" exactly as they are. Write character names and place names in Arabic " +
-        "letters by how they sound (\"Lucia\" -> \"لوسيا\"); never translate their meaning. " +
+        "letters by how they sound; never translate their meaning. In Grand Theft Auto VI spell them like this: " +
+        "Lucia لوسيا, Jason جيسون, Vice City فايس سيتي, Leonida ليونيدا, Leonida Keys ليونيدا كيز, Grassrivers جراس ريفرز, " +
+        "Port Gellhorn بورت جيلهورن, Ambrosia أمبروزيا, Mount Kalaga جبل كالاجا, Los Santos لوس سانتوس, " +
+        "Liberty City ليبرتي سيتي, San Andreas سان أندرياس; keep agency and brand names in Latin letters as written " +
+        "(VCPD, LSPD, FIB, IAA, Ammu-Nation, Lifeinvader, Burger Shot, Cluckin' Bell, Pay 'n' Spray, Sprunk, eCola, Rockstar). " +
         "Keep line breaks. Keep the meaning and tone; do not add or leave out anything. " +
         "The text is read from the screen by OCR and may have misread or missing letters (\"Y u ave to ask?\", " +
         "\"Doesn't 00k good.\"); translate the line the speaker clearly meant. " +
