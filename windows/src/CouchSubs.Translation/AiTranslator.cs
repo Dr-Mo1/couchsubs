@@ -162,6 +162,10 @@ public static class AiRequest
         return fixes;
     }
 
+    /// <summary>Arabic fork: Persian letters the models sometimes write (پ ی ک گ) as Arabic ones; ڤ (foreign v) stays.</summary>
+    public static string ArabicLetters(string text) =>
+        text.Replace('\u067E', '\u0628').Replace('\u06CC', '\u064A').Replace('\u06A9', '\u0643').Replace('\u06AF', '\u062C');
+
     private static string SlangText(string text) =>
         System.Text.RegularExpressions.Regex.Replace(text.ToLowerInvariant().Replace('\u2019', '\''), "[^a-z0-9']+", " ").Trim();
 
@@ -991,7 +995,8 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
                 throw new AiRateLimitedException(new AiRateLimit(Daily: body.Contains("PerDay", StringComparison.Ordinal)));
             throw new AiException(AiRequest.Failure(response.StatusCode, body));
         }
-        return AiRequest.Translations(AiRequest.Text(Provider, body), count);
+        var lines = AiRequest.Translations(AiRequest.Text(Provider, body), count);
+        return _target == "ar" ? [.. lines.Select(AiRequest.ArabicLetters)] : lines;
     }
 
     /// <summary>

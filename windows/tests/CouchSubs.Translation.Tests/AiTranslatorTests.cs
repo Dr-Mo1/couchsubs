@@ -594,6 +594,7 @@ public class AiTranslatorTests
         Assert.Empty(AiRequest.SlangIn(glossary, ["Play lowkey."]));
         var nested = AiRequest.ParseGlossary("come on = يلا بقى\ncome on down = تعالى");
         Assert.Equal(new[] { "come on down" }, AiRequest.SlangIn(nested, ["Yeah, come on down."]).Select(hit => hit.Key));
+        Assert.Equal("يا ديسباتش، ڤينوس كلام", AiRequest.ArabicLetters("یا دیسپاتش، ڤینوس کلام"));
         var user = AiRequest.UserMessage(["We gotta lay low."], [], target: "ar", slang: hits, reference: "Bir süre saklanmalıyız.");
         Assert.Contains("\"lay low\" = \"نختفي شوية\"", user);
         Assert.Contains("Bir süre saklanmalıyız.", user);
