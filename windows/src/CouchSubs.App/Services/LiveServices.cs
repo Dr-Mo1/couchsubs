@@ -54,10 +54,13 @@ public sealed class LiveServices : IAppServices
                                                   string? instruction = null)
     {
         var (log, glossary, fixes, next) = (new AiContextLog(), Glossary(), Corrections(), fallback);
-        foreach (var name in Enumerable.Reverse(AiKeyChain.Keys(server.Model)))
+        foreach (var entry in Enumerable.Reverse(AiKeyChain.Keys(server.Model)))
         {
-            var each = LocalAiServer.Create(server.BaseUrl.ToString(), name)!;
-            next = AiKeyChain.Build(key, AiProvider.Local, AiProvider.Local.Model(name), next, (link, after, _) =>
+            // "address|model" is another server, e.g. "http://127.0.0.1:1235/v1|gemma": the laptop's own model as the last
+            // fallback when every Google key rests. It gets no key (the Google keys never leave for another address).
+            var (address, name, keys) = entry.Split('|', 2) is [var url, var model] ? (url, model, "") : (server.BaseUrl.ToString(), entry, key);
+            if (LocalAiServer.Create(address, name) is not { } each) continue;
+            next = AiKeyChain.Build(keys, AiProvider.Local, AiProvider.Local.Model(name), next, (link, after, _) =>
                 new AiTranslator(AiProvider.Local, link, name, after, cache: TranslationCache.Shared(AppPaths.Translations, each.EngineId, "en", CacheTarget),
                                  server: each, game: game, instruction: instruction, target: TargetLanguage,
                                  context: log, reference: PackReference, glossary: glossary, corrections: fixes));
