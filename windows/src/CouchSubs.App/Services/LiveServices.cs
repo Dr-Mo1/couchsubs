@@ -70,7 +70,7 @@ public sealed class LiveServices : IAppServices
                                server: LocalAiServer.Create(server.BaseUrl.ToString(), AiKeyChain.First(server.Model)), target: TargetLanguage);
 
     // Arabic fork: translations made with the meaning-first prompt, glossary and pack reference are cached apart from older ones.
-    private const string CacheTarget = TargetLanguage + "-v2";
+    private const string CacheTarget = TargetLanguage + "-v3"; // v3: raw swearing prompt (736dce9)
 
     /// <summary>Arabic fork: DocMo's slang glossary ("english = مصري" per line), read when translation starts.</summary>
     private static IReadOnlyList<KeyValuePair<string, string>> Glossary()
