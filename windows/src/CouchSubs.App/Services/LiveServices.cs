@@ -99,6 +99,9 @@ public sealed class LiveServices : IAppServices
     // Oyun paketleri: uygulamaya gömülü olanlar ve %LOCALAPPDATA%\CouchSubs\packs klasöründekiler.
     public GamePackLibrary? GamePacks { get; } = new(GamePackLibrary.EmbeddedPacks, GamePackLibrary.UserDirectory);
     public PackMatch? FindInPacks(string text) => GamePacks is { } packs ? PackLookup.Match(packs, text) : null;
+    // Arabic fork: Egyptian packs built from reviewed lines (tools/packs/build.py format 2); none ship with the app.
+    public GamePackLibrary? ArabicPacks { get; } = new(() => [], Path.Combine(AppPaths.Data, "packs-ar"));
+    public PackMatch? FindInArabicPacks(string text) => ArabicPacks is { } packs ? PackLookup.Match(packs, text) : null;
     public LinePool? Pool { get; } = new(Path.Combine(AppPaths.Data, "pool.json"),
         AppVersion.Current(System.Reflection.Assembly.GetEntryAssembly() ?? typeof(LiveServices).Assembly));
     public string? HistoryFile { get; } = Path.Combine(AppPaths.Data, "history.json");

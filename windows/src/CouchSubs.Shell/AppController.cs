@@ -1833,6 +1833,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     {
         // Elle seçilen oyunda satırlar yalnız o oyunun paketinde aranır, paketi yoksa hiç aranmaz (#218).
         services.GamePacks?.LimitToGame(gameSense.PackLimit);
+        services.ArabicPacks?.LimitToGame(gameSense.PackLimit);
         var current = gameSense.Current;
         PlayedGame = current?.Name;
         FollowGameAreas();
@@ -1878,7 +1879,17 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     }
 
     /// <summary>Paketler yalnız İngilizce→Türkçede ve ayar açıkken kullanılır.</summary>
-    private bool PacksActive => settings.GamePacks && settings.SourceLanguage == "en" && settings.TargetLanguage == "tr" && services.GamePacks is not null;
+    private bool PacksActive => settings.GamePacks && settings.SourceLanguage == "en" && ShownPacks is not null;
+
+    /// <summary>Arabic fork: the packs whose translations are shown (Turkish for "tr", Egyptian for "ar").</summary>
+    private GamePackLibrary? ShownPacks => settings.TargetLanguage switch
+    {
+        "tr" => services.GamePacks,
+        "ar" => services.ArabicPacks,
+        _ => null,
+    };
+
+    private PackMatch? FindShown(string text) => settings.TargetLanguage == "ar" ? services.FindInArabicPacks(text) : services.FindInPacks(text);
 
     private void StartPacksAndPool()
     {
@@ -1965,7 +1976,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         }, CancellationToken.None);
     }
 
-    private void ConnectPacks(SubtitlePipeline target) => target.PackLookup = PacksActive ? services.FindInPacks : null;
+    private void ConnectPacks(SubtitlePipeline target) => target.PackLookup = PacksActive ? FindShown : null;
 
     /// <summary>Gelişmiş ayarlardaki bekleme süreleri (0–2 sn).</summary>
     private void ApplyWaits(SubtitlePipeline target)
@@ -2015,7 +2026,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             var box = built.LastBox;
             var origin = built.LastOrigin == "paket" ? LineOrigin.Pack : LineOrigin.Engine;
             // Satır yalnız tek bir pakette bulunduysa o pakete bir oy: son 20 satırın 5'i aynı paketten gelince oyun odur.
-            var hit = services.GamePacks?.TakeDistinctiveHit();
+            var hit = ShownPacks?.TakeDistinctiveHit();
             var recognised = gameSense.NoteLine(origin == LineOrigin.Pack ? hit?.Id : null, origin == LineOrigin.Pack ? hit?.Title : null);
             post(() =>
             {
@@ -2035,7 +2046,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         built.SpeechReady += lines => post(() => Speak(lines));
         built.PackMissed += OfferToPool;
         built.Log = SubtitleLog.Write;
-        built.PackName = () => services.GamePacks?.SearchScope;
+        built.PackName = () => ShownPacks?.SearchScope;
         ConnectPacks(built);
         ApplyWaits(built);
         OnlineIssue = null;
@@ -2064,7 +2075,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             if (services.MakeReader(settings.SourceLanguage, settings.OcrEngine) is not { } reader) return;
             regionWatcher = new RegionWatcher(reader, MakeTranslator(), server) { Log = SubtitleLog.Write };
         }
-        regionWatcher.PackLookup = PacksActive ? services.FindInPacks : null;
+        regionWatcher.PackLookup = PacksActive ? FindShown : null;
         regionWatcher.SkipsTurkish = settings.TargetLanguage == "tr";
     }
 
