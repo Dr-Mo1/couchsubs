@@ -707,6 +707,9 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         // Arabic fork: a reviewed fix for this exact line wins over the cache and the engine.
         if (_corrections is { Count: > 0 } fixes && fixes.TryGetValue(PackKey.Canon(text), out var fixedLine)) return Remember(fixedLine, text, game);
         if (_cache.TryGet(CacheKey(text, game), out var cached)) return Remember(cached, text, game);
+        // Arabic fork: an OCR re-read of a line shown a moment ago ("Clean iti" / "Clean it'") reuses that translation;
+        // re-reads were 35% of the requests. Only translated lines count, so a failed line can still try again.
+        if (_target == "ar" && RecentTranslation(text) is { } again) return Remember(again, text, game);
 
         var pieces = SubtitleSegmenter.Split(text);
         foreach (var name in pieces.Select(SubtitleSegmenter.LabelName).OfType<string>()) NoteSpeaker(name);
@@ -889,6 +892,14 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
             : _fallback?.SpokenLines(text) ?? [];
     }
 
+    private string? RecentTranslation(string text)
+    {
+        var normalized = TextMatch.Normalize(text);
+        lock (_log)
+            return _log.Lines.LastOrDefault(line => line.Translation is not null && line.Source != text
+                                                    && TextMatch.IsSimilar(TextMatch.Normalize(line.Source), normalized, 0.85))?.Translation;
+    }
+
     private List<AiContextLine> ContextBeforeShowing(string text, string? game)
     {
         lock (_log)
@@ -929,9 +940,30 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         FailureChanged?.Invoke(state);
     }
 
-    private async Task<string> FallbackAsync(string text, CancellationToken cancellationToken) =>
-        _fallback is null ? throw new TranslatorException(TranslatorStatus.NeedsDownload)
-            : await _fallback.TranslateAsync(text, cancellationToken).ConfigureAwait(false);
+    private async Task<string> FallbackAsync(string text, CancellationToken cancellationToken)
+    {
+        if (_target != "ar")
+            return _fallback is null ? throw new TranslatorException(TranslatorStatus.NeedsDownload)
+                : await _fallback.TranslateAsync(text, cancellationToken).ConfigureAwait(false);
+        // Arabic fork: the app listens to the chain's first link, so "every key is resting" travels up the chain and a later
+        // success clears it; before, lines just vanished with nothing on screen.
+        if (_fallback is null)
+        {
+            if (_pauseRateLimited) Report(OnlineKeyState.QuotaExceeded);
+            throw new TranslatorException(TranslatorStatus.NeedsDownload);
+        }
+        try
+        {
+            var translated = await _fallback.TranslateAsync(text, cancellationToken).ConfigureAwait(false);
+            Report(null);
+            return translated;
+        }
+        catch (TranslatorException) when (_fallback is AiTranslator { LastError: OnlineKeyState.QuotaExceeded })
+        {
+            Report(OnlineKeyState.QuotaExceeded);
+            throw;
+        }
+    }
 
     private Task<string[]> RequestAsync(List<string> sentences, List<AiContextLine> context, string? game,
                                         IReadOnlyList<string> names, CancellationToken cancellationToken, string? reference = null) =>

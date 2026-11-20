@@ -615,6 +615,12 @@ public class AiTranslatorTests
         Assert.DoesNotContain("English: Hide!", last.Body);
         Assert.Contains("Saklan!", last.Body);
 
+        // an OCR re-read of the line just shown reuses its translation without a request
+        var before = fake.Requests.Count;
+        var reread = await chain.TranslateAsync("Hide! ");
+        Assert.Equal(before, fake.Requests.Count);
+        Assert.Contains("Hide!", reread);
+
         // A reviewed fix is shown as written (any case or punctuation), without a request.
         var fixes = AiRequest.ParseCorrections("# fixes\nI'm still wired. = أعصابي لسه مشدودة\nno separator here");
         Assert.Single(fixes);
@@ -638,6 +644,8 @@ public class AiTranslatorTests
         // Every key is resting after its 429: the next line sends nothing until a pause ends.
         await Assert.ThrowsAsync<TranslatorException>(() => chain.TranslateAsync("Hide!"));
         Assert.Equal(4, fake.Requests.Count);
+        // every key resting is shown: the first link (the one the app listens to) reports it
+        Assert.Equal(OnlineKeyState.QuotaExceeded, ((AiTranslator)chain).LastError);
         Assert.StartsWith("no-details: Resource exhausted", AiRequest.QuotaSummary("""{"error":{"message":"Resource exhausted."}}"""));
         // Google's OpenAI-compatible endpoint wraps the error in an array.
         Assert.Equal("no-details: Invalid Auth key.", AiRequest.QuotaSummary("""[{"error":{"code":400,"message":"Invalid Auth key."}}]"""));
