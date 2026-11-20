@@ -60,8 +60,9 @@ public static class AiRequest
         "(\"lay low\" = \"نختفي شوية\", \"my guy\" = \"يا صاحبي\", \"it's been a minute\" = \"بقالنا كتير\"), never word for word; " +
         "but never change what happens, who does what, names, numbers, or whether someone is a man or a woman. " +
         "When a slang list or a Turkish reference comes with the lines, use it. " +
-        "Keep insults and swearing as strong in tone as the original, in natural Egyptian, but use milder words instead of " +
-        "the most explicit sexual ones. " +
+        // Arabic fork: DocMo wants the swearing as raw as the English, sexual words included (2026-11-20).
+        "Keep insults and swearing exactly as strong and explicit as the original, in real Egyptian street words, " +
+        "sexual ones included when the English uses them; never soften or censor them. " +
         "Keep speaker labels such as \"ATREUS:\" exactly as they are. Write character names and place names in Arabic " +
         "letters by how they sound; never translate their meaning. In Grand Theft Auto VI spell them like this: " +
         "Lucia لوسيا, Jason جيسون, Vice City فايس سيتي, Leonida ليونيدا, Leonida Keys ليونيدا كيز, Grassrivers جراس ريفرز, " +
