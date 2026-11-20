@@ -639,13 +639,24 @@ public class AiTranslatorTests
         var chain = AiKeyChain.Build("s1,s2,s3,s4", AiProvider.Gemini, AiProvider.Gemini.Model(null), null, (key, next, budget) =>
             new AiTranslator(AiProvider.Gemini, key, null, next, new HttpClient(fake), budget: budget, target: "ar"));
 
+        // Google's no-details 429 hits every key of the model at once: one request, the other keys rest with it.
         await Assert.ThrowsAsync<TranslatorException>(() => chain.TranslateAsync("Run!"));
-        Assert.Equal(4, fake.Requests.Count);
-        // Every key is resting after its 429: the next line sends nothing until a pause ends.
+        Assert.Single(fake.Requests);
+        // Every key is resting: the next line sends nothing until the pause ends.
         await Assert.ThrowsAsync<TranslatorException>(() => chain.TranslateAsync("Hide!"));
-        Assert.Equal(4, fake.Requests.Count);
+        Assert.Single(fake.Requests);
         // every key resting is shown: the first link (the one the app listens to) reports it
         Assert.Equal(OnlineKeyState.QuotaExceeded, ((AiTranslator)chain).LastError);
+
+        // A day limit belongs to one key: each key is tried once, then all rest.
+        var daily = new FakeAi((_, _) => Json("""{"error":{"code":429,"message":"Quota exceeded: GenerateRequestsPerDayPerProjectPerModel-FreeTier","status":"RESOURCE_EXHAUSTED"}}""",
+                                              HttpStatusCode.TooManyRequests));
+        var keys = AiKeyChain.Build("d1,d2,d3,d4", AiProvider.Gemini, AiProvider.Gemini.Model(null), null, (key, next, budget) =>
+            new AiTranslator(AiProvider.Gemini, key, null, next, new HttpClient(daily), budget: budget, target: "ar"));
+        await Assert.ThrowsAsync<TranslatorException>(() => keys.TranslateAsync("Run!"));
+        Assert.Equal(4, daily.Requests.Count);
+        await Assert.ThrowsAsync<TranslatorException>(() => keys.TranslateAsync("Hide!"));
+        Assert.Equal(4, daily.Requests.Count);
         Assert.StartsWith("no-details: Resource exhausted", AiRequest.QuotaSummary("""{"error":{"message":"Resource exhausted."}}"""));
         // Google's OpenAI-compatible endpoint wraps the error in an array.
         Assert.Equal("no-details: Invalid Auth key.", AiRequest.QuotaSummary("""[{"error":{"code":400,"message":"Invalid Auth key."}}]"""));

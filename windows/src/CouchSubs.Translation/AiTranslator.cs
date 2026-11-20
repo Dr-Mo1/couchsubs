@@ -530,7 +530,8 @@ public static class AiRequest
 /// <param name="RetryAfter">Hizmetin önerdiği bekleme ("retryDelay"); yoksa null.</param>
 /// <param name="RequestsPerMinute">Hizmetin bildirdiği dakikalık istek sınırı ("quotaValue"); yoksa null.</param>
 /// <param name="Daily">Arabic fork: the key's day limit; the key rests for <see cref="AiTranslator.DayPause"/>.</param>
-public sealed record AiRateLimit(TimeSpan? RetryAfter = null, int? RequestsPerMinute = null, bool Daily = false);
+/// <param name="Shared">Arabic fork: Google's no-details 429; it hits every key of the model at once, so they all rest.</param>
+public sealed record AiRateLimit(TimeSpan? RetryAfter = null, int? RequestsPerMinute = null, bool Daily = false, bool Shared = false);
 
 /// <summary>Hizmet dakikalık sınırın aşıldığını bildirdi; kullanıcıya hata olarak gösterilmez.</summary>
 internal sealed class AiRateLimitedException(AiRateLimit limit) : Exception("AI translation rate limited")
@@ -566,6 +567,26 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
     public static readonly TimeSpan RateLimitPause = TimeSpan.FromSeconds(20);
     /// <summary>Arabic fork: a key that hit its day limit is tried again only after this (the chain moves on meanwhile).</summary>
     public static readonly TimeSpan DayPause = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// After a 429 this key rests. Arabic fork: when the limit is <see cref="AiRateLimit.Shared"/>, the next keys of the
+    /// same model in the chain rest too. In the 2026-11-20 log, all 4 keys always failed together, so 3 more requests only
+    /// cost ~0.8 s per model before the line reached the next one.
+    /// </summary>
+    private void Rest(AiRateLimit limit)
+    {
+        if (limit.RequestsPerMinute is { } perMinute) _budget?.Lower(perMinute);
+        var until = DateTimeOffset.UtcNow + PauseFor(limit);
+        LastLineWasRateLimited = true;
+        var link = this;
+        while (true)
+        {
+            link._pausedUntil = until;
+            link._pauseRateLimited = true;
+            if (!limit.Shared || link._fallback is not AiTranslator next || next.Model.Id != Model.Id) break;
+            link = next;
+        }
+    }
 
     private static TimeSpan PauseFor(AiRateLimit limit) =>
         limit.Daily ? DayPause
@@ -747,11 +768,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         catch (AiRateLimitedException limited) when (!cancellationToken.IsCancellationRequested)
         {
             // Dakikalık sınır: kısa beklenir, ana ekranda uyarı çıkmaz; hizmet daha düşük sınır bildirdiyse ona inilir.
-            if (limited.Limit.RequestsPerMinute is { } perMinute) _budget?.Lower(perMinute);
-            var pause = PauseFor(limited.Limit);
-            LastLineWasRateLimited = true;
-            _pausedUntil = DateTimeOffset.UtcNow + pause;
-            _pauseRateLimited = true;
+            Rest(limited.Limit);
             return Remember(await FallbackAsync(text, cancellationToken).ConfigureAwait(false), text, game);
         }
         catch (Exception error) when (error is HttpRequestException or TaskCanceledException or AiException
@@ -852,11 +869,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
             }
             catch (AiRateLimitedException limited) when (!cancellationToken.IsCancellationRequested)
             {
-                if (limited.Limit.RequestsPerMinute is { } perMinute) _budget?.Lower(perMinute);
-                var pause = PauseFor(limited.Limit);
-                LastLineWasRateLimited = true;
-                _pausedUntil = DateTimeOffset.UtcNow + pause;
-                _pauseRateLimited = true;
+                Rest(limited.Limit);
                 failed = true;
             }
             catch (Exception error) when (error is HttpRequestException or TaskCanceledException or AiException
@@ -1025,7 +1038,10 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
             // Arabic fork: any other 429 (day limit, Google's no-details "Resource has been exhausted") only rests this key;
             // the line goes to the next key at once and the resting key is not retried line after line.
             if ((int)response.StatusCode == 429 && _target == "ar")
-                throw new AiRateLimitedException(new AiRateLimit(Daily: body.Contains("PerDay", StringComparison.Ordinal)));
+            {
+                var daily = body.Contains("PerDay", StringComparison.Ordinal);
+                throw new AiRateLimitedException(new AiRateLimit(Daily: daily, Shared: !daily));
+            }
             throw new AiException(AiRequest.Failure(response.StatusCode, body));
         }
         var lines = AiRequest.Translations(AiRequest.Text(Provider, body), count);
