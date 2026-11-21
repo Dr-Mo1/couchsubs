@@ -272,6 +272,8 @@ public static class AiRequest
                     ["generationConfig"] = new JsonObject { ["maxOutputTokens"] = maxOutputTokens },
                 };
                 if (model.Thinking is { } level) body["generationConfig"]!["thinkingConfig"] = new JsonObject { ["thinkingLevel"] = level };
+                // Arabic fork: game dialogue (swearing, threats, slurs) is translated as it is; a blocked reply has no text.
+                if (target == "ar") body["safetySettings"] = SafetyOff();
                 break;
             case AiProvider.OpenAi:
                 // https://platform.openai.com/docs/api-reference/chat/create (developers.openai.com/api/reference):
@@ -338,6 +340,34 @@ public static class AiRequest
         }
         request.Content = new StringContent(body.ToJsonString(Compact), Encoding.UTF8, "application/json");
         return request;
+    }
+
+    private static JsonArray SafetyOff() => new([.. new[] { "HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
+        "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT" }
+        .Select(category => (JsonNode)new JsonObject { ["category"] = category, ["threshold"] = "BLOCK_NONE" })]);
+
+    /// <summary>
+    /// Arabic fork: why the model stopped early (Gemini finishReason other than STOP, "length"/"content_filter",
+    /// Claude "max_tokens"/"refusal"), or null for a normal end. A reply cut there must not be cached as a translation.
+    /// </summary>
+    internal static string? EarlyStop(AiProvider provider, string json)
+    {
+        try
+        {
+            var root = JsonNode.Parse(json);
+            var reason = provider switch
+            {
+                AiProvider.Gemini => root?["candidates"]?.AsArray().FirstOrDefault()?["finishReason"]?.GetValue<string>(),
+                AiProvider.OpenAi or AiProvider.Local => root?["choices"]?.AsArray().FirstOrDefault()?["finish_reason"]?.GetValue<string>(),
+                _ => root?["stop_reason"]?.GetValue<string>(),
+            };
+            return reason is "MAX_TOKENS" or "SAFETY" or "RECITATION" or "PROHIBITED_CONTENT" or "BLOCKLIST" or "OTHER"
+                or "length" or "content_filter" or "max_tokens" or "refusal" ? reason : null;
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Yanıttaki düz metin (düşünme bölümleri atlanır).</summary>
@@ -565,6 +595,15 @@ public static class AiRequest
 public sealed record AiRateLimit(TimeSpan? RetryAfter = null, int? RequestsPerMinute = null, bool Daily = false, bool Shared = false);
 
 /// <summary>Hizmet dakikalık sınırın aşıldığını bildirdi; kullanıcıya hata olarak gösterilmez.</summary>
+/// <summary>
+/// Arabic fork: the reply was cut or blocked (<see cref="AiRequest.EarlyStop"/>). It is not cached; the line goes to the
+/// next link and this key is not paused (the key is fine, only this line was a problem).
+/// </summary>
+internal sealed class AiIncompleteException(string reason) : Exception($"AI reply incomplete: {reason}")
+{
+    public string Reason { get; } = reason;
+}
+
 internal sealed class AiRateLimitedException(AiRateLimit limit) : Exception("AI translation rate limited")
 {
     public AiRateLimit Limit { get; } = limit;
@@ -821,6 +860,11 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
             NoteFallback("dakikalık hizmet sınırı");
             return Remember(await FallbackAsync(text, cancellationToken).ConfigureAwait(false), text, game);
         }
+        catch (AiIncompleteException incomplete) when (!cancellationToken.IsCancellationRequested)
+        {
+            NoteFallback($"yarım yanıt: {incomplete.Reason}");
+            return Remember(await FallbackAsync(text, cancellationToken).ConfigureAwait(false), text, game);
+        }
         catch (Exception error) when (error is HttpRequestException or TaskCanceledException or AiException
                                       && !cancellationToken.IsCancellationRequested)
         {
@@ -927,6 +971,10 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
             catch (AiRateLimitedException limited) when (!cancellationToken.IsCancellationRequested)
             {
                 Rest(limited.Limit);
+                failed = true;
+            }
+            catch (AiIncompleteException) when (!cancellationToken.IsCancellationRequested)
+            {
                 failed = true;
             }
             catch (Exception error) when (error is HttpRequestException or TaskCanceledException or AiException
@@ -1100,6 +1148,11 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
                 throw new AiRateLimitedException(new AiRateLimit(Daily: daily, Shared: !daily));
             }
             throw new AiException(AiRequest.Failure(response.StatusCode, body));
+        }
+        if (_target == "ar" && AiRequest.EarlyStop(Provider, body) is { } stop)
+        {
+            SubtitleLog.Write($"yarım yanıt: {stop} key#{_keyTag} {Model.Id}");
+            throw new AiIncompleteException(stop);
         }
         var lines = AiRequest.Translations(AiRequest.Text(Provider, body), count);
         return _target == "ar" ? [.. lines.Select(AiRequest.ArabicLetters)] : lines;

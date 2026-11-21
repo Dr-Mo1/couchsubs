@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 using System.ComponentModel;
+using System.Globalization;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -3229,6 +3230,41 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         if (!history.Add(source, translation, origin)) return;
         Changed(nameof(History));
         SaveHistory();
+        ArchiveDialogue(history.Entries[0]);
+    }
+
+    private static readonly System.Text.Json.JsonSerializerOptions ArchiveJson =
+        new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    /// <summary>
+    /// Arabic fork: every shown line also goes to a permanent per-day archive (dialogues\yyyy-MM-dd.jsonl next to
+    /// history.json, which keeps only the last 200): DocMo's saved dialogues and the next fine-tune's corpus. A reread
+    /// that updated the same line repeats its id; the last row with an id wins.
+    /// </summary>
+    private void ArchiveDialogue(SubtitleHistory.Entry entry)
+    {
+        if (services.HistoryFile is not { } file) return;
+        var line = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            id = entry.Id,
+            time = entry.Date.ToString("o", CultureInfo.InvariantCulture),
+            source = entry.Source,
+            translation = entry.Translation,
+            origin = entry.Origin == LineOrigin.Pack ? "pack" : "engine",
+            game = gameSense.Current?.Name ?? "unknown",
+            target = settings.TargetLanguage,
+        }, ArchiveJson) + '\n';
+        var path = Path.Combine(Path.GetDirectoryName(file)!, "dialogues",
+            entry.Date.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ".jsonl");
+        historySave = historySave.ContinueWith(_ =>
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.AppendAllText(path, line);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
     }
 
     /// <summary>Geçmişi siler (dosyadaki de boşalır).</summary>

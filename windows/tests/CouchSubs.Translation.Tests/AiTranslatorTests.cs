@@ -591,6 +591,33 @@ public class AiTranslatorTests
         Assert.Equal(8, AiRequest.KeyTag("chain-k1").Length);
     }
 
+    /// <summary>
+    /// Arabic fork: Gemini's safety filters are off; a cut reply (MAX_TOKENS) is never shown or cached, the next key
+    /// translates the line, and the cut key is not paused (the next line tries it first again).
+    /// </summary>
+    [Fact]
+    public async Task CutReplyGoesToTheNextKeyWithoutPausing()
+    {
+        static string KeyOf(HttpRequestMessage request) => request.Headers.GetValues("x-goog-api-key").Single();
+        const string cut = """{"candidates":[{"content":{"parts":[{"text":"[\"يا جي"}]},"finishReason":"MAX_TOKENS"}]}""";
+        var fake = new FakeAi((request, body) => KeyOf(request) == "cut-k1" ? Json(cut) : Echo(request, body));
+        var chain = AiKeyChain.Build("cut-k1, cut-k2", AiProvider.Gemini, AiProvider.Gemini.Model(null), null, (key, next, budget) =>
+            new AiTranslator(AiProvider.Gemini, key, null, next, new HttpClient(fake), budget: budget, target: "ar"));
+
+        Assert.Equal("[tr] Run!", await chain.TranslateAsync("Run!"));
+        Assert.Equal("[tr] Hide!", await chain.TranslateAsync("Hide!"));
+        Assert.Equal(new[] { "cut-k1", "cut-k2", "cut-k1", "cut-k2" }, fake.Requests.Select(r => KeyOf(r.Request)));
+        var safety = JsonNode.Parse(fake.Requests[0].Body)!["safetySettings"]!.AsArray();
+        Assert.Equal(4, safety.Count);
+        Assert.All(safety, setting => Assert.Equal("BLOCK_NONE", setting!["threshold"]!.GetValue<string>()));
+
+        Assert.Equal("MAX_TOKENS", AiRequest.EarlyStop(AiProvider.Gemini, cut));
+        Assert.Null(AiRequest.EarlyStop(AiProvider.Gemini, """{"candidates":[{"finishReason":"STOP"}]}"""));
+        Assert.Null(AiRequest.EarlyStop(AiProvider.Gemini, """{"candidates":[{"content":{}}]}"""));
+        Assert.Equal("length", AiRequest.EarlyStop(AiProvider.Local, """{"choices":[{"finish_reason":"length"}]}"""));
+        Assert.Null(AiRequest.EarlyStop(AiProvider.Local, """{"choices":[{"finish_reason":"stop"}]}"""));
+    }
+
     /// <summary>Arabic fork: glossary hits and the Turkish pack line travel with the line; the scene is shared by a chain's keys.</summary>
     [Fact]
     public async Task ArabicLineCarriesGlossaryReferenceAndSharedScene()

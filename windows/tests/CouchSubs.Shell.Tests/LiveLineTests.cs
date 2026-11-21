@@ -72,6 +72,12 @@ public sealed class LiveLineTests : IDisposable
         await controller.WaitForHistoryAsync();
         controller.Dispose();
         Assert.Equal("TR: Hold the gate", Assert.Single(SubtitleHistory.Load(file).Entries).Translation);
+        // Arabic fork: the permanent per-day archive has the line too, and keeps it after the history is cleared.
+        var archive = Assert.Single(Directory.GetFiles(Path.Combine(folder, "dialogues"), "*.jsonl"));
+        var row = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllLines(archive)[^1])!;
+        Assert.Equal("TR: Hold the gate", row["translation"]!.GetValue<string>());
+        Assert.Equal("unknown", row["game"]!.GetValue<string>());
+        Assert.Equal("engine", row["origin"]!.GetValue<string>());
 
         var reopened = Ready(new FakeServices { HistoryFile = file });
         Assert.Equal("TR: Hold the gate", Assert.Single(reopened.History).Translation);
@@ -79,6 +85,7 @@ public sealed class LiveLineTests : IDisposable
         await reopened.WaitForHistoryAsync();
         Assert.Empty(reopened.History);
         Assert.Empty(SubtitleHistory.Load(file).Entries);
+        Assert.NotEmpty(File.ReadAllLines(archive));
         reopened.Dispose();
     }
 
