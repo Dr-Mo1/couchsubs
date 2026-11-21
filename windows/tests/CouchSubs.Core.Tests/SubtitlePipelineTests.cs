@@ -512,7 +512,7 @@ public class SubtitlePipelineTests
         translator.Open();
         await pipeline.WaitForTranslationsAsync();
         Assert.Equal(["TR: Hold the gate."], sender.Sent);
-        Assert.Equal(2000 + "TR: Hold the gate.".Length * 60, sender.Durations[0]);
+        Assert.Equal(2500 + "TR: Hold the gate.".Length * 90, sender.Durations[0]);
     }
 
     /// Satır bir saniyeden uzun süre önce kalktıysa geç gelen çevirisi sonraki sahnenin üstüne düşmez.
