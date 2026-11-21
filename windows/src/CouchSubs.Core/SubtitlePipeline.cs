@@ -811,7 +811,8 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     }
 
     /// <summary>Satır ekrandan kalktıktan sonra gelen çevirinin TV'de kalacağı süre (TV uygulamasıyla aynı kural).</summary>
-    public static int ReadingTime(string text) => Math.Min(8000, 2000 + (text.Length * 60));
+    // Arabic fork: the TV app's hold rule since 0.9.26 (2500 ms + 90 ms/char, at most 9000); was min(8000, 2000 + 60/char).
+    public static int ReadingTime(string text) => Math.Min(9000, 2500 + (text.Length * 90));
 
     private async Task Translate(Request request, CancellationToken token)
     {
