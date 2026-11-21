@@ -157,7 +157,8 @@ public static class AiRequest
         {
             var at = line.IndexOf(" = ", StringComparison.Ordinal);
             if (at <= 0) continue;
-            var (english, arabic) = (PackKey.Canon(line[..at]), line[(at + 3)..].Trim());
+            // "\n" written in the file is a row break (tools/live_review.py keeps two-row lines as two rows).
+            var (english, arabic) = (PackKey.Canon(line[..at]), line[(at + 3)..].Trim().Replace("\\n", "\n", StringComparison.Ordinal));
             if (english.Length > 0 && arabic.Length > 0) fixes[english] = arabic;
         }
         return fixes;

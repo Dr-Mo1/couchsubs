@@ -628,6 +628,10 @@ public class AiTranslatorTests
         var fixedChain = new AiTranslator(AiProvider.Gemini, "scene-k2", null, null, new HttpClient(fake), target: "ar", corrections: fixes);
         Assert.Equal("أعصابي لسه مشدودة", await fixedChain.TranslateAsync("I'M STILL WIRED"));
         Assert.Equal(sent, fake.Requests.Count);
+        // A two-row line keeps its rows: "\n" in the file is a row break.
+        Assert.Equal("إيدك ورا ضهرك!\nدي مش بتاعتي!",
+            AiRequest.ParseCorrections("Hands behind your back! Fuck... that ain't mine, man! = إيدك ورا ضهرك!\\nدي مش بتاعتي!")
+                [PackKey.Canon("Hands behind your back!\nFuck... that ain't mine, man!")]);
     }
 
     /// <summary>Arabic fork: Google's overload 429 has no quota details; a paused chain must not re-send the line at every link.</summary>
