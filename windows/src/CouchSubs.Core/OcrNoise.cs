@@ -16,13 +16,22 @@ public static partial class OcrNoise
 {
     private const string Symbols = "$@#%^*_=|\\~<>{}¢£¥§©®°±µ¶¤";
 
-    public static string Clean(string line)
+    public static string Clean(string line) => Clean(line, false);
+
+    internal static string Clean(string line, bool keepIdentifiers)
     {
         var kept = new List<string>();
         var tokens = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         for (var index = 0; index < tokens.Length; index++)
         {
             var token = tokens[index];
+            // Kumanda simgesinin yeri (ButtonIcons.Marker) çöp değildir.
+            if (token[0] == ButtonIcons.Marker || (keepIdentifiers &&
+                (GamePhoneText.ContainsIdentifier(token) || GamePhoneText.IsWrittenChatWord(token))))
+            {
+                kept.Add(token);
+                continue;
+            }
             var (lead, core, trail) = Split(token);
             // Tek başına "l" ya da "|" çoğu zaman yanlış okunmuş "I"dır ("l don't know", "|'ll go"); ardından küçük
             // harfle başlayan sözcük yoksa ve token ?/! ile bitmiyorsa altyazı kutusunun kenarı olabilir.

@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,7 +54,10 @@ import androidx.compose.ui.unit.dp
 import com.couchsubs.mobile.R
 import com.couchsubs.mobile.Services
 import com.couchsubs.mobile.core.AreaPreset
+import com.couchsubs.mobile.core.AreaProfile
+import com.couchsubs.mobile.core.AreaProfiles
 import com.couchsubs.mobile.core.areasDifferFromProfile
+import com.couchsubs.mobile.core.gameProfiles
 import com.couchsubs.mobile.core.CropRegion
 import com.couchsubs.mobile.core.ExtraArea
 import com.couchsubs.mobile.core.ExtraAreaPreset
@@ -92,7 +96,12 @@ fun AreaProfileTile() {
         }
         Text(headline, style = Tokens.Type.body, color = Tokens.Color.text)
         Text(note, style = Tokens.Type.caption, color = Tokens.Color.secondary)
-        if (target != null && (active == null || unsaved)) {
+        if (target != null && status.areaProfileTargetSaved) {
+            // Oynanan oyunun kayıtlı alanları uygulanmadı: üzerine yazılmaz, istenirse kullanılır.
+            SecondaryButton(stringResource(R.string.area_profile_use_saved, target)) {
+                PlayedGame.areas.targetKey?.let { PlayedGame.areas.use(it, settings) }
+            }
+        } else if (target != null && (active == null || unsaved)) {
             SecondaryButton(if (active == null) stringResource(R.string.area_profile_save_for, target) else stringResource(R.string.area_profile_save)) {
                 PlayedGame.areas.save()
             }
@@ -112,6 +121,135 @@ fun AreaProfileTile() {
         dismissButton = { TextButton({ confirmDelete = false }) { Text(stringResource(R.string.cancel)) } },
         containerColor = Tokens.Color.surface2,
     )
+}
+
+/** Oyun profilleri kartında ad yazılan işlem: yeni profil (null anahtar), yeniden adlandırma ya da çoğaltma. */
+private data class ProfileEditing(val key: String?, val duplicate: Boolean)
+
+/**
+ * Ayarlar › Oyun profilleri: her oyunun kendi alanları. Listede olmayan oyun adı yazılarak eklenir; profil seçilir,
+ * yeniden adlandırılır, çoğaltılır, silinir. Profil seçmek oynanan oyunu da o yapar (Mac, Windows ve iPhone ile aynı).
+ */
+@Composable
+fun GameProfilesTile() {
+    val status by LiveState.status.collectAsState()
+    val settings = Services.settings
+    val areas = PlayedGame.areas
+    var edits by remember { mutableIntStateOf(0) }
+    DisposableEffect(settings) {
+        val listener = settings.onAreasChanged { edits++ }
+        onDispose { settings.removeListener(listener) }
+    }
+    val profiles = remember(edits, status.profilesVersion) { settings.gameProfiles(areas.areaSource) }
+    val active = remember(edits, status.profilesVersion) { settings.activeAreaProfile }
+    var editing by remember { mutableStateOf<ProfileEditing?>(null) }
+    var name by remember { mutableStateOf("") }
+    var problem by remember { mutableStateOf<String?>(null) }
+    var deleting by remember { mutableStateOf<AreaProfile?>(null) }
+    val existsText = stringResource(R.string.game_profiles_exists, name.trim())
+    val emptyText = stringResource(R.string.game_profiles_empty)
+    fun begin(mode: ProfileEditing, initial: String) {
+        editing = mode
+        name = initial
+        problem = null
+    }
+    fun commit() {
+        val mode = editing ?: return
+        val key = mode.key
+        val edit = when {
+            key == null -> areas.saveAs(name, settings)
+            mode.duplicate -> areas.duplicate(key, name, settings)
+            else -> areas.rename(key, name, settings)
+        }
+        edits++
+        when (edit) {
+            AreaProfiles.Edit.DONE -> editing = null
+            AreaProfiles.Edit.EXISTS -> problem = existsText
+            else -> problem = emptyText
+        }
+    }
+    @Composable
+    fun Editor() {
+        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
+            Field(name, { name = it }, stringResource(R.string.game_profiles_name))
+            problem?.let { Text(it, style = Tokens.Type.caption, color = Tokens.Color.secondary) }
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
+                val mode = editing
+                val title = when {
+                    mode?.key == null -> R.string.game_profiles_save_current
+                    mode.duplicate -> R.string.game_profiles_duplicate
+                    else -> R.string.game_profiles_rename
+                }
+                SecondaryButton(stringResource(title), enabled = name.isNotBlank()) { commit() }
+                GhostButton(stringResource(R.string.cancel), color = Tokens.Color.secondary) { editing = null }
+            }
+        }
+    }
+    Tile(Modifier.fillMaxWidth()) {
+        TileLabel(stringResource(R.string.game_profiles_title))
+        Text(stringResource(R.string.game_profiles_body), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        for (profile in profiles) key(profile.key) {
+            // Düzenlenen profilin yerinde düzenleyici durur. "return@key" D8'de APK derlemesini bozuyordu
+            // (NON_LOCAL_RETURN; android-app iş akışı #798'den beri kırmızıydı).
+            if (editing?.key == profile.key) {
+                Editor()
+            } else {
+                var menu by remember { mutableStateOf(false) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(profile.game, style = Tokens.Type.body, color = Tokens.Color.text, maxLines = 1)
+                        if (profile.key == active) {
+                            Text(stringResource(R.string.game_profiles_in_use), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+                        }
+                    }
+                    if (profile.key != active) {
+                        GhostButton(stringResource(R.string.area_profile_use)) {
+                            areas.use(profile.key, settings)
+                            edits++
+                        }
+                    }
+                    Box {
+                        GhostButton(stringResource(R.string.game_profiles_more), color = Tokens.Color.secondary) { menu = true }
+                        DropdownMenu(menu, { menu = false }) {
+                            DropdownMenuItem({ Text(stringResource(R.string.game_profiles_rename)) }, {
+                                menu = false
+                                begin(ProfileEditing(profile.key, false), profile.game)
+                            })
+                            DropdownMenuItem({ Text(stringResource(R.string.game_profiles_duplicate)) }, {
+                                menu = false
+                                begin(ProfileEditing(profile.key, true), "")
+                            })
+                            DropdownMenuItem({ Text(stringResource(R.string.area_profile_delete), color = Tokens.Color.danger) }, {
+                                menu = false
+                                deleting = profile
+                            })
+                        }
+                    }
+                }
+            }
+        }
+        if (editing?.key == null && editing != null) {
+            Editor()
+        } else if (editing == null) {
+            SecondaryButton(stringResource(R.string.game_profiles_new)) { begin(ProfileEditing(null, false), status.game ?: "") }
+        }
+    }
+    deleting?.let { profile ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text(stringResource(R.string.area_profile_delete)) },
+            text = { Text(stringResource(R.string.area_profile_delete_body, profile.game)) },
+            confirmButton = {
+                TextButton({
+                    deleting = null
+                    areas.delete(profile.key, settings)
+                    edits++
+                }) { Text(stringResource(R.string.area_profile_delete), color = Tokens.Color.danger) }
+            },
+            dismissButton = { TextButton({ deleting = null }) { Text(stringResource(R.string.cancel)) } },
+            containerColor = Tokens.Color.surface2,
+        )
+    }
 }
 
 /** Ayarlar › Altyazı alanı: Alt alan, Üst alan, Tam ekran, Özel; önizlemede çerçeve sürüklenir. */
@@ -166,6 +304,12 @@ fun ExtraAreasTile() {
     val version = LiveState.status.collectAsState().value.areasVersion
     var areas by remember(version) { mutableStateOf(settings.extraAreas) }
     var menu by remember { mutableStateOf(false) }
+    // Altyazı alanı Tam ekranken ek alanlar okunmaz (bkz. watched); seçim değişince not ve soluk görünüm güncellenir.
+    var fullScreen by remember(version) { mutableStateOf(settings.areaPreset == AreaPreset.FULL) }
+    DisposableEffect(settings) {
+        val listener = settings.onAreasChanged { fullScreen = settings.areaPreset == AreaPreset.FULL }
+        onDispose { settings.removeListener(listener) }
+    }
     fun save(value: List<ExtraArea>) {
         areas = value
         settings.extraAreas = value
@@ -174,10 +318,13 @@ fun ExtraAreasTile() {
     Tile(Modifier.fillMaxWidth()) {
         TileLabel(stringResource(R.string.extra_title))
         Text(stringResource(R.string.extra_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        if (fullScreen && areas.isNotEmpty()) {
+            Text(stringResource(R.string.extra_full_screen_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        }
         areas.forEach { area ->
             // Karo içindeki kutu: inner köşe ve çerçeve, zemin karonunki; böylece içindeki ad alanı (surface2) kutudan ayrılır.
             val shape = RoundedCornerShape(Tokens.Radius.inner)
-            Column(Modifier.fillMaxWidth().border(1.dp, Tokens.Color.borderStrong, shape).padding(Tokens.Space.gap),
+            Column(Modifier.fillMaxWidth().alpha(if (fullScreen) 0.5f else 1f).border(1.dp, Tokens.Color.borderStrong, shape).padding(Tokens.Space.gap),
                 verticalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
                     Box(Modifier.weight(1f)) {
@@ -227,7 +374,8 @@ private fun presetName(preset: ExtraAreaPreset) = stringResource(when (preset) {
  * Alanın canlı önizlemesi: son karenin üstünde çerçeve; alanın dışı karartılır, okunacak yer belirgin olur. Çerçeve
  * içinden sürüklenerek taşınır, sekiz tutamacından (köşeler ve kenar ortaları) sürüklenerek boyutlandırılır. [centered]
  * (altyazı alanında "Ortada tut" açıkken): yatay boyut ortadan değişir, alan ortalı kalır. Kurallar [RegionEdit]'tedir (Windows, Mac ve iPhone ile
- * aynı). Çerçevenin dışından başlayan sürükleme bir şey değiştirmez.
+ * aynı). Çerçevenin dışından başlayan sürükleme bir şey değiştirmez. Sürükleme boyunca yalnız önizlemedeki taslak değişir;
+ * [onChange] bırakınca bir kez çağrılır, ayar her harekette yazılmaz (GitHub #802; Windows RegionPicker, Mac RegionDrag).
  */
 @Composable
 fun RegionPreview(region: CropRegion, centered: Boolean = false, onChange: (CropRegion) -> Unit) {
@@ -239,6 +387,8 @@ fun RegionPreview(region: CropRegion, centered: Boolean = false, onChange: (Crop
     val current by rememberUpdatedState(region)
     val change by rememberUpdatedState(onChange)
     val evenly by rememberUpdatedState(centered)
+    // Süren sürüklemenin taslağı; sürükleme yokken null.
+    var draft by remember { mutableStateOf<CropRegion?>(null) }
     Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(Tokens.Radius.control)).background(Color.Black)) {
         frame?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds) }
             ?: Text(stringResource(R.string.area_preview_empty), style = Tokens.Type.caption, color = Tokens.Color.secondary,
@@ -256,19 +406,28 @@ fun RegionPreview(region: CropRegion, centered: Boolean = false, onChange: (Crop
                     handle = RegionEdit.handleAt(start, at.x.toDouble() / size.width, at.y.toDouble() / size.height,
                         grab.toDouble() / size.width, grab.toDouble() / size.height)
                 },
-                onDragEnd = { handle = null },
-                onDragCancel = { handle = null },
+                onDragEnd = {
+                    val result = draft
+                    handle = null
+                    draft = null
+                    if (result != null && result != start) change(result)
+                },
+                onDragCancel = {
+                    handle = null
+                    draft = null
+                },
             ) { pointer, drag ->
                 val grabbed = handle ?: return@detectDragGestures
                 pointer.consume()
                 moved += drag
-                change(RegionEdit.dragged(start, grabbed, moved.x.toDouble() / size.width, moved.y.toDouble() / size.height, evenly))
+                draft = RegionEdit.dragged(start, grabbed, moved.x.toDouble() / size.width, moved.y.toDouble() / size.height, evenly)
             }
         }) {
-            val left = (region.left * size.width).toFloat()
-            val top = (region.top * size.height).toFloat()
-            val right = (region.right * size.width).toFloat()
-            val bottom = (region.bottom * size.height).toFloat()
+            val shown = draft ?: region
+            val left = (shown.left * size.width).toFloat()
+            val top = (shown.top * size.height).toFloat()
+            val right = (shown.right * size.width).toFloat()
+            val bottom = (shown.bottom * size.height).toFloat()
             val shade = Color.Black.copy(alpha = 0.5f)
             drawRect(shade, Offset.Zero, Size(size.width, top))
             drawRect(shade, Offset(0f, bottom), Size(size.width, size.height - bottom))
@@ -276,7 +435,7 @@ fun RegionPreview(region: CropRegion, centered: Boolean = false, onChange: (Crop
             drawRect(shade, Offset(right, top), Size(size.width - right, bottom - top))
             drawRect(Tokens.Color.accent, Offset(left, top), Size(right - left, bottom - top), style = Stroke(2.dp.toPx()))
             val handleSize = 9.dp.toPx()
-            RegionEdit.handles(region).forEach { grip ->
+            RegionEdit.handles(shown).forEach { grip ->
                 drawRect(Tokens.Color.accent, Offset((grip.x * size.width).toFloat() - handleSize / 2, (grip.y * size.height).toFloat() - handleSize / 2),
                     Size(handleSize, handleSize))
             }

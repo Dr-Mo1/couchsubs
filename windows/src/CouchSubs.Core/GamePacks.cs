@@ -60,6 +60,17 @@ public static class PackKey
         return Convert.ToHexStringLower(hash, 0, 8);
     }
 
+    /// <summary>
+    /// Zaten canon olan metnin UTF-8 baytlarından anahtar sayısı: <c>Number(Key(canon))</c> ile aynı, onaltılık yazıya
+    /// çevirmeden (düzeltme adaylarında binlerce kez çağrılır). Bayt boş olmamalı.
+    /// </summary>
+    public static ulong CanonNumber(ReadOnlySpan<byte> canon)
+    {
+        Span<byte> hash = stackalloc byte[32];
+        SHA256.HashData(canon, hash);
+        return System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(hash);
+    }
+
     /// <summary>Anahtarın sayı hâli (sözlükte daha az yer tutar); geçersizse null.</summary>
     public static ulong? Number(string key) =>
         key.Length == 16 && ulong.TryParse(key, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var value) ? value : null;
@@ -93,6 +104,8 @@ public static class PackKey
         return output.ToString();
     }
 
+    private static bool IsNoncharacter(int value) => (value & 0xFFFE) == 0xFFFE || value is >= 0xFDD0 and <= 0xFDEF;
+
     /// <summary>Bozuk UTF-16 (tek başına vekil karakter) normalleştirmeyi durdurmasın.</summary>
     private static string Normalize(string text, NormalizationForm form)
     {
@@ -100,7 +113,10 @@ public static class PackKey
         catch (ArgumentException)
         {
             var clean = new StringBuilder(text.Length);
-            foreach (var rune in text.EnumerateRunes()) clean.Append(rune.ToString());
+            // Karakter olmayan kod noktaları (U+FFFE, U+FFFF, U+FDD0–U+FDEF) da normalleştirmeyi durdurur; OCR bunları
+            // seyrek de olsa üretebiliyor (Mac okumasında ~2 milyon karakterde bir) ve arama istisnayla çöküyordu.
+            foreach (var rune in text.EnumerateRunes())
+                if (!IsNoncharacter(rune.Value)) clean.Append(rune.ToString());
             return clean.ToString().Normalize(form);
         }
     }
@@ -200,6 +216,19 @@ public sealed class GamePack(string id, string title, IReadOnlyDictionary<ulong,
 
 /// <summary>Pakette bulunan satırın Türkçesi ve seslendirilecek cümleleri.</summary>
 public sealed record PackMatch(string Text, IReadOnlyList<SpokenLine> Spoken);
+
+/// <summary>
+/// Çok satırlı okumanın yalnız bir satırı pakette yok: satırlar sırasıyla, bulunanın Türkçesi ve seslendirmesiyle;
+/// bulunmayanın <see cref="PackLine.Turkish"/>'i null (yalnız o satır motora gider). Bkz. PackLookup.MatchPartial.
+/// </summary>
+public sealed record PackPartial(IReadOnlyList<PackLine> Lines)
+{
+    /// <summary>Motora gidecek tek satır.</summary>
+    public string Missing => Lines.First(line => line.Turkish is null).Source;
+}
+
+/// <summary>Kısmi eşleşmede bir satır: okunan İngilizce, paketteki Türkçesi (yoksa null) ve seslendirmesi.</summary>
+public sealed record PackLine(string Source, string? Turkish, IReadOnlyList<SpokenLine> Spoken);
 
 /// <summary>
 /// Uygulamayla gelen ve kullanıcının klasörüne bırakılan paketler; hepsi tek bir sözlükte birleşir.
@@ -405,24 +434,31 @@ public sealed class GamePackLibrary(Func<IEnumerable<(string Name, byte[] Data)>
         }
         if (pack is null) return null;
         if (Corrected(text, pack, translation) is { } corrected) return corrected;
-        return pack.Fuzzy?.Nearest(text, translation) is { } found ? translation(found) : null;
+        // GTA paketinde kısa satırlar da aranır (paket betiği GTA'ya kısa satır imzası da yazar).
+        var minimum = ScreenText.IsGta(pack.Title) ? PackFuzzy.ShortMinLength : PackFuzzy.MinLength;
+        return pack.Fuzzy?.Nearest(text, translation, minimum) is { } found ? translation(found) : null;
     }
 
     /// <summary>
-    /// Tek OCR düzeltmesiyle (<see cref="PackFuzzy.Variants"/>) oynanan oyunun paketinde tam bulunan satırın Türkçesi;
-    /// düzeltmelerin hepsi aynı Türkçeye çıkmıyorsa null.
+    /// Tek OCR düzeltmesiyle (<see cref="PackFuzzy.Variants"/>, hiçbiri tutmazsa <see cref="PackFuzzy.EditKeys"/>) oynanan
+    /// oyunun paketinde tam bulunan satırın Türkçesi; aynı turdaki düzeltmelerin hepsi aynı Türkçeye çıkmıyorsa null.
     /// </summary>
     private static string? Corrected(string text, GamePack pack, Func<ulong, string?> translation)
     {
-        string? found = null;
-        foreach (var variant in PackFuzzy.Variants(text))
+        IEnumerable<ulong> First() =>
+            PackFuzzy.Variants(text).Select(variant => PackKey.CanonNumber(Encoding.UTF8.GetBytes(variant)));
+        foreach (var round in new Func<IEnumerable<ulong>>[] { First, () => PackFuzzy.EditKeys(text) })
         {
-            if (PackKey.Key(variant) is not { } key || PackKey.Number(key) is not { } number || !Contains(pack.Keys, number)
-                || translation(number) is not { } turkish) continue;
-            if (found is not null && found != turkish) return null;
-            found = turkish;
+            string? found = null;
+            foreach (var number in round())
+            {
+                if (!Contains(pack.Keys, number) || translation(number) is not { } turkish) continue;
+                if (found is not null && found != turkish) return null;
+                found = turkish;
+            }
+            if (found is not null) return found;
         }
-        return found;
+        return null;
     }
 
     /// <summary>Bulanık aramanın yapılacağı paketin kimliği (son tam eşleşmenin paketi); yoksa null.</summary>

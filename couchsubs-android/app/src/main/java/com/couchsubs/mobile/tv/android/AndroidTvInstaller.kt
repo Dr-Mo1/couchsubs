@@ -31,6 +31,8 @@ class AndroidTvInstaller(
     private val playListed: () -> Boolean = { false },
     private val playWaitMs: Long = 4 * 60 * 1000L,
     private val playPollMs: Long = 3_000L,
+    /** Uygulama açılırken verilecek başlatma parametreleri (`{"server":"http://…"}`); TV telefonu ağda aramadan bağlanır. */
+    private val launchParams: String? = null,
 ) {
     data class Pairing(val port: Int, val code: String)
     data class Result(val version: String, val installed: Boolean)
@@ -45,19 +47,33 @@ class AndroidTvInstaller(
 
         fun versionFromDumpsys(output: String): String? = versionName.find(output)?.groupValues?.get(1)
 
-        private val userInstalled = Regex("""^\s*User \d+:.*?\binstalled=(true|false)\b""", RegexOption.MULTILINE)
+        private val userInstalled = Regex("""^\s*User (\d+):.*?\binstalled=(true|false)\b""", RegexOption.MULTILINE)
+
+        /** dumpsys'teki kullanıcı satırları: kullanıcı numarası -> kurulu mu. */
+        private fun usersFromDumpsys(output: String): Map<String, Boolean> =
+            userInstalled.findAll(output).associate { it.groupValues[1] to (it.groupValues[2] == "true") }
 
         /**
-         * dumpsys sürüm söylüyor ama uygulama hiçbir kullanıcıda kurulu değil (kullanıcı satırlarının hepsi installed=false):
-         * TV'den kaldırılan uygulamanın kaydı kalmış (veri saklanarak kaldırma, arşivleme). Önceden "kurulu" sayılıyor,
-         * kurulum atlanıyordu (#352, #389). Kullanıcı satırı yoksa (eski Android) kalıntı sayılmaz.
+         * dumpsys sürüm söylüyor ama uygulama TV'nin ana kullanıcısında (User 0) kurulu değil: TV'den kaldırılan
+         * uygulamanın kaydı kalmış (veri saklanarak kaldırma, arşivleme; #352, #389) ya da TV uygulamayı yalnız ana
+         * kullanıcıdan kaldırmış, çocuk/ikincil profilde kurulu kalmış (#528). Önceden "kurulu" sayılıyor, kurulum
+         * atlanıyor, `am start` hata veriyordu. Kullanıcı satırı yoksa (eski Android) kalıntı sayılmaz.
          * Masaüstündeki AndroidTvApp.IsLeftover ile aynıdır.
          */
         fun isLeftover(output: String): Boolean {
             if (versionFromDumpsys(output) == null) return false
-            val users = userInstalled.findAll(output).map { it.groupValues[1] }.toList()
-            return users.isNotEmpty() && users.all { it == "false" }
+            val users = usersFromDumpsys(output)
+            if (users.isEmpty()) return false
+            return users["0"] == false || users.values.none { it }
         }
+
+        /** Kalıntı ama APK başka bir profilde kurulu: `pm install-existing --user 0` ile APK göndermeden geri getirilir (#528). */
+        fun canInstallExisting(output: String): Boolean = isLeftover(output) && usersFromDumpsys(output).values.any { it }
+
+        const val INSTALL_EXISTING_COMMAND = "shell:pm install-existing --user 0 $PACKAGE_NAME"
+
+        /** `pm install-existing` başarılı mı ("Package com.couchsubs.tv installed for user: 0")? */
+        fun installExistingSucceeded(output: String): Boolean = output.contains("installed for user")
 
         /** TV'de kurulu CouchSubs sürümü; yoksa ya da yalnız kaydı kalmışsa null. */
         fun installedVersionFromDumpsys(output: String): String? = versionFromDumpsys(output)?.takeUnless { isLeftover(output) }
@@ -109,6 +125,48 @@ class AndroidTvInstaller(
             val address = value.substring(0, colon).trim()
             return if (address.isEmpty()) null else address to port
         }
+
+        /** Uygulamayı açan ADB komutu; [launchParams] varsa `--es params '…'` ile (Windows'taki StartCommand ile aynı kural). */
+        fun startCommand(launchParams: String?): String {
+            val command = "shell:am start -n $PACKAGE_NAME/.MainActivity"
+            // TV'de sh çalıştırır: değer tek tırnak içinde gider; tek tırnak ve satır sonu içeren değer hiç gönderilmez.
+            if (launchParams.isNullOrEmpty() || launchParams.any { it == '\'' || it == '\n' || it == '\r' || it == '\u0000' }) return command
+            return "$command --es params '$launchParams'"
+        }
+
+        /**
+         * TV'de çalışan CouchSubs'a adresi bildiren yayın (TV uygulamasındaki AddressReceiver): ekranı öne çekmez, görüntü
+         * modunu değiştirmez. Parametre yoksa ya da kabukta güvenle gönderilemiyorsa null (Windows'taki AddressCommand ile aynı).
+         */
+        fun addressCommand(launchParams: String?): String? {
+            if (launchParams.isNullOrEmpty() || launchParams.any { it == '\'' || it == '\n' || it == '\r' || it == '\u0000' }) return null
+            return "shell:am broadcast -a $PACKAGE_NAME.action.ADDRESS -n $PACKAGE_NAME/.AddressReceiver --es params '$launchParams'"
+        }
+
+        /**
+         * CouchSubs TV çalışıyor mu: etkinlik yığınlarındaki kayıtlar (ekran arka planda olsa da yığındadır) ve paketin
+         * servisleri (katman). Windows'taki RunningCommand ve Mac/iPhone'daki AndroidTVApp.runningCommand ile aynı.
+         */
+        const val RUNNING_COMMAND = "shell:dumpsys activity activities | grep Hist; dumpsys activity services $PACKAGE_NAME | grep ServiceRecord"
+
+        /** Uygulama zaten açıkken [open]'ın döndürdüğü sonuç (`am start` gönderilmedi). */
+        const val ALREADY_RUNNING = "zaten açık"
+
+        /**
+         * [RUNNING_COMMAND] çıktısında CouchSubs TV'nin ekranı ya da katman servisi var mı. Boş ya da tanınmayan çıktı (çok
+         * eski TV'de `grep` yok) çalışmıyor sayılır: eski yol, bekçinin açma sınırı yine geçerli.
+         */
+        fun isRunning(output: String): Boolean = output.lineSequence().any { line ->
+            ((line.contains("Hist") && line.contains("ActivityRecord{")) || line.contains("ServiceRecord{")) &&
+                line.contains("$PACKAGE_NAME/")
+        }
+
+        /**
+         * Yalnız sunucu adresi gider; erişim anahtarı gitmez (Android TV kullanıcı onaylı eşleştirmeyle bağlanır). Adres
+         * tırnak ya da ters bölü içeriyorsa null.
+         */
+        fun launchParams(server: String): String? =
+            if (server.isEmpty() || server.any { it == '"' || it == '\\' || it < ' ' }) null else "{\"server\":\"$server\"}"
 
         /** TV'de ADB açık mı (port yanıt veriyor mu)? */
         fun isReachable(host: String, port: Int = AdbConnection.DEFAULT_PORT, timeoutMs: Int = 700): Boolean = try {
@@ -162,6 +220,26 @@ class AndroidTvInstaller(
         }
     }
 
+    /**
+     * Kurulu uygulamayı telefonun adresiyle açar (kurmadan, sessizce): TV telefonu ağda aramadan bağlanır. TV bu telefonu
+     * onaylamamışsa onay beklenmez, NOT_APPROVED ile vazgeçilir. Uygulama TV'de zaten çalışıyorsa (ekranı önde ya da
+     * arkada, ya da katmanı) `am start` gönderilmez, [ALREADY_RUNNING] döner: `am start` çalışan uygulamayı öne çekiyor,
+     * TV uygulaması da parametreli açılışta katmana dönüp ekranı kapatıyordu (X, Android TV 8, beta.74; Windows ve iPhone'la
+     * aynı).
+     */
+    fun open(params: String? = launchParams): String {
+        val key = adbKey()
+        return connector(key) { throw AndroidInstallException(AndroidInstallError.NOT_APPROVED, "açılışta onay beklenmez") }.use { adb ->
+            val running = try { adb.run(RUNNING_COMMAND) } catch (_: IOException) { "" }
+            if (isRunning(running)) {
+                // Çalışan uygulama telefona bağlı değil (bekçi yalnız o zaman açar): kayıtlı eski bir adrese bağlı kalmış
+                // olabilir. Adres ekranı öne çekmeden bildirilir (TV 0.9.63+; eski TV uygulaması yok sayar).
+                addressCommand(params)?.let { command -> try { adb.run(command) } catch (_: IOException) { } }
+                ALREADY_RUNNING
+            } else adb.run(startCommand(params)).trim()
+        }
+    }
+
     private fun installCore(apk: () -> ByteArray, version: String?, allowReplace: Boolean): Result {
         val key = adbKey()
         pairing?.let {
@@ -176,7 +254,13 @@ class AndroidTvInstaller(
         }.use { adb ->
             log.write("ADB bağlantısı kuruldu (${if (adb.secure) "TLS" else "düz"}, en çok ${adb.maxData} bayt).")
             progress(InstallStep.READING)
-            val dumpsys = adb.run("shell:dumpsys package $PACKAGE_NAME")
+            var dumpsys = adb.run("shell:dumpsys package $PACKAGE_NAME")
+            if (canInstallExisting(dumpsys)) {
+                // TV uygulamayı yalnız ana kullanıcıdan kaldırmış, başka profilde duruyor: APK göndermeden geri getirilir (#528).
+                val existing = runCatching { adb.run(INSTALL_EXISTING_COMMAND) }.getOrDefault("")
+                log.write("CouchSubs TV başka bir profilde kurulu; ana kullanıcıya geri getiriliyor: ${existing.trim()}")
+                if (installExistingSucceeded(existing)) dumpsys = adb.run("shell:dumpsys package $PACKAGE_NAME")
+            }
             val installed = installedVersionFromDumpsys(dumpsys)
             val fromPlay = installedFromPlay(dumpsys)
             if (isLeftover(dumpsys)) log.write("TV'de CouchSubs'ın kaydı kalmış ama uygulama kurulu değil; yeniden kuruluyor.")
@@ -262,7 +346,7 @@ class AndroidTvInstaller(
     private fun launch(adb: AdbConnection) {
         progress(InstallStep.LAUNCHING)
         try {
-            log.write("Uygulama açılıyor: ${adb.run("shell:am start -n $PACKAGE_NAME/.MainActivity").trim()}")
+            log.write("Uygulama açılıyor: ${adb.run(startCommand(launchParams)).trim()}")
         } catch (error: IOException) {
             log.write("Uygulama açılamadı (kurulum yine tamam): ${error.message}")
         }

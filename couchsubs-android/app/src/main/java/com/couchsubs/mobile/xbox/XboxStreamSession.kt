@@ -2,7 +2,8 @@
 // Xbox ev yayını (Beta): Windows'taki XboxStreamSession + player.html'in telefondaki karşılığı. Görüntü yerel
 // libwebrtc'yle alınır; kareler OCR hattına doğrudan parlaklık (Y) düzlemi olarak gider (bkz. docs/superpowers/specs/
 // 2026-11-16-telefon-xbox-design.md). Oyun sesi ayar açıksa telefonda çalınır (bkz. playAudio); mikrofon açılmaz,
-// kumanda girdisi gönderilmez.
+// kumanda girdisi gönderilmez. İlk kareden sonra görüntü kesilirse (ICE DISCONNECTED'da takılı kalsa da) uyarı
+// gösterilir ve oturum yeniden kurulur (XboxPictureWatch.kt).
 package com.couchsubs.mobile.xbox
 
 import android.content.Context
@@ -14,6 +15,7 @@ import com.couchsubs.mobile.account.Backend
 import com.couchsubs.mobile.remoteplay.DisconnectKind
 import com.couchsubs.mobile.remoteplay.FrameSource
 import com.couchsubs.mobile.remoteplay.SessionState
+import com.couchsubs.mobile.remoteplay.ChromaPlanes
 import com.couchsubs.mobile.remoteplay.VideoFrame
 import org.webrtc.DataChannel
 import org.webrtc.IceCandidate
@@ -55,12 +57,14 @@ class XboxStreamSession(
         const val TAG = "CouchSubsXbox"
         const val ICE_GATHER_MS = 5000L
         const val KEEPALIVE_MS = 30_000L
-        /** El sıkışmadan sonra bu sürede kare gelmezse oturum yeniden açılır. */
-        const val FIRST_FRAME_MS = 20_000L
+        /** El sıkışmadan sonra bu sürede kare gelmezse bağlantı "görüntü gelmedi" nedeniyle kapatılır. */
+        const val FIRST_FRAME_MS = XboxFirstFrameWatch.FIRST_FRAME_LIMIT_MS
         /** OCR saniyede beş kez okur; her kareyi I420'ye çevirmeye gerek yok. */
         const val FRAME_INTERVAL_MS = 66L
         /** Kare onayları oynatıcıdaki gibi 16 ms'de bir paketlenir (Input.ts `_inputInterval`). */
         const val ACK_INTERVAL_MS = 16L
+        /** İlk kare beklenirken anahtar kare ve tanı saatinin adımı (Windows'taki gibi). */
+        const val WATCH_TICK_MS = 500L
     }
 
     private val appContext = context.applicationContext
@@ -95,6 +99,12 @@ class XboxStreamSession(
         acks.offer(XboxFrameAck(XboxFrameAckQueue.serverDataKey(rtpMs), arrivedAt - clockStart, decodedAt - clockStart))
     }
     private val channels = HashMap<String, DataChannel>()
+    /** İlk kare gelene kadar anahtar kare isteği ve tanı satırı (bkz. XboxFirstFrame.kt). */
+    private val watchLock = Any()
+    @Volatile private var watch: XboxFirstFrameWatch? = null
+    @Volatile private var watchTask: ScheduledFuture<*>? = null
+    @Volatile private var connectedAt = 0L
+    @Volatile private var videoTrack: VideoTrack? = null
 
     override val framesReceived: Long get() = frameCounter.totalFrames
 
@@ -159,7 +169,11 @@ class XboxStreamSession(
                         else -> break@loop
                     }
                 }
-                if (!stopped.get()) throw XboxException(XboxError.NETWORK, endReason ?: "Xbox görüntü bağlantısı kapandı")
+                if (!stopped.get()) {
+                    // Bağlantı kuruldu ama Xbox tek kare göndermeden kapattı: "görüntü gelmedi" sayılır (iki bağlantıda durulur).
+                    val noFirstFrame = connectedAt > 0 && frameSession?.let { frameCounter.framesInSession(it) } == 0L
+                    throw XboxException(if (noFirstFrame) XboxError.NO_FIRST_FRAME else XboxError.NETWORK, endReason ?: "Xbox görüntü bağlantısı kapandı")
+                }
             } catch (error: InterruptedException) {
                 if (stopped.get()) break
             } catch (error: XboxException) {
@@ -204,6 +218,10 @@ class XboxStreamSession(
         lastError = "$kind: $detail"
         if (stopped.get()) return
         log("kopma ($kind): $detail")
+        if (kind == XboxError.NO_FIRST_FRAME) {
+            log("Xbox görüntü göndermedi: bağlantı kuruldu ama tek kare gelmedi. Xbox'ta Ayarlar › Cihazlar ve bağlantılar › " +
+                "Uzak özellikler açık mı, Xbox kablolu mu? Tanı satırlarında video bayt 0 ise Xbox hiç görüntü kodlamıyor")
+        }
         val failed = machine.phase as? XboxSessionMachine.Phase.Failed
         when {
             failed == null || failed.willRetry -> {
@@ -215,8 +233,14 @@ class XboxStreamSession(
             else -> {
                 // Denemeler bitti ya da konsol yayını reddetti: yayın durur, yeniden denenmez.
                 log("yeniden denenmiyor, yayın durdu")
-                onState(SessionState.Disconnected(DisconnectKind.OTHER,
-                    appContext.getString(R.string.xbox_connection_lost, detail?.takeIf { it.isNotBlank() } ?: kind.name)))
+                val text = when (XboxSessionMachine.stopKind(kind, detail)) {
+                    XboxSessionMachine.StopKind.BUSY -> appContext.getString(R.string.xbox_stopped_busy)
+                    XboxSessionMachine.StopKind.CONSOLE_UNAVAILABLE -> appContext.getString(R.string.xbox_stopped_console)
+                    XboxSessionMachine.StopKind.NO_PICTURE -> appContext.getString(R.string.xbox_stopped_no_picture)
+                    XboxSessionMachine.StopKind.OTHER ->
+                        appContext.getString(R.string.xbox_connection_lost, XboxSessionMachine.shortReason(detail, kind.name))
+                }
+                onState(SessionState.Disconnected(DisconnectKind.OTHER, text))
             }
         }
     }
@@ -260,13 +284,20 @@ class XboxStreamSession(
     private fun negotiate(id: String) {
         val negotiatedFrames = frameCounter.beginSession()
         frameSession = negotiatedFrames
+        // İlk kareden sonra görüntü kesilirse uyarı ve yeniden kurma (kareler ve ICE olayları buraya yazılır).
+        val watchPicture = XboxPictureWatch()
         val sink = VideoSink { frame ->
             if (stopped.get()) return@VideoSink
             val sessionFrames = frameCounter.recordFrame(negotiatedFrames) ?: return@VideoSink
             val now = SystemClock.elapsedRealtime()
+            watchPicture.frameArrived(now)
             if (sessionFrames == 1L) {
                 firstFrameAt = now
-                log("ilk kare ${frame.buffer.width}x${frame.buffer.height}")
+                val waited = watch?.let { current ->
+                    current.frameArrived()
+                    ", bağlantıdan ${"%.1f".format(java.util.Locale.ROOT, (now - connectedAt) / 1000.0)} sn sonra, keyframe isteği ${current.keyframesRequested}"
+                } ?: ""
+                log("ilk kare ${frame.buffer.width}x${frame.buffer.height}$waited")
                 frameCounter.runIfCurrent(negotiatedFrames) {
                     if (!stopped.get() && machine.streaming()) onState(SessionState.Streaming)
                 }
@@ -276,7 +307,8 @@ class XboxStreamSession(
             val i420 = frame.buffer.toI420() ?: return@VideoSink
             try {
                 if (frameCounter.framesInSession(negotiatedFrames) > 0) {
-                    onFrame(VideoFrame(i420.dataY, i420.width, i420.height, i420.strideY))
+                    val chroma = if (i420.strideU == i420.strideV) ChromaPlanes(i420.dataU, i420.dataV, i420.strideU) else null
+                    onFrame(VideoFrame(i420.dataY, i420.width, i420.height, i420.strideY, chroma = chroma))
                 }
             } finally {
                 i420.release()
@@ -286,6 +318,7 @@ class XboxStreamSession(
         endReason = null
         lastError = null
         firstFrameAt = 0L
+        connectedAt = 0L
         acking = false
         acks.clear()
         ackSequence = 0
@@ -300,7 +333,15 @@ class XboxStreamSession(
         )).apply { sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN }
         val connection = pcFactory.createPeerConnection(config, object : PeerConnection.Observer {
             override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
-            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) { log("ICE: $state") }
+            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+                log("ICE: $state")
+                watchPicture.iceChanged(when (state) {
+                    PeerConnection.IceConnectionState.CONNECTED, PeerConnection.IceConnectionState.COMPLETED -> XboxPictureWatch.Ice.CONNECTED
+                    PeerConnection.IceConnectionState.DISCONNECTED -> XboxPictureWatch.Ice.DISCONNECTED
+                    PeerConnection.IceConnectionState.FAILED -> XboxPictureWatch.Ice.FAILED
+                    else -> XboxPictureWatch.Ice.OTHER
+                }, SystemClock.elapsedRealtime())
+            }
             override fun onIceConnectionReceivingChange(receiving: Boolean) {}
             override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {
                 if (state == PeerConnection.IceGatheringState.COMPLETE) gathered.countDown()
@@ -339,8 +380,10 @@ class XboxStreamSession(
             RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY))
         audio?.receiver?.track()?.setEnabled(playAudio)
         log(if (playAudio) "oyun sesi bu telefonda çalınır" else "oyun sesi kapalı (ayar)")
-        (video?.receiver?.track() as? VideoTrack)?.addSink(sink)
+        val track = (video?.receiver?.track() as? VideoTrack)
             ?: throw XboxException(XboxError.SERVICE, "Görüntü alıcısı kurulamadı")
+        track.addSink(sink)
+        videoTrack = track
 
         val offer = await<SessionDescription>("SDP teklifi") { result -> connection.createOffer(result.creating(), MediaConstraints()) }
         val munged = SessionDescription(SessionDescription.Type.OFFER, XboxChannels.mungeOffer(offer.description))
@@ -365,7 +408,31 @@ class XboxStreamSession(
             if (done.await(1, TimeUnit.SECONDS)) break
             if (frameCounter.framesInSession(negotiatedFrames) == 0L && SystemClock.elapsedRealtime() - negotiatedAt > FIRST_FRAME_MS) {
                 endReason = "Xbox'tan ${FIRST_FRAME_MS / 1000} sn içinde görüntü gelmedi"
-                throw XboxException(XboxError.CONSOLE_UNAVAILABLE, endReason!!)
+                throw XboxException(XboxError.NO_FIRST_FRAME, endReason!!)
+            }
+            checkPicture(watchPicture)
+        }
+    }
+
+    /**
+     * Saniyede bir: ilk kareden sonra görüntü kesildiyse ana ekranda uyarı, uzun sürdüyse oturum kapatılır ve yeniden
+     * denenir (bkz. XboxPictureWatch).
+     */
+    private fun checkPicture(watch: XboxPictureWatch) {
+        when (val verdict = watch.tick(SystemClock.elapsedRealtime())) {
+            XboxPictureVerdict.Fine -> {}
+            XboxPictureVerdict.Warn -> {
+                log("görüntü kesildi (${XboxPictureWatch.WARN_AFTER_MS / 1000} sn kare yok ya da ICE takıldı); toparlanması bekleniyor")
+                onState(SessionState.Disconnected(DisconnectKind.OTHER, describe(XboxError.NO_PICTURE)))
+            }
+            XboxPictureVerdict.Recovered -> {
+                log("görüntü yeniden geliyor")
+                onState(SessionState.Streaming)
+            }
+            is XboxPictureVerdict.Stalled -> {
+                log("${verdict.reason}; oturum yeniden kuruluyor")
+                endReason = verdict.reason
+                throw XboxException(XboxError.NO_PICTURE, verdict.reason)
             }
         }
     }
@@ -378,7 +445,10 @@ class XboxStreamSession(
             log("kanal $name: $state")
             when {
                 state == DataChannel.State.OPEN && name == "message" -> sendText("message", XboxChannels.HANDSHAKE)
-                state == DataChannel.State.OPEN && name == "input" -> startKeepalive()
+                state == DataChannel.State.OPEN && name == "input" -> {
+                    startKeepalive()
+                    startWatch()
+                }
                 state == DataChannel.State.CLOSED && name == "input" -> {
                     endReason = "Xbox görüntü bağlantısı kapandı"
                     done.countDown()
@@ -436,6 +506,59 @@ class XboxStreamSession(
         }, ACK_INTERVAL_MS, ACK_INTERVAL_MS, TimeUnit.MILLISECONDS)
     }
 
+    /**
+     * Bağlantıdan (input kanalı açıldı) sonra 500 ms'de bir: görüntü gelene kadar kontrol kanalından anahtar kare
+     * istenir, 10 sn'den sonra 10 sn'de bir getStats tanısı yazılır. İlk kare gelince durur.
+     */
+    private fun startWatch() {
+        synchronized(watchLock) {
+            watchTask?.cancel(false)
+            val current = XboxFirstFrameWatch()
+            watch = current
+            connectedAt = SystemClock.elapsedRealtime()
+            watchTask = timers.scheduleWithFixedDelay({ watchTick(current) }, 0, WATCH_TICK_MS, TimeUnit.MILLISECONDS)
+        }
+    }
+
+    private fun watchTick(current: XboxFirstFrameWatch) {
+        try {
+            synchronized(watchLock) {
+                // closePeer bu kilitle kanalları ve bağlantıyı kapatır; kapandıysa hiçbir şeye dokunulmaz.
+                if (watch !== current) return
+                val since = SystemClock.elapsedRealtime() - connectedAt
+                val control = synchronized(channels) { channels["control"] }
+                val ready = videoTrack != null && control?.state() == DataChannel.State.OPEN
+                val step = current.tick(since, ready)
+                if (step.requestKeyframe) {
+                    if (current.keyframesRequested == 1) log("ilk kare bekleniyor: Xbox'tan anahtar kare isteniyor")
+                    sendText("control", XboxFirstFrameWatch.KEYFRAME_REQUEST)
+                }
+                if (step.logStats) logStats(current, since)
+                if (current.frameSeen) {
+                    watchTask?.cancel(false)
+                    watchTask = null
+                }
+            }
+        } catch (error: Exception) {
+            log("ilk kare tanısı: ${error.message}")
+        }
+    }
+
+    private fun logStats(current: XboxFirstFrameWatch, since: Long) {
+        val connection = peer ?: return
+        val trackState = runCatching { videoTrack?.state()?.name }.getOrNull() ?: "yok"
+        val picture = XboxStreamStats.picture(trackState)
+        connection.getStats { report ->
+            try {
+                val stats = report.statsMap.values.filter { it.type in XboxStreamStats.TYPES }
+                    .map { XboxStat(it.type, it.id, it.members) }
+                log(XboxStreamStats.describe(since, current.frameSeen, current.keyframesRequested, stats, picture))
+            } catch (error: Exception) {
+                log("ilk kare tanısı: ${error.message}")
+            }
+        }
+    }
+
     private fun startKeepalive() {
         keepalive?.cancel(false)
         keepalive = timers.scheduleWithFixedDelay({
@@ -449,6 +572,12 @@ class XboxStreamSession(
     }
 
     private fun closePeer() {
+        synchronized(watchLock) {
+            watchTask?.cancel(false)
+            watchTask = null
+            watch = null
+            videoTrack = null
+        }
         frameSession?.let(frameCounter::endSession)
         frameSession = null
         keepalive?.cancel(false)

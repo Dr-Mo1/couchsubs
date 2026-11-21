@@ -19,6 +19,8 @@ gönderilir. Ayrıntılar: [Gizlilik](PRIVACY.md). Ücretsiz ve açık kaynaklı
 
 *English below.*
 
+TV bağlantısında eşleştirme kodu veya OBS erişim anahtarı için [TV eşleştirme rehberine](docs/tv-pairing.md) bakın.
+
 ## Oyunda nasıl görünüyor
 
 Mafia: The Old Country, PS5'te İngilizce oynanıyor; Türkçe altyazı TV'de oyunun üstünde, CouchSubs bilgisayarda çalışıyor.
@@ -137,16 +139,17 @@ yalnız altyazıyı okumak için kullanır. Siz oyunu HDMI'dan, gecikmesiz oynam
   uygulamayı uzun süre kullanmazsanız TV'deki Developer Mode uygulamasından **EXTEND** ile uzatın.
 - Samsung'da TV, CouchSubs TV uygulaması açıkken sürekli HDMI 1'e ya da başka bir kaynağa geçiyorsa TV'de
   **Ayarlar › Tüm Ayarlar › Bağlantı › Harici Cihaz Yöneticisi** altında **Anynet+ (HDMI-CEC)** ve **Otomatik Kaynak
-  Değiştirme**'yi kapatın. Samsung TV'yi yeniden başlatmak için güç tuşunu yaklaşık 2 saniye basılı tutun; kısa basınca
+  Değiştirme**'yi kapatın. Samsung TV'yi yeniden başlatmak için güç tuşunu TV kapanıp Samsung logosuyla
+  yeniden açılana kadar (yaklaşık 5 saniye) basılı tutun ya da fişini 30 saniye çekin; TV kapanınca bırakırsanız
   yalnız bekleme moduna geçer.
 - Altyazı, oyunda altyazı açıksa okunabilir. Bölgeyi **Ayarlar › Altyazı alanı**'ndan oyuna göre ayarlayabilirsiniz.
-- **Kısayollar** (yalnız çeviri sürerken, CouchSubs arka plandayken de çalışır): Windows'ta **Num 9** ya da
-  **Ctrl+Shift+9** ekranı çevirir, **Num 1–3** / **Ctrl+Shift+1–3** ek bölgeleri, **Num 5** / **Ctrl+Shift+5** serbest
-  alanı çevirir, **Num 0** / **Ctrl+Shift+0** canlı altyazıyı duraklatır, **Num 7** / **Ctrl+Shift+7** altyazı
-  penceresinde tıklamaları geçirir, **Num 8** / **Ctrl+Shift+8** ayarlardaki görüntüyü yeniler. Sayı tuş takımı
-  olmayan dizüstünde harflerin üstündeki rakamlar Ctrl+Shift ile kullanılır. Windows'ta tuşlar **Ayarlar ›
-  Kısayollar**'dan değiştirilebilir. Mac'te ekranı çevir **⌥⌘T**,
-  tıklamalar **⌥⌘L**.
+- **Kısayollar** (yalnız çeviri sürerken, CouchSubs arka plandayken de çalışır): **Num 9** ya da
+  **Ctrl+Shift+9** (Mac'te **⌃⇧9**) ekranı çevirir, **Num 1–3** / **Ctrl+Shift+1–3** ek alanları, **Num 5** /
+  **Ctrl+Shift+5** serbest alanı çevirir, **Num 0** / **Ctrl+Shift+0** canlı altyazıyı duraklatır, **Num 7** /
+  **Ctrl+Shift+7** altyazı penceresinde tıklamaları geçirir, **Num 8** / **Ctrl+Shift+8** ayarlardaki görüntüyü
+  yeniler. Sayı tuş takımı olmayan klavyede harflerin üstündeki rakamlar Ctrl+Shift (Mac'te ⌃⇧) ile kullanılır.
+  Windows'ta ve Mac'te tuşlar **Ayarlar › Kısayollar**'dan değiştirilebilir. Önceki sürümden gelen Mac'lerde **⌥⌘T** (ekranı
+  çevir) ve **⌥⌘L** (tıklamalar) da çalışmayı sürdürür.
 - Çeviri makine çevirisidir; bazı cümleler kusurlu olabilir.
 
 ## Yerel yapay zekâ ile çeviri (Ollama, LM Studio)
@@ -155,6 +158,9 @@ yalnız altyazıyı okumak için kullanır. Siz oyunu HDMI'dan, gecikmesiz oynam
 altyazı metni bilgisayardan çıkmaz. Hız bilgisayarınıza bağlıdır; ekran kartı ya da Apple Silicon olan bir bilgisayarda
 7-8 milyar parametreli bir model (ör. Qwen 2.5 7B) bir altyazıyı genellikle bir iki saniyede çevirir. Model yanıt
 vermezse o satır her zamanki ücretsiz çeviriyle gelir.
+
+Ekran kartınıza göre hangi modelin (Gemma 4) seçileceği, PolyStrata ve LM Studio ile büyük modeli küçük kartta
+çalıştırma ve sansürsüz çeviri için hazır Ek talimat: [docs/yerel-model.md](docs/yerel-model.md) (topluluk rehberi).
 
 **Ollama ile**
 
@@ -294,12 +300,13 @@ On Windows, if SmartScreen appears, choose **More info › Run anyway**.
 **Local AI translation:** in **Settings › Translation** choose **Local model** to translate with a model running on your
 own computer through [Ollama](https://ollama.com) (`ollama pull qwen2.5:7b`, address `http://127.0.0.1:11434/v1`) or
 [LM Studio](https://lmstudio.ai) (local server, `http://localhost:1234/v1`). No key, quota or cost, and subtitle text
-stays on your computer; **Test connection** checks the server and the model.
+stays on your computer; **Test connection** checks the server and the model. Which model fits your graphics card
+(community guide, Turkish): [docs/yerel-model.md](docs/yerel-model.md).
 
 **Shortcuts** (while translating, even with CouchSubs in the background): on Windows **Num 9** or **Ctrl+Shift+9**
 translates the screen; Num 1–3, 5, 0, 7 and 8 also work as Ctrl+Shift+1–3, 5, 0, 7 and 8, so laptops without a numeric
-keypad can use them. Windows users can change the keys in **Settings › Keyboard shortcuts**. On a Mac: **⌥⌘T**
-translates the screen, **⌥⌘L** toggles click-through.
+keypad can use them (on a Mac the same keys with **⌃⇧**). The keys can be changed in **Settings › Keyboard shortcuts**
+on Windows and Mac. Macs upgraded from an earlier version keep **⌥⌘T** and **⌥⌘L** as the second keys.
 
 Copyright (C) 2026 Sinan Yorulmaz. Licensed under the [GNU AGPL-3.0](LICENSE) (forks must keep this notice, see
 [NOTICE](NOTICE)); third-party components are listed in

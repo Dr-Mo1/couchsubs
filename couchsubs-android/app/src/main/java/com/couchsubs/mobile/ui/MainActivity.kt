@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
@@ -20,12 +21,16 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.couchsubs.mobile.Services
 import com.couchsubs.mobile.account.Telemetry
+import com.couchsubs.mobile.promo.PromoController
 import com.couchsubs.mobile.service.LiveState
 import com.couchsubs.mobile.service.TranslationService
 import com.couchsubs.mobile.settings.SubtitleTarget
@@ -77,14 +82,23 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge(SystemBarStyle.dark(Color.TRANSPARENT), SystemBarStyle.dark(Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
         val settings = Services.settings
+        // Tanıtım popup'ı: uygulama ön plana her geldiğinde (soğuk açılışta hemen, sonra en çok günde bir) promo.json'a
+        // arka planda bakılır; ağ hatası sessizdir. Kurulum ya da ilk tur bitmediyse bu açılışta hazırlanmaz.
+        lifecycle.addObserver(androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_START)
+                PromoController.refresh(applicationContext, Services.scope, setupDone = Routes.next() == Routes.MAIN && settings.tourShown)
+        })
         setContent {
             CouchSubsTheme {
                 val navigation = rememberNavController()
+                val currentEntry by navigation.currentBackStackEntryAsState()
                 val status by LiveState.status.collectAsState()
                 LaunchedEffect(status.running) {
                     if (status.running && settings.keepScreenOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 }
+                // "Arka planda sürdür": çeviri sürerken uygulamadan çıkınca küçük pencere açılır (Android 12+'da sistem açar).
+                LaunchedEffect(status.running) { BackgroundPip.update(this@MainActivity, BackgroundPip.wanted(this@MainActivity, status)) }
                 // Masaüstündeki gibi: uygulama açılınca ve TV her bağlandığında TV'deki CouchSubs sürümüne bakılır;
                 // eskiyse ana ekran "TV uygulamasını güncelle" önerir.
                 val tvConnected = status.connectedTvs > 0
@@ -158,14 +172,15 @@ class MainActivity : ComponentActivity() {
                                 TvAppUpdate.pending = tv
                                 navigation.navigate(Routes.TV_INSTALL)
                             },
+                            onHome = currentEntry?.destination?.route == Routes.MAIN,
                         )
                     }
                     composable(Routes.PACKS) {
-                        PacksScreen(onBack = { navigation.popBackStack() }, packInUse = status.packInUse)
+                        PacksScreen(onBack = { pop(navigation) }, packInUse = status.packInUse)
                     }
                     composable(Routes.PROFILE) {
                         ProfileScreen(
-                            onBack = { navigation.popBackStack() },
+                            onBack = { pop(navigation) },
                             onSettings = { navigation.navigate(Routes.SETTINGS) },
                             onPairing = { pairing(navigation) },
                             onTarget = { navigation.navigate(Routes.TARGET) },
@@ -173,22 +188,48 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     composable(Routes.SETTINGS) {
-                        SettingsScreen(onBack = { navigation.popBackStack() }, onPacks = { navigation.navigate(Routes.PACKS) },
+                        SettingsScreen(onBack = { pop(navigation) }, onPacks = { navigation.navigate(Routes.PACKS) },
                             onTarget = { navigation.navigate(Routes.TARGET) }, onPairing = { pairing(navigation) },
                             onTvInstall = { navigation.navigate(Routes.TV_INSTALL) },
                             onPlatform = { navigation.navigate(Routes.PLATFORM) }, onDemo = { startDemo(navigation) })
                     }
-                    composable(Routes.HISTORY) { HistoryScreen(onBack = { navigation.popBackStack() }) }
+                    composable(Routes.HISTORY) { HistoryScreen(onBack = { pop(navigation) }) }
                     composable(Routes.TV_INSTALL) {
                         // Kurulum bitince "Ana ekrana geç": kurulumun 3. adımından gelindiyse kurulum biter (TvAppUpdate.installed).
-                        TvInstallScreen(onBack = { navigation.popBackStack() }) {
+                        TvInstallScreen(onBack = { pop(navigation) }) {
                             if (Routes.next() == Routes.MAIN) navigation.navigate(Routes.MAIN) { popUpTo(0) { inclusive = true } }
-                            else navigation.popBackStack()
+                            else pop(navigation)
                         }
                     }
                 }
+                // TV'nin eşleştirme isteği: onay penceresi ve her ekranın üstünde onay satırı (iPhone ile aynı).
+                TvPairingPrompt(status.pairing)
+                // Küçük pencerede (Resim içinde resim) yalnız oyun görüntüsü ve canlı altyazı; gezinme yığını altta durur.
+                if (inPip) PipSubtitleView(status)
             }
         }
+    }
+
+    /** Küçük pencerede (Resim içinde resim) mi; Compose içeriği buna göre çizilir. */
+    private var inPip by mutableStateOf(false)
+
+    /** Öne gelen ekran, gösterilemeyen (ya da arka plandayken gelen) eşleştirme isteğini yeniden gösterir. */
+    override fun onResume() {
+        super.onResume()
+        TranslationService.syncPairing()
+        // Profil'de "Arka planda sürdür" değişmiş olabilir.
+        BackgroundPip.update(this, BackgroundPip.wanted(this, LiveState.status.value))
+    }
+
+    /** Android 11 ve öncesi: ana ekrana dönülürken küçük pencere burada açılır. */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        BackgroundPip.onUserLeave(this, BackgroundPip.wanted(this, LiveState.status.value))
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        inPip = isInPictureInPictureMode
     }
 
     /**
@@ -203,15 +244,24 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (next == Routes.MAIN && navigation.previousBackStackEntry != null) {
-            navigation.popBackStack()
+            pop(navigation)
             return
         }
         navigation.navigate(next) { popUpTo(0) { inclusive = true } }
     }
 
+    /**
+     * Bir ekran geri döner; yığında önceki ekran yoksa hiçbir şey yapmaz. Kapanma animasyonu sürerken geri düğmesine
+     * ikinci kez dokunulunca düz `popBackStack()` ana ekranı da yığından atar, ekran boş kalırdı (iPhone'daki
+     * `Route` yığınının `pop`'uyla aynı kural).
+     */
+    private fun pop(navigation: NavHostController) {
+        if (navigation.previousBackStackEntry != null) navigation.popBackStack()
+    }
+
     /** Ana ekrandan açılmış adımda geri düğmesi; kurulumda (yığında önceki ekran yok) düğme görünmez. */
     private fun back(navigation: NavHostController): (() -> Unit)? =
-        if (navigation.previousBackStackEntry != null) ({ navigation.popBackStack() }) else null
+        if (navigation.previousBackStackEntry != null) ({ pop(navigation) }) else null
 
     /** Kurulumda (yığında önceki ekran yok) "Şimdilik geç": PSN ve PS5 adımları atlanır, PS5'siz ana ekrana geçilir. */
     private fun skip(navigation: NavHostController): (() -> Unit)? =
@@ -250,6 +300,7 @@ class MainActivity : ComponentActivity() {
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         TranslationService.start(this)
+        // Yalnız "Bu telefonda" seçiliyken kendiliğinden açılır; "İkisi de"de "Telefonda göster" düğmesiyle (iPhone ile aynı).
         if (Services.settings.target == SubtitleTarget.PHONE) startActivity(Intent(this, PhoneSubtitleActivity::class.java))
     }
 }

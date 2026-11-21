@@ -5,6 +5,8 @@ using System.Diagnostics;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using Hyperlink = System.Windows.Documents.Hyperlink;
+using Run = System.Windows.Documents.Run;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using CouchSubs.App.Controls;
@@ -17,6 +19,8 @@ namespace CouchSubs.App.Views;
 public partial class MainView : UserControl
 {
     private readonly AppController controller;
+    private string? notesVersion;
+    private bool notesUnavailable;
     // Çeviri sürerken PS5 ve TV bağlanamıyorsa güvenlik duvarı kartı önerilir.
     private readonly DispatcherTimer connectionWatch = new() { Interval = TimeSpan.FromSeconds(5) };
     /// <summary>Canlı altyazı karosu yalnız bu oturumun satırlarını gösterir (önceki oturumlar Geçmiş'te).</summary>
@@ -33,11 +37,14 @@ public partial class MainView : UserControl
         controller.PropertyChanged += OnChanged;
         connectionWatch.Tick += async (_, _) => await controller.CheckConnectionsAsync();
         Loaded += (_, _) => connectionWatch.Start();
+        Services.CrashWatch.Changed += OnCrashChanged;
         Unloaded += (_, _) =>
         {
             controller.PropertyChanged -= OnChanged;
+            Services.CrashWatch.Changed -= OnCrashChanged;
             connectionWatch.Stop();
         };
+        ShowCrash();
         Refresh();
         ShowTiles();
         ShowUpdate();
@@ -49,11 +56,12 @@ public partial class MainView : UserControl
     private void OnChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(AppController.IsRunning) or nameof(AppController.TranslatorStatus) or nameof(AppController.ModelInstalled)
-            or nameof(AppController.OnlineIssue) or nameof(AppController.CanStart) or nameof(AppController.IsStarting))
+            or nameof(AppController.OnlineIssue) or nameof(AppController.CanStart) or nameof(AppController.IsStarting)
+            or nameof(AppController.DemoMode))
             Refresh();
         if (e.PropertyName is nameof(AppController.Settings) or nameof(AppController.InstalledPacks))
             ShowTiles();
-        if (e.PropertyName is nameof(AppController.IsRunning) or nameof(AppController.PlayedGame) or nameof(AppController.AskingGame)
+        if (e.PropertyName is nameof(AppController.IsRunning) or nameof(AppController.DemoMode) or nameof(AppController.PlayedGame) or nameof(AppController.AskingGame)
             or nameof(AppController.AreaProfileGame) or nameof(AppController.OfferedAreaProfileGame))
             ShowGame();
         if (e.PropertyName is nameof(AppController.IsRunning) && controller.IsRunning)
@@ -67,9 +75,39 @@ public partial class MainView : UserControl
             ShowUpdate();
     }
 
+    /// <summary>Kayıt arka planda hazırlanır; hazır olunca arayüz iş parçacığında gösterilir.</summary>
+    private void OnCrashChanged() => Dispatcher.BeginInvoke(ShowCrash);
+
+    /// <summary>Önceki çalışma yerel bir hatayla kapandıysa bir kez bildirilir (sonraki açılışta yinelenmez).</summary>
+    private void ShowCrash()
+    {
+        var show = Services.CrashWatch.Pending is not null;
+        CrashCard.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (show) Services.CrashWatch.MarkShown();
+    }
+
+    private void OnShowCrash(object sender, RoutedEventArgs e) => Services.CrashWatch.ShowInExplorer();
+
+    private void OnCopyCrash(object sender, RoutedEventArgs e)
+    {
+        if (Services.CrashWatch.CopySummary()) CrashCopyButton.Content = Localizer.Current["Copied"];
+    }
+
+    private void OnDismissCrash(object sender, RoutedEventArgs e)
+    {
+        Services.CrashWatch.Dismiss();
+        ShowCrash();
+    }
+
     private void ShowUpdate()
     {
         var text = Localizer.Current;
+        if (notesVersion is not null && notesVersion != controller.UpdateVersion)
+        {
+            UpdateNotes.IsExpanded = false;
+            UpdateNotesText.Inlines.Clear();
+            notesVersion = null;
+        }
         UpdateCard.Visibility = controller.UpdateVersion is null ? Visibility.Collapsed : Visibility.Visible;
         UpdateTitle.Text = text["A new version of CouchSubs is available: %@"].Replace("%@", controller.UpdateVersion ?? "");
         UpdateButton.Content = text[controller.CanUpdateItself ? "Update now" : "Download"];
@@ -78,6 +116,32 @@ public partial class MainView : UserControl
         UpdateBar.Value = controller.UpdateProgress;
         UpdateErrorText.Text = controller.UpdateError ?? "";
         UpdateErrorText.Visibility = controller.UpdateError is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private async void OnUpdateNotesExpanded(object sender, RoutedEventArgs e)
+    {
+        if (controller.UpdateVersion is not { } version || (notesVersion == version && !notesUnavailable)) return;
+        notesVersion = version;
+        notesUnavailable = false;
+        UpdateNotesText.Text = Localizer.Current["Loading release notes…"];
+        var notes = await controller.LoadUpdateNotesAsync(version);
+        if (controller.UpdateVersion != version || notesVersion != version) return;
+        UpdateNotesText.Inlines.Clear();
+        foreach (var note in notes)
+        {
+            var run = new Run(note.Text);
+            if (note.Bold) run.FontWeight = FontWeights.SemiBold;
+            if (note.Link is not { } url) UpdateNotesText.Inlines.Add(run);
+            else
+            {
+                var link = new Hyperlink(run) { NavigateUri = url };
+                link.SetResourceReference(Hyperlink.ForegroundProperty, "accentTextBrush");
+                link.RequestNavigate += (_, args) => { controller.OpenInBrowser(args.Uri); args.Handled = true; };
+                UpdateNotesText.Inlines.Add(link);
+            }
+        }
+        notesUnavailable = notes.Count == 0;
+        if (notesUnavailable) UpdateNotesText.Text = Localizer.Current["Release notes are unavailable."];
     }
 
     /// <summary>
@@ -90,7 +154,9 @@ public partial class MainView : UserControl
         var settings = controller.Settings;
         ShowScreenKeys(settings);
         EngineText.Text = settings.Engine == TranslationEngine.Free ? text["Free"] : settings.Engine.DisplayName();
-        var packs = controller.InstalledPacks.Count;
+        PictureSourceText.Text = controller.PictureSourceTitle ?? "";
+        PictureSourceRow.Visibility = controller.PictureSourceTitle is null ? Visibility.Collapsed : Visibility.Visible;
+        var packs = GameCatalog.PackShelf(controller.InstalledPacks).Count;
         var active = settings.GamePacks && settings.SourceLanguage == "en" && settings.TargetLanguage == "tr" && packs > 0;
         PackTile.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
         PackText.Text = text.Format("Game packs are on · %lld games translated in advance", packs);
@@ -134,11 +200,15 @@ public partial class MainView : UserControl
     private void Refresh()
     {
         var running = controller.IsRunning;
-        Toggle.Style = (Style)FindResource(running ? "DangerButton" : "PrimaryButton");
-        ToggleGlyph.Text = running ? Glyphs.Stop : Glyphs.Play;
-        ToggleText.Text = Localizer.Current[running ? "Stop translating" : "Start translating"];
+        // Deneme modunda düğme "Deneme modundan çık" olur; durum karosu "Deneme modu · Örnek görüntüler" yazar.
+        var demo = controller.DemoMode;
+        Toggle.Style = (Style)FindResource(running || demo ? "DangerButton" : "PrimaryButton");
+        ToggleGlyph.Text = demo ? Glyphs.Cancel : running ? Glyphs.Stop : Glyphs.Play;
+        ToggleText.Text = Localizer.Current[demo ? "Exit demo mode" : running ? "Stop translating" : "Start translating"];
         // Altyazının gideceği bir yer yoksa (TV seçili ama bağlı değil) çeviri başlatılamaz.
-        Toggle.IsEnabled = !controller.IsStarting && (running || controller.CanStart);
+        Toggle.IsEnabled = !controller.IsStarting && (running || demo || controller.CanStart);
+        ConsoleStatus.Glyph = demo ? Glyphs.Play : Glyphs.Controller;
+        DemoButton.Visibility = !controller.CanStart && !running && !demo ? Visibility.Visible : Visibility.Collapsed;
         ModelCard.Visibility = controller.ModelInstalled ? Visibility.Collapsed : Visibility.Visible;
         EngineCard.Visibility = controller.TranslatorStatus == TranslatorStatus.EngineFailed ? Visibility.Visible : Visibility.Collapsed;
         // Çevrimiçi motor çeviremiyor; satırlar bu arada cihaz üstü modelle geliyor.
@@ -161,7 +231,8 @@ public partial class MainView : UserControl
         var starting = !controller.IsRunning;
         try
         {
-            if (starting) await controller.StartAsync(); else controller.Stop();
+            if (controller.DemoMode) controller.ExitDemo();
+            else if (starting) await controller.StartAsync(); else controller.Stop();
         }
         catch (Exception error)
         {
@@ -174,6 +245,9 @@ public partial class MainView : UserControl
 
     private void OnTranslationSettings(object sender, RoutedEventArgs e) =>
         SettingsWindow.Open(Window.GetWindow(this), controller, SettingsSection.Translation);
+
+    private void OnPictureSourceSettings(object sender, RoutedEventArgs e) =>
+        SettingsWindow.Open(Window.GetWindow(this), controller, SettingsSection.PictureSource);
 
     /// <summary>Yeni canlı satır 0,18 sn'de belirir; Windows'ta animasyonlar kapalıysa geçiş yok (docs/TASARIM.md).</summary>
     private void FadeInLiveLine()
@@ -215,10 +289,16 @@ public partial class MainView : UserControl
         catch (Exception error) { StartupGuard.Log("Deneme altyazısı gönderilemedi", error); }
     }
 
-    /// <summary>TV'siz kurulmuş uygulamada TV'yi sonradan bağlamak için sihirbazın TV adımı açılır.</summary>
+    /// <summary>TV'siz kurulmuş uygulamada TV'yi sonradan bağlamak ya da TV'yi değiştirmek için sihirbazın TV adımı açılır.</summary>
     private void OnConnectTv(object sender, RoutedEventArgs e) => controller.Step = OnboardingStep.Tv;
 
     /// <summary>TV adımı açılır (kurulum kartı orada görünür) ve TV'ye yeniden bakılır.</summary>
+    /// <summary>TV uygulaması bağlı değil: bekçi TV uygulamasını beklemeden yeniden açmaya çalışır.</summary>
+    private void OnRetryTvOpen(object sender, RoutedEventArgs e) => controller.RetryTvOpen();
+    private void OnLinkXbox(object sender, RoutedEventArgs e) => controller.LinkXbox();
+
+    private void OnReconnect(object sender, RoutedEventArgs e) => controller.Reconnect();
+
     private async void OnReinstallTvApp(object sender, RoutedEventArgs e)
     {
         controller.Step = OnboardingStep.Tv;
@@ -263,7 +343,8 @@ public partial class MainView : UserControl
     private void ShowGame()
     {
         var text = Localizer.Current;
-        GameCard.Visibility = controller.IsRunning ? Visibility.Visible : Visibility.Collapsed;
+        // Deneme karelerinde oyun yoktur: oyun karosu gösterilmez.
+        GameCard.Visibility = controller.IsRunning && !controller.DemoMode ? Visibility.Visible : Visibility.Collapsed;
         var asking = controller.AskingGame;
         GameRow.Visibility = asking ? Visibility.Collapsed : Visibility.Visible;
         GameAsk.Visibility = asking ? Visibility.Visible : Visibility.Collapsed;

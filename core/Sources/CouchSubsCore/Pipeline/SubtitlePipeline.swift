@@ -89,6 +89,7 @@ public final class SubtitlePipeline {
     }
 
     private let reader: TextReader
+    private let readQueue: ReadQueue
     private let translator: TextTranslator
     private let server: SubtitleSending
     private let now: () -> Int
@@ -110,9 +111,25 @@ public final class SubtitlePipeline {
     private var pairs: [(number: Int, source: String, translation: String?)] = []
     /// Okuma durdurulunca artar; önceki oturumdan dönen çeviriler gösterilmez.
     private var session = 0
-    /// Son okunan satırlar; kare değişmediyse yeniden okunmaz, bunlar kullanılır.
-    private var lastReading = Reading.empty
+    /// Son ham OCR. Gri görüntü izi aynı kalırken satırların altındaki panel rengi değişebilir.
+    private var lastOcrReading = Reading.empty
+    private var lastPanelReading = Reading.empty
     private var stickyRows = StickyRows()
+    /// Bu oturumda kesin altyazının okunduğu yükseklikler: oradaki kısa satır sahne yazısı sayılmaz (`SceneText`).
+    private var subtitleBand = SubtitleBand()
+    /// Günlüğe yazılmış son sahne yazıları (her karede yeniden yazılmasın).
+    private var loggedSceneText: [String] = []
+    private var mission = MissionLine()
+    /// Görev satırının bölgesi değişti (nil: görev kalktı). Görev altyazıya girmez; bölgesi "auto-mission" ek alanı olarak
+    /// kendi yerinde ve özgün stilinde gösterilir (bkz. `MissionLine`).
+    public var onMissionChanged: ((CropRegion?) -> Void)?
+    private var notices = ScreenNotices()
+    /// Ekranın kenarındaki bildirim kartlarının alanları değişti (boş: hiç yok). Bildirim altyazıya girmez; alanları
+    /// "auto-notice-<n>" ek alanı olarak kendi yerinde ve özgün stilinde gösterilir (bkz. `ScreenNotices`).
+    public var onNoticesChanged: (([ExtraArea]) -> Void)?
+    /// Altyazının son okunan satırları ve alanı; ekran yazısı okuyucuları bunlarla altyazıyı dışlar (bkz. `SubtitleEcho`).
+    /// Uygulama `SubtitleEcho.shared` verir.
+    public var echo: SubtitleEcho?
     /// Son yazı tanımanın süresi (ms); kare değişmeyip okuma yeniden kullanılınca da o okumanın süresi geçerlidir.
     private var lastReadMs: Int?
     /// İşlenen karenin okunması (satır kararlı olunca isteğe geçer).
@@ -141,6 +158,8 @@ public final class SubtitlePipeline {
     /// Hedef dil Türkçe: yüksek güvenle Türkçe olan satır (`TurkishText.isSure`) çevirmene gönderilmez (#289). Uygulama
     /// hedef dil Türkçe değilse kapatır.
     public var skipsTurkish = true
+    /// Yalnız GTA 6 altyazı renginin üstündeki OCR satırlarını oku.
+    public var watchSubtitleBackground = false
     /// Hiçbir pakette bulunmayan kararlı satır (ortak havuz için).
     public var onPackMiss: ((String) -> Void)?
     /// Son gösterilen çevirinin nereden geldiği: "paket" ya da "motor" (günlük ve sayım için).
@@ -160,9 +179,11 @@ public final class SubtitlePipeline {
 
     /// `scheduler`: varsayılanı her kareyi okur; uygulama gereksiz okumaları atlayan planı verir.
     /// `clock`: milisaniye saati; testlerde sahtesi verilir.
+    /// `readQueue`: okumaların sırası (süreç genelinde tek); testlerde kısa süreli bir sıra verilir.
     public init(reader: TextReader, translator: TextTranslator, server: SubtitleSending, scheduler: ReadScheduler = .always,
-         clock: @escaping () -> Int = SubtitleStabilizer.uptimeMs) {
+         clock: @escaping () -> Int = SubtitleStabilizer.uptimeMs, readQueue: ReadQueue = .shared) {
         self.reader = reader
+        self.readQueue = readQueue
         self.translator = translator
         self.server = server
         self.scheduler = scheduler
@@ -192,36 +213,78 @@ public final class SubtitlePipeline {
         let startedSession = session
         // Yazı tanıma uzun sürebilir; arayüz takılmasın diye ana iş parçacığının dışında yapılır.
         let reader = self.reader
+        let watchSubtitleBackground = self.watchSubtitleBackground
         let (area, signature) = await Task.detached(priority: .userInitiated) {
             let area = RegionCropper.crop(frame, to: region)
             return (area, RegionCropper.signature(of: area))
         }.value
         guard session == startedSession else { return }
-        switch scheduler.plan(signature: signature) {
-        case .reuse:
-            break
-        case .read(let deep):
+        var visible = lastOcrReading
+        var panelLeft = false
+        var plan = scheduler.plan(signature: signature)
+        if case .reuse = plan, watchSubtitleBackground {
+            let cached = lastOcrReading
+            if cached.lines.contains(where: { $0.box != nil }) {
+                visible = await Task.detached(priority: .userInitiated) {
+                    SubtitleBackground.filter(cached, in: area)
+                }.value
+                guard session == startedSession else { return }
+                // Panel yeni bir kutunun altına geldiyse eski HUD yazısını diyalog sanma.
+                if !visible.lines.allSatisfy(lastPanelReading.lines.contains) { plan = .read(deep: false) }
+                // Aynı kutular yeniden sınandı ve panel yoksa bu boşluk bir OCR kaçağı değil.
+                panelLeft = !lastPanelReading.lines.isEmpty && visible.lines.isEmpty
+            } else {
+                visible = .empty
+            }
+        }
+        if case .read(let deep) = plan {
             let started = now()
-            let result = await Task.detached(priority: .userInitiated) {
-                Result { try reader.readLines(area, deep: deep) }
-            }.value
+            // Okuma kendi sırasında (`ReadQueue`) yapılır, Swift havuzunu tutmaz; takılırsa süre dolunca kare atlanır (#507).
+            let result: Result<(ocr: Reading, visible: Reading), Error>
+            do {
+                result = .success(try await readQueue.run(priority: .subtitle, detail: ReadQueue.detail("altyazı", area, deep: deep)) {
+                    let ocr = try reader.readLines(area, deep: deep)
+                    return (ocr, watchSubtitleBackground ? SubtitleBackground.filter(ocr, in: area) : ocr)
+                })
+            } catch {
+                result = .failure(error)
+                if case ReadQueueError.timedOut(let ms) = error { log("okuma \(ms) ms'de bitmedi; kare atlandı") }
+            }
             guard session == startedSession else {
                 log("eski okuma \(now() - started) ms sonra bitti, hat sıfırlanmıştı; atıldı")
                 return
             }
             lastReadMs = now() - started
-            lastReading = (try? result.get()) ?? .empty
+            let observations = try? result.get()
+            lastOcrReading = observations?.ocr ?? .empty
+            visible = observations?.visible ?? .empty
             onReadResult?(result.failure)
-            scheduler.record(lastReading.text)
+            scheduler.record(visible.text)
         }
+        lastPanelReading = watchSubtitleBackground ? visible : .empty
         // Kumanda ipuçları ("R2 Swing") altyazı değildir; çevrilmez, yeri de altyazının yerine katılmaz.
         // Yazı tanımanın uydurduğu sözcük çöpleri ("ou$3e") de çevirmene gitmez.
         // Alandaki menü ve köşe göstergeleri de altyazı değildir; yalnız altyazı bloğu çevrilir ve kutusu ona göre olur.
         let place = TextBox(left: region.left, top: region.top, right: region.right, bottom: region.bottom)
         // Konuşma değişirken sabit duran görev/HUD satırı ("Get in the sea plane", GTA 6) altyazı bloğuna katılmaz.
-        let rows = stickyRows.filter(lastReading.withoutButtonPrompts().withoutOcrNoise().joiningRows(), at: now())
+        let rows = stickyRows.filter(visible.withoutButtonPrompts().withoutOcrNoise().joiningRows(), at: now())
         for row in stickyRows.newlySticky { log("sabit satır: \(SubtitleLog.excerpt(row)) görev/HUD yazısı sayıldı, çevrilmiyor") }
-        let reading = rows.subtitleBlock(in: place)
+        if mission.observe(stickyRows.removed, area: place, at: now()) {
+            log(mission.region == nil ? "görev satırı kalktı" : "görev satırı kendi yerinde gösteriliyor")
+            onMissionChanged?(mission.region)
+        }
+        var edge: [Reading] = []
+        let reading = rows.subtitleBlock(in: place, band: subtitleBand, dropped: { [weak self] block, reason in
+            self?.logSceneText(block.text, reason)
+        }, notices: { edge.append($0.placed(in: place)) })
+        // Kenardaki bildirim kartı altyazının yerinde (ekranın ortasında) değil, kendi yerinde çevrilir.
+        if notices.observe(edge, at: now()) {
+            log(notices.areas.isEmpty ? "kenar bildirimi kalktı" : "kenar bildirimi kendi yerinde gösteriliyor (\(notices.areas.count))")
+            onNoticesChanged?(notices.areas)
+        }
+        subtitleBand.record(reading, in: place)
+        // Ekran yazısı okuyucuları altyazıyı ikinci kez çizmesin (bkz. `SubtitleEcho`).
+        echo?.record(reading, region: region)
         currentRead = ReadInfo(capturedAt: captured, ocrMs: lastReadMs, confidence: reading.confidence)
         let box = reading.box?.placed(in: place).centeredOnScreen()
         if !sawText, !reading.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -229,7 +292,7 @@ public final class SubtitlePipeline {
             log("ilk yazı: oturum başından \(now() - sessionStart) ms sonra \(SubtitleLog.excerpt(reading.text))")
         }
         // Bölge izi ve satırın yeri: okuma boş dönse de satırın yeri değişmediyse satır silinmez (parlak zemin).
-        var action = stabilizer.feed(reading.text, signature: signature, box: reading.box)
+        var action = stabilizer.feed(reading.text, signature: panelLeft ? nil : signature, box: reading.box)
         // Ekranda duran kötü yeniden okuma her karede not edilir; günlüğe bir kez yazılır.
         if let note = stabilizer.note, note != lastNote {
             lastNote = note
@@ -644,13 +707,25 @@ public final class SubtitlePipeline {
     /// Okumanın hemen başlaması için modelleri önceden yükler; ilk okuma yoksa saniyelerce sürer.
     public func warmUp() {
         let reader = self.reader
+        let readQueue = self.readQueue
         Task.detached(priority: .utility) {
             let context = CGContext(data: nil, width: 64, height: 32, bitsPerComponent: 8, bytesPerRow: 0,
                                     space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-            if let image = context?.makeImage() { _ = try? reader.read(image) }
+            if let image = context?.makeImage() {
+                _ = try? await readQueue.run(priority: .background, detail: "ısınma (ilk okuma, model yükleniyor)") { try reader.read(image) }
+            }
         }
         let translator = self.translator
         Task { await translator.warmUp() }
+    }
+
+    /// Sahne yazısı sayılıp atılan blok günlüğe nedeniyle bir kez yazılır (GitHub #822: atılan altyazı günlükte görünsün).
+    private func logSceneText(_ text: String, _ reason: String) {
+        let key = text + "|" + reason
+        guard !loggedSceneText.contains(key) else { return }
+        loggedSceneText.append(key)
+        if loggedSceneText.count > 20 { loggedSceneText.removeFirst() }
+        log("sahne yazısı: \(SubtitleLog.excerpt(text)) altyazı sayılmadı (\(reason))")
     }
 
     /// Okuma durunca TV'deki son altyazıyı kaldırır.
@@ -669,10 +744,16 @@ public final class SubtitlePipeline {
         // Apple'ın çevirisi görev iptaline uyar; süren çeviri beklenmeden bırakılır.
         work?.cancel()
         pairs.removeAll()
-        lastReading = .empty
+        lastOcrReading = .empty
+        lastPanelReading = .empty
         lastReadMs = nil
         scheduler.reset()
         stickyRows.reset()
+        subtitleBand.reset()
+        loggedSceneText.removeAll()
+        mission.reset()
+        notices.reset()
+        echo?.reset()
         if stabilizer.reset() == .clear { server.clear() }
     }
 }

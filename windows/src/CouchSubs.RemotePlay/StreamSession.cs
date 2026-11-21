@@ -7,50 +7,289 @@ using CouchSubs.Core;
 
 namespace CouchSubs.RemotePlay;
 
-/// <summary>Bağlantı koptuğunda yeniden deneme aralıkları: 2, 4, 8, 16, en çok 30 sn.</summary>
+/// <summary>
+/// Son PS5 aramasının sonucu ve "bulunamadı" etiketi (Mac/iPhone ve Android'deki ConsoleSearchState ile aynı kural).
+/// Oturum ağ hatasıyla düşer ve PS5 son aramada da yanıt vermediyse neden "bulunamadı"dır. Eskiden aramanın sonucu PS5'e
+/// bağlanınca unutulmuyordu: arama yanıtı kaçıp "yine de bağlanılıyor" ile kurulan oturum saatlerce sürse de sonraki her
+/// kopma (görüntü bekçisininki dahil) "PS5 … adresinde bulunamadı" diye gösteriliyordu (X'te bildirim, iPad, 60-70 dk
+/// sonra). Art arda yanıtsız aramalarda bu cihazın ağ durumu günlüğe yazılır (bkz. <see cref="DeviceDiagnostics"/>).
+/// </summary>
+internal sealed class ConsoleSearchState
+{
+    /// <summary>İlk yanıtsız aramada ve sonra her bu kadar yanıtsız aramada bir tanı satırı yazılır.</summary>
+    public const int DiagnoseEvery = 5;
+
+    /// <summary>Son aramada PS5 yanıt verdi mi (ya da o aramadan sonra PS5'e bağlanıldı mı).</summary>
+    public bool Answered { get; private set; } = true;
+
+    /// <summary>Art arda yanıtsız arama sayısı.</summary>
+    public int Unanswered { get; private set; }
+
+    public void Reset()
+    {
+        Answered = true;
+        Unanswered = 0;
+    }
+
+    /// <returns>Tanı satırı yazılacaksa true.</returns>
+    public bool Searched(bool answered)
+    {
+        Answered = answered;
+        if (answered)
+        {
+            Unanswered = 0;
+            return false;
+        }
+        Unanswered++;
+        return Unanswered == 1 || Unanswered % DiagnoseEvery == 0;
+    }
+
+    /// <summary>Oturum bağlandı: PS5'e ulaşılıyor, sonraki kopma "bulunamadı" sayılmaz.</summary>
+    public void Connected()
+    {
+        Answered = true;
+        Unanswered = 0;
+    }
+
+    public DisconnectReason Classify(DisconnectReason reason, string host) => StreamSession.Classify(reason, Answered, host);
+}
+
+/// <summary>
+/// PS5 aramaya yanıt vermeyince bu cihazın kendi ağ durumu (Mac/iPhone ve Android'deki DeviceDiagnostics ile aynı satır):
+/// açık tanıtıcı sayısı ve IPv4 ağları. "PS5 ağdan düştü" ile "bu cihaz PS5'e paket gönderemiyor" günlükten ayrılsın.
+/// Windows'ta süreç başına tanıtıcı sınırı yoktur; sınır yerine "-" yazılır.
+/// </summary>
+internal static class DeviceDiagnostics
+{
+    public static string Line()
+    {
+        int handles;
+        try { handles = System.Diagnostics.Process.GetCurrentProcess().HandleCount; }
+        catch { handles = -1; }
+        return Describe(handles, null, Ipv4Networks());
+    }
+
+    public static string Describe(int openFiles, int? limit, IReadOnlyList<string> networks) =>
+        $"açık tanıtıcı {openFiles}/{(limit is { } value ? value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "-")}; "
+        + (networks.Count == 0 ? "IPv4 ağı yok" : "IPv4 " + string.Join(", ", networks));
+
+    private static List<string> Ipv4Networks()
+    {
+        var result = new List<string>();
+        try
+        {
+            foreach (var adapter in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (adapter.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up
+                    || adapter.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback) continue;
+                foreach (var unicast in adapter.GetIPProperties().UnicastAddresses)
+                {
+                    if (unicast.Address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) continue;
+                    result.Add($"{adapter.Name} {unicast.Address}/{unicast.PrefixLength}");
+                }
+            }
+        }
+        catch (Exception error) { result.Add($"okunamadı ({error.GetType().Name})"); }
+        return result;
+    }
+}
+
+/// <summary>
+/// Dinlenme modundaki PS5 uyandırılsın mı (Mac/iPhone ve Android'deki WakePolicy ile aynı kural). Yalnız kullanıcı çeviriyi
+/// başlattıktan sonra, PS5'e henüz bağlanılmamışken uyandırılır. Eskiden yeniden bağlanma döngüsü de uyandırıyordu: oyuncu
+/// PS5'i kapatınca (dinlenme modu) uygulama birkaç saniye sonra PS5'i yeniden açıp bağlanıyor, TV kapalıyken "PS5 bağlı"
+/// görünüyordu. Bu çeviride akış bir kez kurulduysa dinlenmedeki PS5'e dokunulmaz; açılınca bağlanılır.
+/// </summary>
+internal sealed class WakePolicy
+{
+    public enum Action
+    {
+        /// <summary>PS5 uyanık ya da aramaya yanıt vermedi: oturum açılmaya çalışılır.</summary>
+        Connect,
+        /// <summary>PS5 dinlenmede, çeviri yeni başladı: uyandırılır.</summary>
+        Wake,
+        /// <summary>PS5 dinlenmede ve bu çeviride zaten bağlanılmıştı (kullanıcı kapattı): açılması beklenir.</summary>
+        WaitUntilOn,
+    }
+
+    private bool hasStreamed;
+
+    /// <summary>Kullanıcı çeviriyi başlattı.</summary>
+    public void Reset() => hasStreamed = false;
+
+    /// <summary>PS5'e bağlanıldı.</summary>
+    public void Streamed() => hasStreamed = true;
+
+    /// <summary><paramref name="awake"/>: aramada PS5'in durumu (null: yanıt vermedi).</summary>
+    public Action Decide(bool? awake) => awake != false ? Action.Connect : hasStreamed ? Action.WaitUntilOn : Action.Wake;
+}
+
+/// <summary>
+/// Bağlantı koptuğunda yeniden deneme aralıkları: 2, 4, 8, 16, 32, en çok 60 sn (Mac ve Android'deki ReconnectPolicy ile
+/// aynı kural). Aralık bağlanınca hemen değil, oturum <see cref="StableAfter"/> kadar sürdükten sonra kapanınca baştan
+/// başlar. Eskiden her bağlanışta sıfırlanıyordu: PS5 oturumu açılıp birkaç saniyede düşürünce (ör. "açıldıktan 3-4 sn
+/// sonra kapanıyor") 2 sn sonra yeniden bağlanılıyor, PS5'te ikinci hesap durmadan girip çıkıyordu.
+///
+/// Akış sürerken kopan oturumdan sonra en az 8 sn beklenir; aralık 2 dk süren oturumdan sonra baştan başlar. Eskiden
+/// 60 sn yetiyordu ve en çok 30 sn beklenirdi: kablosuz ağ bozulunca oturumlar birer dakika sürüp düşüyor, her seferinde
+/// 2 sn sonra yeniden deneniyordu. Yeni oturum istekleri PS5'in eski oturumu bırakmasını beklemeden geldikçe PS5 30 sn ile
+/// birkaç dakika yanıt vermiyordu (GitHub #593). Bir ara 5 dk'ydı: üç dört dakikada bir kopan ağda bekleme 8, 16, 32,
+/// 60 sn diye büyüyüp 60 sn'de kalıyor, her kopma bir dakikadan uzun sürüyordu ("sürekli kopuyor").
+/// </summary>
 internal sealed class ReconnectPolicy
 {
+    public static readonly TimeSpan StableAfter = TimeSpan.FromMinutes(2);
+    public const int MaxDelay = 60;
+    /// <summary>Akış sürerken kopan oturumdan sonraki en kısa bekleme: 2 &lt;&lt; 2 = 8 sn.</summary>
+    public const int AfterDropAttempt = 2;
     private int attempt;
+    private long? connectedAt;
 
-    public int NextDelay()
+    /// <param name="inUse">Uzaktan Oynatma başka cihazda: sık denemek boşuna, en az 8 sn beklenir (8, 16, 32).</param>
+    public int NextDelay(bool inUse = false)
     {
-        var delay = Math.Min(30, 2 << attempt);
+        if (inUse) attempt = Math.Max(attempt, 2);
+        var delay = Math.Min(MaxDelay, 2 << attempt);
         attempt = Math.Min(attempt + 1, 5);
         return delay;
     }
 
-    public void Reset() => attempt = 0;
+    public void Reset()
+    {
+        attempt = 0;
+        connectedAt = null;
+    }
+
+    public void Connected(long nowMs) => connectedAt = nowMs;
+
+    /// <summary>Oturum kapandı: uzun sürdüyse aralık baştan başlar, kısa sürdüyse büyümeye devam eder. Bağlı oturum
+    /// kapandıysa PS5 eski oturumu bıraksın diye en az 8 sn beklenir.</summary>
+    public void Ended(long nowMs)
+    {
+        if (connectedAt is { } at)
+        {
+            if (nowMs - at >= (long)StableAfter.TotalMilliseconds) attempt = 0;
+            attempt = Math.Max(attempt, AfterDropAttempt);
+        }
+        connectedAt = null;
+    }
+}
+
+/// <summary>
+/// PS5'teki Uzaktan Oynatma çöktüyse (<see cref="DisconnectKind.ConsoleRemotePlayCrashed"/>) kaç kez yeniden denenir
+/// (Mac/iPhone ve Android'deki CrashRetryLimit ile aynı kural). PS5 tamamen kapatılıp açılmadan her oturum isteği aynı
+/// yanıtı alır; eskiden sonsuza kadar "Yeniden bağlanılıyor…" deneniyordu (GitHub #519). Art arda
+/// <see cref="MaxRetries"/> denemeden sonra durulur ve kullanıcıya PS5'i tamamen kapatıp açması söylenir. Sayaç çeviri
+/// başlayınca, ağ değişince ve bağlanınca sıfırlanır.
+/// </summary>
+internal sealed class CrashRetryLimit
+{
+    public const int MaxRetries = 2;
+
+    /// <summary>Art arda bildirilen çökme sayısı.</summary>
+    public int Crashes { get; private set; }
+
+    public void Reset() => Crashes = 0;
+
+    /// <summary>PS5 çöktü dedi: yeniden denenecekse true, durulacaksa false.</summary>
+    public bool Crashed() => ++Crashes <= MaxRetries;
+}
+
+/// <summary>
+/// Bağlantı sık kopuyorsa görüntü 720p'ye düşürülür (Mac ve Android'deki QualityFallback ile aynı kural).
+/// 1080p akış ~15 Mbit/sn, 720p ~10 Mbit/sn ister. Kablosuz ağda PS5 akışı birkaç dakikada bir kopuyor ya da görüntü
+/// takılıyordu (GitHub #388, #401); altyazı okumak için 720p yeterlidir. <see cref="Window"/> içinde
+/// <see cref="DropsToLower"/> kopma olursa bu çeviri boyunca 720p kullanılır.
+/// </summary>
+internal sealed class QualityFallback
+{
+    public static readonly TimeSpan Window = TimeSpan.FromMinutes(10);
+    public const int DropsToLower = 2;
+    private readonly Queue<long> drops = new();
+
+    /// <summary>Görüntü 720p'ye düşürüldü mü.</summary>
+    public bool Lowered { get; private set; }
+
+    /// <summary>Akış sürerken bağlantı koptu ya da görüntü takıldı. Bu kopmayla 720p'ye geçildiyse true.</summary>
+    public bool Dropped(long nowMs)
+    {
+        if (Lowered) return false;
+        drops.Enqueue(nowMs);
+        while (drops.Count > 0 && nowMs - drops.Peek() > (long)Window.TotalMilliseconds) drops.Dequeue();
+        if (drops.Count < DropsToLower) return false;
+        Lowered = true;
+        return true;
+    }
+
+    /// <summary>Kopma ağ kaynaklı mı (akış sürerken PS5 ile bağlantı gitti ya da görüntü kesildi). PS5'in reddi, başka
+    /// cihazda kullanım ya da durdurma sayılmaz: düşük çözünürlük bunlara çare değildir.</summary>
+    public static bool CountsAsDrop(DisconnectKind kind) => kind is DisconnectKind.Network or DisconnectKind.Other;
 }
 
 /// <summary>
 /// Bağlı oturumda PS5'ten görüntü gelmiyor mu (Mac'teki PictureWatchdog ve Android'deki eşi ile aynı kural).
-/// libchiaki bir karenin FEC onarımı tutmayınca PS5'ten bir kez yeni anahtar kare (IDR) ister ve o gelene kadar bütün
-/// kareleri atlar (enable_idr_on_fec_failure). İstenen IDR karesinin kendisi de bozuk gelirse yeniden istemez ("Video FEC
-/// failure, already waiting for requested IDR"): bağlantı açık kalır, ama bir daha hiç kare gelmez. Kablosuz ağda bu
-/// birkaç dakikada bir olur; altyazı duruyor, TV bağlı görünüyor ve ancak uygulamayı kapatıp açmak düzeltiyordu.
-/// Bağlıyken <see cref="StallAfter"/> boyunca hiç görüntü gelmezse oturum yeniden kurulur; yeni oturum anahtar kareyle başlar.
+/// libchiaki bir karenin FEC onarımı tutmayınca PS5'ten yeni anahtar kare (IDR) ister ve o gelene kadar bütün kareleri
+/// atlar (enable_idr_on_fec_failure). İstek ya da IDR karesi kaybolursa eskiden bir daha istenmiyordu: bağlantı açık
+/// kalıyor, ama bir daha hiç kare gelmiyordu. chiaki-stream-recovery.patch ile istek saniyede bir yinelenir. Bağlıyken
+/// görüntü <see cref="StallAfter"/> (oturumda henüz görüntü gelmediyse <see cref="FirstPictureAfter"/>) boyunca gelmezse
+/// oturum yine yeniden kurulur; yeni oturum anahtar kareyle başlar. <see cref="StallAfter"/> eskiden 8 sn'ydi: ağ birkaç
+/// saniye bozulunca IDR yinelenmeden oturum kapatılıyor, PS5 ardından 30 sn ile birkaç dakika yanıt vermiyordu (GitHub #593).
 /// </summary>
 internal sealed class PictureWatchdog
 {
-    /// <summary>IDR ile olağan toparlanma bir saniyeden kısa sürer; bundan uzun boşluk takılmadır.</summary>
-    public static readonly TimeSpan StallAfter = TimeSpan.FromSeconds(8);
+    /// <summary>Saniyede bir yinelenen IDR isteğine ve libchiaki'nin 5 sn'lik yeniden gönderme süresine yer kalır.</summary>
+    public static readonly TimeSpan StallAfter = TimeSpan.FromSeconds(15);
+    /// <summary>Bağlandıktan sonra ilk görüntü bu sürede gelmezse takılma sayılır.</summary>
+    public static readonly TimeSpan FirstPictureAfter = TimeSpan.FromSeconds(8);
     /// <summary>Yeniden bağlanırken ana ekranda "Yeniden bağlanılıyor… (…)" içinde görünen neden.</summary>
     public const string Reason = "no picture from the PS5";
 
     private readonly Lock gate = new();
     /// <summary>Bağlıyken son görüntünün (ya da bağlanmanın) anı (ms); bağlı değilken null.</summary>
     private long? since;
+    /// <summary>Bu oturumda görüntü geldi mi.</summary>
+    private bool hasPicture;
+    /// <summary>Oturumun bağlandığı an (ms) ve o andan beri gelen görüntü sayısı: kopma günlüğü için.</summary>
+    private long connectedAt;
+    private long pictures;
 
     /// <summary>Oturum bağlandı: süre bağlanma anından sayılır (ilk kare hiç gelmezse de yakalanır).</summary>
     public void Connected(long nowMs)
     {
-        lock (gate) since = nowMs;
+        lock (gate)
+        {
+            since = nowMs;
+            hasPicture = false;
+            connectedAt = nowMs;
+            pictures = 0;
+        }
     }
 
     /// <summary>Görüntü geldi (kare iş parçacığından).</summary>
     public void Picture(long nowMs)
     {
-        lock (gate) if (since is not null) since = nowMs;
+        lock (gate)
+        {
+            if (since is null) return;
+            since = nowMs;
+            hasPicture = true;
+            pictures++;
+        }
+    }
+
+    /// <summary>Kopma günlüğüne eklenen özet: oturum kaç saniye sürdü, kaç görüntü geldi, son görüntü kaç saniye önceydi.
+    /// Bağlı değilken null. Kopmanın nedenini ayırır: görüntü son ana kadar geliyorsa bağlantıyı PS5 ya da ağ kesmiştir;
+    /// saniyelerdir gelmiyorsa akış önce donmuştur.</summary>
+    public string? Summary(long nowMs)
+    {
+        lock (gate)
+        {
+            if (since is not { } last) return null;
+            var lasted = (nowMs - connectedAt) / 1000;
+            return hasPicture
+                ? $"oturum {lasted} sn sürdü, {pictures} görüntü geldi, sonuncusu {(nowMs - last) / 1000.0:0.0} sn önce"
+                : $"oturum {lasted} sn sürdü, hiç görüntü gelmedi";
+        }
     }
 
     /// <summary>Oturum kapandı ya da yeniden kuruluyor.</summary>
@@ -59,14 +298,15 @@ internal sealed class PictureWatchdog
         lock (gate) since = null;
     }
 
-    /// <summary>Bağlıyken <see cref="StallAfter"/>'dan uzun süredir görüntü yoksa boşluğun süresi; yoksa null.</summary>
+    /// <summary>Bağlıyken <see cref="StallAfter"/>'dan (oturumda henüz görüntü yoksa <see cref="FirstPictureAfter"/>'dan)
+    /// uzun süredir görüntü yoksa boşluğun süresi; yoksa null.</summary>
     public TimeSpan? Stalled(long nowMs)
     {
         lock (gate)
         {
             if (since is not { } last) return null;
             var gap = TimeSpan.FromMilliseconds(nowMs - last);
-            return gap >= StallAfter ? gap : null;
+            return gap >= (hasPicture ? StallAfter : FirstPictureAfter) ? gap : null;
         }
     }
 }
@@ -80,14 +320,22 @@ internal static class DisconnectReasons
         NativeMethods.QuitInUse => new(DisconnectKind.InUse),
         NativeMethods.QuitRefused => new(DisconnectKind.Refused),
         NativeMethods.QuitNetwork => new(DisconnectKind.Network),
+        NativeMethods.QuitRpCrashed => new(DisconnectKind.ConsoleRemotePlayCrashed),
+        NativeMethods.QuitConsoleClosed => new(DisconnectKind.ConsoleClosed, text ?? ""),
+        // PSN eşlemesinin reddi yeniden eşleme ister (eskiden TCP reddiyle aynı Refused'du).
+        NativeMethods.QuitPsnRegistFailed => new(DisconnectKind.RegistrationInvalid),
         _ => new(DisconnectKind.Other, text),
     };
 
     /// <summary>libchiaki'nin CHIAKI_QUIT_REASON_SESSION_REQUEST_UNKNOWN metni (yerel kütüphane CS_QUIT_OTHER ile verir).</summary>
     internal const string UnknownSessionRequest = "Unknown Session Request Error";
 
-    /// <summary>CHIAKI_RP_APPLICATION_REASON_REGIST_FAILED ve _INVALID_PSN_ID.</summary>
-    internal static readonly uint[] RegistrationRejectedCodes = [0x80108b09, 0x80108b02];
+    /// <summary>CHIAKI_RP_APPLICATION_REASON_REGIST_FAILED, _INVALID_PSN_ID ve 0x80108b26. 0x80108b26'yı libchiaki tanımaz:
+    /// PS5 gönderilen kayıt anahtarını (RP-Registkey) kendi eşli cihaz listesinde bulamadı (eşleme PS5'te silinmiş ya da
+    /// PS5 sıfırlanmış). Yeniden denemek aynı yere çıkar; PS5 yeniden eşlenmelidir.</summary>
+    internal static readonly uint[] RegistrationRejectedCodes = [0x80108b09, 0x80108b02, UnknownRegistKey];
+
+    internal const uint UnknownRegistKey = 0x80108b26;
 
     private static readonly string[] UnreachableLines =
     [
@@ -186,8 +434,16 @@ public sealed class StreamSession : IStreamSession
     private readonly SerialQueue queue = new("CouchSubs stream session");
     private readonly FrameDelivery delivery;
     private readonly ReconnectPolicy policy = new();
+    /// <summary>Dinlenmedeki PS5 yalnız çeviri başlarken uyandırılır (yalnız kuyrukta).</summary>
+    private readonly WakePolicy wakePolicy = new();
+    /// <summary>Bağlantı sık koparsa görüntü 720p'ye düşürülür (yalnız kuyrukta).</summary>
+    private readonly QualityFallback quality = new();
+    /// <summary>Geçerli oturum bağlandı mı (yalnız kuyrukta): yalnız akış sürerken olan kopmalar sayılır.</summary>
+    private bool streaming;
     /// <summary>Bağlıyken görüntü gelmezse oturum yeniden kurulur (kare iş parçacığından da yazılır, kendi kilidi var).</summary>
     private readonly PictureWatchdog watchdog = new();
+    /// <summary>PS5'teki Uzaktan Oynatma çöktüyse en çok iki kez yeniden denenir (yalnız kuyrukta).</summary>
+    private readonly CrashRetryLimit crashLimit = new();
     /// <summary>Yalnız kuyrukta okunup yazılır.</summary>
     private SessionBox? box;
 
@@ -195,6 +451,7 @@ public sealed class StreamSession : IStreamSession
     /// bloklar (yeniden deneme, eski oturumun kapanma olayı) kendini iptal eder.</summary>
     private readonly Lock stateLock = new();
     private bool running;
+    private bool gaveUp;
     private int generation;
     private bool disposed;
 
@@ -213,6 +470,9 @@ public sealed class StreamSession : IStreamSession
         queue.Post(() =>
         {
             policy.Reset();
+            wakePolicy.Reset();
+            crashLimit.Reset();
+            search.Reset();
             Connect(current);
         });
     }
@@ -233,6 +493,7 @@ public sealed class StreamSession : IStreamSession
         {
             CloseBox();
             policy.Reset();
+            crashLimit.Reset();
             Connect(current);
         });
     }
@@ -264,8 +525,27 @@ public sealed class StreamSession : IStreamSession
         lock (stateLock)
         {
             this.running = running;
+            gaveUp = false;
             return ++generation;
         }
+    }
+
+    /// <summary>Yeniden deneme bırakılır (<see cref="Stop"/>tan farkı: kullanıcı durdurmadı; bkz. <see cref="HasGivenUp"/>).</summary>
+    private void GiveUp()
+    {
+        lock (stateLock)
+        {
+            running = false;
+            gaveUp = true;
+            ++generation;
+        }
+    }
+
+    /// <summary>Oturum yeniden denemeyi kendisi bıraktı mı (kayıt ya da giriş şifresi geçersiz, PS5'te Uzaktan Oynatma
+    /// çöktü). <see cref="ReconnectNow"/> o zaman bir şey yapmaz; uygulama yeni oturum açar (Mac StreamSession ile aynı).</summary>
+    public bool HasGivenUp
+    {
+        get { lock (stateLock) return gaveUp; }
     }
 
     private bool IsCurrent(int value)
@@ -281,23 +561,42 @@ public sealed class StreamSession : IStreamSession
         Emit(SessionState.Connecting);
 
         // PS5 uyuyorsa uyandır; uyanmayı kuyruğu bloklamadan, aralıklı kontrollerle bekle.
-        var info = ConsoleDiscovery.Discover(console.Host, TimeSpan.FromSeconds(2)).FirstOrDefault() ?? Relocate();
-        searchAnswered = info is not null;
+        // Kayıtlı adreste başka bir PS5 yanıt verirse (aynı evde iki PS5, modem adresleri değiştirmiş; GitHub #425)
+        // kayıtlı PS5 adıyla ağda aranır; bulunamazsa eskisi gibi o adrese bağlanılır.
+        var atHost = ConsoleDiscovery.Discover(console.Host, TimeSpan.FromSeconds(2)).FirstOrDefault();
+        ConsoleInfo? info;
+        if (atHost is not null && ConsoleDiscovery.IsRegistered(atHost, console.Name)) info = atHost;
+        else
+        {
+            if (atHost is not null)
+                RemotePlayLog.Note($"PS5 oturumu: {console.Host} adresinde başka PS5 yanıt verdi ({atHost.Name}), {console.Name} aranıyor");
+            info = Relocate() ?? atHost;
+        }
+        if (search.Searched(answered: info is not null))
+            RemotePlayLog.Note($"PS5 aranıyor: art arda {search.Unanswered}. yanıtsız arama; bu cihaz: {DeviceDiagnostics.Line()}");
+        var action = wakePolicy.Decide(info?.IsAwake);
         RemotePlayLog.Note(info is null
             ? $"PS5 oturumu: {console.Host} aramaya yanıt vermedi, yine de bağlanılıyor"
-            : $"PS5 oturumu: {info.Name} {info.Host} {(info.IsAwake ? "uyanık" : "dinlenmede, uyandırılıyor")}");
-        if (info is { IsAwake: false })
+            : $"PS5 oturumu: {info.Name} {info.Host} {(info.IsAwake ? "uyanık" : action == WakePolicy.Action.Wake ? "dinlenmede, uyandırılıyor" : "dinlenmede, açılması bekleniyor")}");
+        switch (action)
         {
-            try { ConsoleDiscovery.Wake(console); }
-            catch (Exception error) { RemotePlayLog.Write(1, $"wake: {error.Message}"); }
-            WaitForWake(current, DateTime.UtcNow.AddSeconds(20));
-            return;
+            case WakePolicy.Action.Wake:
+                try { ConsoleDiscovery.Wake(console); }
+                catch (Exception error) { RemotePlayLog.Write(1, $"wake: {error.Message}"); }
+                WaitForWake(current, DateTime.UtcNow.AddSeconds(20));
+                break;
+            case WakePolicy.Action.WaitUntilOn:
+                // Kullanıcı PS5'i kapattı: yeniden açılmaz; aralıklı bakılır, PS5 açılınca bağlanılır.
+                ScheduleReconnect(current, new DisconnectReason(DisconnectKind.ConsoleAsleep));
+                break;
+            default:
+                OpenSession(current);
+                break;
         }
-        OpenSession(current);
     }
 
-    /// <summary>Son aramada PS5 yanıt verdi mi (yalnız kuyrukta).</summary>
-    private bool searchAnswered = true;
+    /// <summary>Son aramanın sonucu ve "bulunamadı" etiketi (yalnız kuyrukta).</summary>
+    private readonly ConsoleSearchState search = new();
 
     /// <summary>Oturum ağ hatasıyla düştüyse ve PS5 aramaya da yanıt vermediyse neden "bulunamadı"dır (adresle).
     /// Eskiden ikisi de yalnız "Yeniden bağlanılıyor…" idi.</summary>
@@ -335,7 +634,7 @@ public sealed class StreamSession : IStreamSession
     private void OpenSession(int current)
     {
         if (!IsCurrent(current) || box is not null) return;
-        var started = SessionBox.Start(this, current, console, accountId, out var failure);
+        var started = SessionBox.Start(this, current, console, accountId, quality.Lowered ? 720 : 1080, out var failure);
         if (started is null)
         {
             RemotePlayLog.Note($"PS5 oturumu başlatılamadı ({console.Host}): {failure}");
@@ -348,6 +647,7 @@ public sealed class StreamSession : IStreamSession
     /// <summary>Geçerli oturumu kapatır. Kapatma join içerdiği için kuyruğu bekletmemek adına arka planda yapılır.</summary>
     private void CloseBox()
     {
+        streaming = false;
         watchdog.Ended();
         if (box is not { } closing) return;
         box = null;
@@ -363,7 +663,11 @@ public sealed class StreamSession : IStreamSession
                 queue.Post(() =>
                 {
                     if (box?.Generation != eventGeneration || !IsCurrent(eventGeneration)) return;
-                    policy.Reset();
+                    policy.Connected(Environment.TickCount64);
+                    wakePolicy.Streamed();
+                    crashLimit.Reset();
+                    search.Connected();
+                    streaming = true;
                     watchdog.Connected(Environment.TickCount64);
                     Emit(SessionState.Streaming);
                     ScheduleWatch(eventGeneration);
@@ -382,7 +686,7 @@ public sealed class StreamSession : IStreamSession
                         return;
                     }
                     // Şifre yok ya da yanlış: yeniden denemek aynı yere çıkar.
-                    Bump(running: false);
+                    GiveUp();
                     CloseBox();
                     Emit(SessionState.Disconnected(stop ?? DisconnectKind.LoginPasscode));
                 });
@@ -390,18 +694,42 @@ public sealed class StreamSession : IStreamSession
             case NativeMethods.EventQuit:
                 var reason = DisconnectReasons.FromNative(quitReason, text, sessionRequestHint);
                 RemotePlayLog.Write(1, $"Oturum kapandı: neden {quitReason} ({reason.Kind}) {text}");
+                if (reason.Kind == DisconnectKind.ConsoleClosed)
+                    RemotePlayLog.Write(1, $"PS5 Uzaktan Oynatma'yı kendisi kapattı (PS5'in nedeni: \"{text}\"); ağ kopması değil, çoğunlukla PS5'te kullanıcı değişince olur; yeniden bağlanılıyor");
                 queue.Post(() =>
                 {
                     // Eski bir oturumun (ör. ReconnectNow ile kapatılanın) kapanma olayı yeni oturumu etkilemez.
                     if (box?.Generation != eventGeneration || !IsCurrent(eventGeneration)) return;
+                    var wasStreaming = streaming;
+                    // Bekçi değil libchiaki kapattı (PS5 ya da ağ); görüntünün son ana kadar gelip gelmediği nedeni ayırır.
+                    if (watchdog.Summary(Environment.TickCount64) is { } summary)
+                        RemotePlayLog.Note($"PS5 oturumunu libchiaki kapattı ({reason.Kind}); {summary}");
                     CloseBox();
+                    policy.Ended(Environment.TickCount64);
+                    if (wasStreaming && QualityFallback.CountsAsDrop(reason.Kind)) NoteDrop();
                     if (reason.Kind == DisconnectKind.RegistrationInvalid)
                     {
                         // Kayıt geçersiz: yeniden denemek aynı yere çıkar (eskiden sonsuza kadar "Yeniden bağlanılıyor…").
-                        Bump(running: false);
+                        GiveUp();
                         Emit(new SessionState(SessionPhase.Disconnected, reason));
                         return;
                     }
+                    if (reason.Kind == DisconnectKind.ConsoleRemotePlayCrashed)
+                    {
+                        var retry = crashLimit.Crashed();
+                        RemotePlayLog.Note($"PS5'teki Uzaktan Oynatma çöktü (art arda {crashLimit.Crashes}); " +
+                                           (retry ? "yeniden deneniyor" : "yeniden bağlanma bırakıldı, PS5 tamamen kapatılıp açılmalı"));
+                        if (!retry)
+                        {
+                            // PS5 kapatılıp açılmadan her deneme aynı yanıtı alır (eskiden sonsuz "Yeniden bağlanılıyor…").
+                            GiveUp();
+                            Emit(new SessionState(SessionPhase.Disconnected, reason));
+                            return;
+                        }
+                    }
+                    // PS5'in adresi TCP bağlantısını reddetti: PS5 yeni uyanıyor olabilir ya da adres başka bir cihaza geçmiş
+                    // olabilir. Bir sonraki denemede beklemeden ağda da aranır (eşlemeyi yenilemek bunu çözmez).
+                    if (reason.Kind == DisconnectKind.Refused) nextRelocate = DateTime.MinValue;
                     ScheduleReconnect(eventGeneration, reason);
                 });
                 break;
@@ -422,18 +750,30 @@ public sealed class StreamSession : IStreamSession
                 ScheduleWatch(boxGeneration);
                 return;
             }
-            RemotePlayLog.Note($"PS5'ten {(int)gap.TotalSeconds} sn'dir görüntü gelmiyor (bağlantı açık); oturum yeniden kuruluyor");
+            RemotePlayLog.Note($"PS5'ten {(int)gap.TotalSeconds} sn'dir görüntü gelmiyor (bağlantı açık); oturumu görüntü bekçisi yeniden kuruyor; "
+                               + watchdog.Summary(Environment.TickCount64));
             CloseBox();
+            policy.Ended(Environment.TickCount64);
+            NoteDrop();
             ScheduleReconnect(boxGeneration, new DisconnectReason(DisconnectKind.Other, PictureWatchdog.Reason));
         });
     }
 
+    /// <summary>Akış sürerken bağlantı koptu: sık oluyorsa sonraki oturumlar 720p açılır.</summary>
+    private void NoteDrop()
+    {
+        if (quality.Dropped(Environment.TickCount64))
+            RemotePlayLog.Note($"PS5 bağlantısı {QualityFallback.Window.TotalMinutes:0} dk içinde {QualityFallback.DropsToLower} kez koptu; " +
+                               "görüntü 720p'ye düşürülüyor (daha az bant genişliği). Kalıcı çözüm: PS5'i modeme kabloyla bağlayın");
+    }
+
     private void ScheduleReconnect(int current, DisconnectReason reason)
     {
-        reason = Classify(reason, searchAnswered, console.Host);
+        reason = search.Classify(reason, console.Host);
         Emit(new SessionState(SessionPhase.Disconnected, reason));
         if (!IsCurrent(current)) return;
-        var delay = policy.NextDelay();
+        var delay = policy.NextDelay(inUse: reason.Kind == DisconnectKind.InUse);
+        RemotePlayLog.Note($"PS5 oturumu: {delay} sn sonra yeniden denenecek");
         queue.PostAfter(TimeSpan.FromSeconds(delay), () => Connect(current));
     }
 
@@ -466,7 +806,9 @@ public sealed class StreamSession : IStreamSession
             handle = GCHandle.Alloc(this);
         }
 
-        public static unsafe SessionBox? Start(StreamSession owner, int generation, RegisteredConsole console, byte[] accountId, out string? failure)
+        /// <param name="videoHeight">1080 ya da 720 (bağlantı sık koparsa).</param>
+        public static unsafe SessionBox? Start(StreamSession owner, int generation, RegisteredConsole console, byte[] accountId,
+                                               int videoHeight, out string? failure)
         {
             var box = new SessionBox(owner, generation);
             failure = null;
@@ -481,9 +823,9 @@ public sealed class StreamSession : IStreamSession
                 fixed (byte* key = registKey)
                 fixed (byte* morningPointer = morning)
                 fixed (byte* account = accountId)
-                    box.native = NativeMethods.cs_session_start(console.Host, key, morningPointer, account, MaxFps,
-                                                                (nint)frame, (nint)eventCallback, (nint)log,
-                                                                GCHandle.ToIntPtr(box.handle));
+                    box.native = NativeMethods.cs_session_start_ex(console.Host, key, morningPointer, account, MaxFps, videoHeight,
+                                                                   (nint)frame, (nint)eventCallback, (nint)log,
+                                                                   GCHandle.ToIntPtr(box.handle));
             }
             catch (Exception error)
             {

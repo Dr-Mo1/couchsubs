@@ -23,22 +23,33 @@ struct FrameThrottle {
     }
 }
 
-/// Bağlantı koptuğunda yeniden deneme aralıkları: 2, 4, 8, 16, en çok 30 sn.
+/// Bağlantı koptuğunda yeniden deneme aralıkları: 2, 4, 8, 16, 32, en çok 60 sn (Android ve Windows'taki
+/// ReconnectPolicy ile aynı kural).
 ///
 /// Aralık bağlanınca hemen değil, oturum `stableAfter` kadar sürdükten sonra kapanınca baştan başlar. Eskiden her
 /// bağlanışta sıfırlanıyordu: PS5 oturumu açılıp birkaç saniyede düşürünce (ör. aynı ikinci hesapla bağlı başka bir
 /// cihaz) telefon 2 sn sonra yeniden bağlanıyor, PS5'te ikinci hesap durmadan girip çıkıyordu.
+///
+/// Akış sürerken kopan oturumdan sonra en az 8 sn beklenir; aralık 2 dk süren oturumdan sonra baştan başlar.
+/// Eskiden 60 sn yetiyordu ve en çok 30 sn beklenirdi: kablosuz ağ bozulunca oturumlar birer dakika sürüp düşüyor, her
+/// seferinde 2 sn sonra yeniden deneniyor, "her dakika bağlanıp kopuyor" döngüsü uzun süre sürüyordu (TestFlight, iPad).
+/// Yeni oturum istekleri PS5'in eski oturumu bırakmasını beklemeden geldikçe PS5 30 sn ile birkaç dakika yanıt
+/// vermiyordu (GitHub #593). Bir ara 5 dk'ydı: üç dört dakikada bir kopan ağda bekleme 8, 16, 32, 60 sn diye büyüyüp
+/// 60 sn'de kalıyor, her kopma bir dakikadan uzun sürüyordu ("sürekli kopuyor").
 struct ReconnectPolicy {
-    static let stableAfter: TimeInterval = 60
+    static let stableAfter: TimeInterval = 2 * 60
+    static let maxDelay = 60
+    /// Akış sürerken kopan oturumdan sonraki en kısa bekleme: `2 << afterDropAttempt` = 8 sn.
+    static let afterDropAttempt = 2
     private var attempt = 0
     private var connectedAt: Date?
 
-    /// `inUse`: Uzaktan Oynatma başka cihazda; sık denemek boşuna, en az 8 sn beklenir (8, 16, 30). Hemen en uzuna
+    /// `inUse`: Uzaktan Oynatma başka cihazda; sık denemek boşuna, en az 8 sn beklenir (8, 16, 32). Hemen en uzuna
     /// atlanmaz: telefonun kendi eski oturumu PS5'te birkaç saniye daha açık görünebilir.
     mutating func nextDelay(inUse: Bool = false) -> Int {
         if inUse { attempt = max(attempt, 2) }
         defer { attempt = min(attempt + 1, 5) }
-        return min(30, 2 << attempt)
+        return min(Self.maxDelay, 2 << attempt)
     }
 
     mutating func reset() {
@@ -48,23 +59,114 @@ struct ReconnectPolicy {
 
     mutating func connected(at now: Date = Date()) { connectedAt = now }
 
-    /// Oturum kapandı: uzun sürdüyse aralık baştan başlar, kısa sürdüyse büyümeye devam eder.
+    /// Oturum kapandı: uzun sürdüyse aralık baştan başlar, kısa sürdüyse büyümeye devam eder. Bağlı oturum kapandıysa
+    /// PS5 eski oturumu bıraksın diye en az 8 sn beklenir.
     mutating func ended(at now: Date = Date()) {
-        if let connectedAt, now.timeIntervalSince(connectedAt) >= Self.stableAfter { attempt = 0 }
+        if let connectedAt {
+            if now.timeIntervalSince(connectedAt) >= Self.stableAfter { attempt = 0 }
+            attempt = max(attempt, Self.afterDropAttempt)
+        }
         connectedAt = nil
+    }
+}
+
+/// Dinlenme modundaki PS5 uyandırılsın mı (Android ve Windows'taki WakePolicy ile aynı kural).
+///
+/// Yalnız kullanıcı "Çeviriyi başlat"a bastıktan sonra, PS5'e henüz bağlanılmamışken uyandırılır. Eskiden yeniden bağlanma
+/// döngüsü de uyandırıyordu: oyuncu PS5'i kapatınca (dinlenme modu) PS5 oturumu bitiriyor, uygulama birkaç saniye sonra
+/// PS5'i yeniden açıyor ve yeniden bağlanıyordu. TV kapalı, PS5 kapatılmış görünürken ana ekran "PS5 bağlı" diyor, çeviri
+/// sürüyordu (X'te kullanıcı bildirimi, 19 Kas). Bu çeviride akış bir kez kurulduysa dinlenmedeki PS5'e dokunulmaz:
+/// "PS5'i açın" görünür ve PS5 açılınca bağlanılır.
+struct WakePolicy {
+    enum Action: Equatable {
+        /// PS5 uyanık ya da aramaya yanıt vermedi: oturum açılmaya çalışılır.
+        case connect
+        /// PS5 dinlenmede, çeviri yeni başladı: uyandırılır.
+        case wake
+        /// PS5 dinlenmede ve bu çeviride zaten bağlanılmıştı (kullanıcı kapattı): uyandırılmaz, açılması beklenir.
+        case waitUntilOn
+    }
+
+    private var hasStreamed = false
+
+    /// Kullanıcı çeviriyi başlattı.
+    mutating func reset() { hasStreamed = false }
+
+    /// PS5'e bağlanıldı.
+    mutating func streamed() { hasStreamed = true }
+
+    /// `awake`: aramada PS5'in durumu (nil: yanıt vermedi).
+    func action(awake: Bool?) -> Action {
+        guard awake == false else { return .connect }
+        return hasStreamed ? .waitUntilOn : .wake
+    }
+}
+
+/// PS5'teki Uzaktan Oynatma çöktüyse (`DisconnectReason.consoleRemotePlayCrashed`) kaç kez yeniden denenir (Windows ve
+/// Android'deki CrashRetryLimit ile aynı kural).
+///
+/// PS5 tamamen kapatılıp açılmadan her oturum isteği aynı yanıtı alır; eskiden sonsuza kadar "Yeniden bağlanılıyor…"
+/// deneniyordu (GitHub #519). Art arda `maxRetries` denemeden sonra durulur ve kullanıcıya PS5'i tamamen kapatıp açması
+/// söylenir. Sayaç çeviri başlayınca, ağ değişince ve bağlanınca sıfırlanır.
+struct CrashRetryLimit {
+    static let maxRetries = 2
+    /// Art arda bildirilen çökme sayısı.
+    private(set) var crashes = 0
+
+    mutating func reset() { crashes = 0 }
+
+    /// PS5 çöktü dedi: yeniden denenecekse true, durulacaksa false.
+    mutating func crashed() -> Bool {
+        crashes += 1
+        return crashes <= Self.maxRetries
+    }
+}
+
+/// Bağlantı sık kopuyorsa görüntü 720p'ye düşürülür (Windows ve Android'deki QualityFallback ile aynı kural).
+///
+/// 1080p akış ~15 Mbit/sn, 720p ~10 Mbit/sn ister. Kablosuz ağda PS5 akışı birkaç dakikada bir kopuyor ya da görüntü
+/// takılıyordu (GitHub #388, #401); altyazı okumak için 720p yeterlidir. `window` içinde `dropsToLower` kopma olursa bu
+/// çeviri boyunca 720p kullanılır.
+struct QualityFallback {
+    static let window: TimeInterval = 10 * 60
+    static let dropsToLower = 2
+    private var drops: [Date] = []
+    /// Görüntü 720p'ye düşürüldü mü.
+    private(set) var lowered = false
+
+    /// Akış sürerken bağlantı koptu ya da görüntü takıldı. Bu kopmayla 720p'ye geçildiyse true.
+    mutating func dropped(at now: Date = Date()) -> Bool {
+        guard !lowered else { return false }
+        drops.append(now)
+        drops.removeAll { now.timeIntervalSince($0) > Self.window }
+        guard drops.count >= Self.dropsToLower else { return false }
+        lowered = true
+        return true
+    }
+
+    /// Kopma ağ kaynaklı mı (akış sürerken PS5 ile bağlantı gitti ya da görüntü kesildi). PS5'in reddi, başka cihazda
+    /// kullanım ya da durdurma sayılmaz: düşük çözünürlük bunlara çare değildir.
+    static func countsAsDrop(_ reason: DisconnectReason) -> Bool {
+        switch reason {
+        case .network, .other: return true
+        default: return false
+        }
     }
 }
 
 /// Bağlı oturumda PS5'ten görüntü gelmiyor mu (Windows'taki PictureWatchdog ve Android'deki eşi ile aynı kural).
 ///
-/// libchiaki bir karenin FEC onarımı tutmayınca PS5'ten bir kez yeni anahtar kare (IDR) ister ve o gelene kadar bütün
-/// kareleri atlar (`enable_idr_on_fec_failure`). İstenen IDR karesinin kendisi de bozuk gelirse yeniden istemez
-/// ("Video FEC failure, already waiting for requested IDR"): bağlantı açık kalır, ama bir daha hiç kare gelmez. Kablosuz
-/// ağda bu birkaç dakikada bir olur; altyazı duruyor, TV bağlı görünüyor ve ancak uygulamayı kapatıp açmak düzeltiyordu.
-/// Bağlıyken `stallAfter` boyunca hiç görüntü gelmezse oturum yeniden kurulur; yeni oturum anahtar kareyle başlar.
+/// libchiaki bir karenin FEC onarımı tutmayınca PS5'ten yeni anahtar kare (IDR) ister ve o gelene kadar bütün kareleri
+/// atlar (`enable_idr_on_fec_failure`). İstek ya da IDR karesi kaybolursa eskiden bir daha istenmiyordu: bağlantı açık
+/// kalıyor, ama bir daha hiç kare gelmiyordu. chiaki-stream-recovery.patch ile istek saniyede bir yinelenir. Bağlıyken
+/// görüntü `stallAfter` (oturumda henüz görüntü gelmediyse `firstPictureAfter`) boyunca gelmezse oturum yine yeniden
+/// kurulur; yeni oturum anahtar kareyle başlar. `stallAfter` eskiden 8 sn'ydi: ağ birkaç saniye bozulunca IDR yinelenmeden
+/// oturum kapatılıyor, PS5 ardından 30 sn ile birkaç dakika yanıt vermiyordu (GitHub #593).
 struct PictureWatchdog {
-    /// IDR ile olağan toparlanma bir saniyeden kısa sürer; bundan uzun boşluk takılmadır.
-    static let stallAfter: TimeInterval = 8
+    /// Saniyede bir yinelenen IDR isteğine ve libchiaki'nin 5 sn'lik yeniden gönderme süresine yer kalır.
+    static let stallAfter: TimeInterval = 15
+    /// Bağlandıktan sonra ilk görüntü bu sürede gelmezse takılma sayılır.
+    static let firstPictureAfter: TimeInterval = 8
     /// Yeniden bağlanırken ana ekranda "Yeniden bağlanılıyor… (…)" içinde görünen neden.
     static let reason = "no picture from the PS5"
     /// Art arda bu kadar oturumda hiç görüntü gelmezse yeniden bağlanma bırakılır (Android'deki eşi ile aynı).
@@ -82,6 +184,9 @@ struct PictureWatchdog {
     private var since: Date?
     /// Bu oturumda görüntü geldi mi.
     private var hasPicture = false
+    /// Oturumun bağlandığı an ve o andan beri gelen görüntü sayısı: kopma günlüğü için.
+    private var connectedAt = Date()
+    private var pictures = 0
     /// Art arda hiç görüntü gelmeyen oturum sayısı; görüntü gelince sıfırlanır.
     private(set) var noPictureSessions = 0
 
@@ -96,6 +201,8 @@ struct PictureWatchdog {
     mutating func connected(at now: Date = Date()) {
         since = now
         hasPicture = false
+        connectedAt = now
+        pictures = 0
     }
 
     /// Görüntü geldi.
@@ -103,7 +210,18 @@ struct PictureWatchdog {
         guard since != nil else { return }
         since = now
         hasPicture = true
+        pictures += 1
         noPictureSessions = 0
+    }
+
+    /// Kopma günlüğüne eklenen özet: oturum kaç saniye sürdü, kaç görüntü geldi, son görüntü kaç saniye önceydi. Bağlı
+    /// değilken nil. Kopmanın nedenini ayırır: görüntü son ana kadar geliyorsa bağlantıyı PS5 ya da ağ kesmiştir;
+    /// saniyelerdir gelmiyorsa akış önce donmuştur.
+    func summary(at now: Date = Date()) -> String? {
+        guard let since else { return nil }
+        let lasted = Int(now.timeIntervalSince(connectedAt))
+        guard hasPicture else { return "oturum \(lasted) sn sürdü, hiç görüntü gelmedi" }
+        return "oturum \(lasted) sn sürdü, \(pictures) görüntü geldi, sonuncusu \(String(format: "%.1f", now.timeIntervalSince(since))) sn önce"
     }
 
     /// `stalled` boşluk bildirdi; oturum kapatılırken ne yapılacağı.
@@ -116,11 +234,57 @@ struct PictureWatchdog {
     /// Oturum kapandı ya da yeniden kuruluyor.
     mutating func ended() { since = nil }
 
-    /// Bağlıyken `stallAfter`'dan uzun süredir görüntü yoksa boşluğun süresi (sn); yoksa nil.
+    /// Bağlıyken `stallAfter`'dan (oturumda henüz görüntü yoksa `firstPictureAfter`'dan) uzun süredir görüntü yoksa
+    /// boşluğun süresi (sn); yoksa nil.
     func stalled(at now: Date = Date()) -> TimeInterval? {
         guard let since else { return nil }
         let gap = now.timeIntervalSince(since)
-        return gap >= Self.stallAfter ? gap : nil
+        return gap >= (hasPicture ? Self.stallAfter : Self.firstPictureAfter) ? gap : nil
+    }
+}
+
+/// Son PS5 aramasının sonucu ve "bulunamadı" etiketi (Windows ve Android'deki ConsoleSearchState ile aynı kural).
+///
+/// Oturum ağ hatasıyla düşer ve PS5 son aramada da yanıt vermediyse neden `.notFound`'dur. Eskiden aramanın sonucu PS5'e
+/// bağlanınca unutulmuyordu: arama yanıtı kaçıp "yine de bağlanılıyor" ile kurulan oturum saatlerce sürse de sonraki her
+/// kopma (görüntü bekçisininki dahil) "PS5 … adresinde bulunamadı" diye gösteriliyordu (X'te bildirim, iPad, 60-70 dk
+/// kesintisiz çeviriden sonra). Bağlanınca PS5'e ulaşıldığı bilinir.
+///
+/// Art arda yanıtsız aramalarda bu cihazın ağ durumu (açık dosya tanıtıcısı ve sınırı, IPv4 ağları) günlüğe yazılır:
+/// "PS5 ağdan düştü" ile "bu cihaz soket açamıyor ya da ağı değişti" bir sonraki bildirimde günlükten ayrılsın.
+struct ConsoleSearchState {
+    /// İlk yanıtsız aramada ve sonra her bu kadar yanıtsız aramada bir tanı satırı yazılır.
+    static let diagnoseEvery = 5
+    /// Son aramada PS5 yanıt verdi mi (ya da o aramadan sonra PS5'e bağlanıldı mı).
+    private(set) var answered = true
+    /// Art arda yanıtsız arama sayısı.
+    private(set) var unanswered = 0
+
+    /// Kullanıcı başlattı.
+    mutating func reset() {
+        answered = true
+        unanswered = 0
+    }
+
+    /// Arama bitti. Tanı satırı yazılacaksa true.
+    mutating func searched(answered: Bool) -> Bool {
+        self.answered = answered
+        guard !answered else {
+            unanswered = 0
+            return false
+        }
+        unanswered += 1
+        return unanswered == 1 || unanswered % Self.diagnoseEvery == 0
+    }
+
+    /// Oturum bağlandı: PS5'e ulaşılıyor, sonraki kopma "bulunamadı" sayılmaz.
+    mutating func connected() {
+        answered = true
+        unanswered = 0
+    }
+
+    func classify(_ reason: DisconnectReason, host: String) -> DisconnectReason {
+        DisconnectReason.classify(reason, searchAnswered: answered, host: host)
     }
 }
 
@@ -131,15 +295,17 @@ public enum DisconnectReason: Equatable, Sendable {
     case consoleAsleep
     /// Remote Play başka bir cihazda kullanılıyor.
     case inUse
-    /// PS5 bağlantıyı reddetti (ör. kayıt geçersiz ya da Uzaktan Oynatma kapalı).
+    /// PS5'in adresi oturum ya da ctrl bağlantısını (TCP 9295) reddetti: PS5 yeni uyanıyor ya da adres başka bir cihaza
+    /// geçmiş. Eşleme sorunu değildir (eskiden "PS5'i yeniden kurun" deniyordu); beklenip yeniden denenir ve PS5 ağda
+    /// yeniden aranır.
     case refused
     case network
     /// İkinci kullanıcının PS5'te giriş şifresi var ve Ayarlar'da kayıtlı şifre yok.
     case loginPasscode
     /// Ayarlar'daki giriş şifresini PS5 kabul etmedi. Yeniden gönderilmez (yanlış şifreyle döngüye girilmez).
     case loginPasscodeIncorrect
-    /// PS5 oturum isteğinde kaydı kabul etmedi (0x80108b09 kayıt geçersiz, 0x80108b02 hesap tanınmıyor). Yeniden denemek
-    /// aynı yere çıkar; PS5 ikinci hesapla yeniden eşlenmelidir.
+    /// PS5 oturum isteğinde kaydı kabul etmedi (0x80108b09 kayıt geçersiz, 0x80108b02 hesap tanınmıyor, 0x80108b26 PS5 bu
+    /// cihazın eşlemesini bulamadı). Yeniden denemek aynı yere çıkar; PS5 ikinci hesapla yeniden eşlenmelidir.
     case registrationInvalid
     /// Bağlantı kuruluyor ama art arda `PictureWatchdog.maxNoPictureSessions` oturumda PS5'ten hiç görüntü gelmedi;
     /// yeniden bağlanma bırakıldı (eskiden sonsuza kadar "Yeniden bağlanılıyor…").
@@ -150,7 +316,39 @@ public enum DisconnectReason: Equatable, Sendable {
     /// "Unknown Session Request Error" diye verir (GitHub #33, #202). Değer: PS5'in "Reported Application Reason" kodu
     /// (libchiaki'nin tanımadığı kodlar, ör. 0x80108bff; günlükte kod yoksa nil).
     case rejected(UInt32?)
+    /// PS5'teki Uzaktan Oynatma çöktü (CHIAKI_QUIT_REASON_SESSION_REQUEST_RP_CRASH, "Remote Play on Console has crashed").
+    /// PS5 tamamen kapatılıp açılana kadar her oturum isteği aynı yanıtı alır; eskiden İngilizce metinle sonsuza kadar
+    /// "Yeniden bağlanılıyor…" deneniyordu (GitHub #519). `CrashRetryLimit.maxRetries` denemeden sonra durulur.
+    case consoleRemotePlayCrashed
+    /// PS5 akışı kendisi kapattı: Takion bağlantısında "disconnect" iletisi gönderdi
+    /// (CHIAKI_QUIT_REASON_STREAM_CONNECTION_REMOTE_DISCONNECTED / _REMOTE_SHUTDOWN). Ağ kopması değildir; ağ gidince PS5'ten
+    /// ileti gelmez, libchiaki STREAM_CONNECTION_UNKNOWN verir. Kullanıcılar bunu oyun sırasında PS5'te ana hesaba geçince
+    /// görüyor (X, 21 Kas: "ana hesaba geçtiğim zaman sürekli bağlantı kopuyor"); eskiden `.network` sayılıp "kabloyla
+    /// bağlayın" deniyor ve kopma görüntüyü 720p'ye düşürüyordu. Değer: PS5'in gönderdiği neden metni (günlükte görünsün
+    /// diye; boş olabilir). Yeniden bağlanılır.
+    case consoleClosed(String)
     case other(String)
+
+    /// Altyazı günlüğüne (altyazi.log) yazılan kısa neden: adres ve ayrıntı olmadan, yalnız türü. Kullanıcılar çoğu zaman
+    /// yalnız altyazi.log gönderiyor; GitHub #456'daki günlükte 30 kopmanın hiçbirinin nedeni görünmüyordu.
+    public var logName: String {
+        switch self {
+        case .stopped: "stopped"
+        case .consoleAsleep: "consoleAsleep"
+        case .inUse: "inUse"
+        case .refused: "refused"
+        case .network: "network"
+        case .loginPasscode: "loginPasscode"
+        case .loginPasscodeIncorrect: "loginPasscodeIncorrect"
+        case .registrationInvalid: "registrationInvalid"
+        case .noPicture: "noPicture"
+        case .notFound: "notFound"
+        case .rejected(let code): code.map { String(format: "rejected 0x%08x", $0) } ?? "rejected"
+        case .consoleRemotePlayCrashed: "consoleRemotePlayCrashed"
+        case .consoleClosed(let text): text.isEmpty ? "consoleClosed" : "consoleClosed: \(text)"
+        case .other(let text): text.isEmpty ? "other" : "other: \(text)"
+        }
+    }
 
     /// Oturum ağ hatasıyla düştüyse ve PS5 aramaya da yanıt vermediyse neden "bulunamadı"dır (eskiden yalnız
     /// "Yeniden bağlanılıyor…" görünüyordu).
@@ -176,8 +374,14 @@ public enum DisconnectReason: Equatable, Sendable {
         return unreachableLines.contains(where: line.contains) ? .network : nil
     }
 
-    /// CHIAKI_RP_APPLICATION_REASON_REGIST_FAILED ve _INVALID_PSN_ID.
-    static let registrationRejectedCodes: Set<UInt32> = [0x80108b09, 0x80108b02]
+    /// CHIAKI_RP_APPLICATION_REASON_REGIST_FAILED, _INVALID_PSN_ID ve 0x80108b26. 0x80108b26'yı libchiaki tanımaz: PS5
+    /// gönderilen kayıt anahtarını (RP-Registkey) kendi eşli cihaz listesinde bulamadı (eşleme PS5'te silinmiş ya da PS5
+    /// sıfırlanmış). Yeniden denemek aynı yere çıkar; PS5 yeniden eşlenmelidir.
+    static let registrationRejectedCodes: Set<UInt32> = [0x80108b09, 0x80108b02, 0x80108b26]
+    /// PS5'te Uzaktan Oynatma kapalı (Ayarlar › Sistem › Uzaktan Oynatma › Uzaktan Oynatmayı Etkinleştir). libchiaki
+    /// tanımaz; GitHub #9'da kullanıcı ayarı açınca düzeldi. `.rejected(remotePlayDisabled)` olarak gelir ve ayar açılınca
+    /// bağlanılsın diye yeniden denenir.
+    public static let remotePlayDisabled: UInt32 = 0x80108b12
     private static let unreachableLines = [
         "Session request connect failed eventually",
         "Failed to send session request",
@@ -186,22 +390,26 @@ public enum DisconnectReason: Equatable, Sendable {
 
     /// Oturum isteği bilinmeyen nedenle düştüyse günlükten anlaşılan neden kullanılır. Günlükte neden yoksa (PS5'in
     /// yanıtı okunamadı) PS5 oturumu başlatmamıştır: anlamsız İngilizce metin yerine `.rejected(nil)`.
-    init(quit: ChiakiQuitReason, sessionRequestHint hint: DisconnectReason?) {
+    init(quit: ChiakiQuitReason, sessionRequestHint hint: DisconnectReason?, remoteText: String? = nil) {
         if quit == CHIAKI_QUIT_REASON_SESSION_REQUEST_UNKNOWN {
             self = hint ?? .rejected(nil)
         } else {
-            self.init(quit: quit)
+            self.init(quit: quit, remoteText: remoteText)
         }
     }
 
-    init(quit: ChiakiQuitReason) {
+    /// `remoteText`: PS5'in akışı kapatırken gönderdiği neden (libchiaki `quit.reason_str`).
+    init(quit: ChiakiQuitReason, remoteText: String? = nil) {
         switch quit {
         case CHIAKI_QUIT_REASON_STOPPED: self = .stopped
         case CHIAKI_QUIT_REASON_SESSION_REQUEST_RP_IN_USE: self = .inUse
-        case CHIAKI_QUIT_REASON_SESSION_REQUEST_CONNECTION_REFUSED, CHIAKI_QUIT_REASON_CTRL_CONNECTION_REFUSED,
-             CHIAKI_QUIT_REASON_PSN_REGIST_FAILED: self = .refused
-        case CHIAKI_QUIT_REASON_STREAM_CONNECTION_REMOTE_DISCONNECTED, CHIAKI_QUIT_REASON_STREAM_CONNECTION_REMOTE_SHUTDOWN,
-             CHIAKI_QUIT_REASON_CTRL_CONNECT_FAILED, CHIAKI_QUIT_REASON_STREAM_CONNECTION_UNKNOWN: self = .network
+        case CHIAKI_QUIT_REASON_SESSION_REQUEST_CONNECTION_REFUSED, CHIAKI_QUIT_REASON_CTRL_CONNECTION_REFUSED: self = .refused
+        // PSN üzerinden eşleme reddedildi: yalnız bu yeniden eşleme ister (eskiden TCP reddiyle aynı `.refused`'du).
+        case CHIAKI_QUIT_REASON_PSN_REGIST_FAILED: self = .registrationInvalid
+        case CHIAKI_QUIT_REASON_STREAM_CONNECTION_REMOTE_DISCONNECTED, CHIAKI_QUIT_REASON_STREAM_CONNECTION_REMOTE_SHUTDOWN:
+            self = .consoleClosed(remoteText ?? "")
+        case CHIAKI_QUIT_REASON_CTRL_CONNECT_FAILED, CHIAKI_QUIT_REASON_STREAM_CONNECTION_UNKNOWN: self = .network
+        case CHIAKI_QUIT_REASON_SESSION_REQUEST_RP_CRASH: self = .consoleRemotePlayCrashed
         default: self = .other(String(cString: chiaki_quit_reason_string(quit)))
         }
     }
@@ -275,12 +483,15 @@ final class ChiakiSessionBox {
     }
 
     /// `chiaki_session_init`; başarısızsa kutu kullanılmamış sayılır (kapatılacak iş parçacığı yok).
-    func initialize(console: RegisteredConsole, accountId: Data) -> ChiakiErrorCode {
+    /// `lowQuality`: bağlantı sık koptu, 720p (~10 Mbit/sn) istenir; yoksa 1080p (~15 Mbit/sn).
+    func initialize(console: RegisteredConsole, accountId: Data, lowQuality: Bool = false) -> ChiakiErrorCode {
         var info = ChiakiConnectInfo()
         info.ps5 = true
         copy(console.registKey, into: &info.regist_key)
         copy(console.morning, into: &info.morning)
-        chiaki_connect_video_profile_preset(&info.video_profile, CHIAKI_VIDEO_RESOLUTION_PRESET_1080p, CHIAKI_VIDEO_FPS_PRESET_30)
+        chiaki_connect_video_profile_preset(&info.video_profile,
+                                            lowQuality ? CHIAKI_VIDEO_RESOLUTION_PRESET_720p : CHIAKI_VIDEO_RESOLUTION_PRESET_1080p,
+                                            CHIAKI_VIDEO_FPS_PRESET_30)
         info.video_profile.codec = CHIAKI_CODEC_H264
         info.video_profile_auto_downgrade = true
         info.enable_keyboard = false
@@ -336,8 +547,8 @@ public final class StreamSession: @unchecked Sendable {
 
     /// Yalnız `queue` üzerinde değişir (PS5'in adresi değişirse; Windows'taki gibi).
     private var console: RegisteredConsole
-    /// Son aramada PS5 yanıt verdi mi (yalnız `queue`).
-    private var searchAnswered = true
+    /// Son aramanın sonucu ve "bulunamadı" etiketi (yalnız `queue`).
+    private var search = ConsoleSearchState()
     /// Tüm ağı taramak pahalı; PS5 kapalıyken her yeniden denemede yapılmaz.
     private var nextRelocate = Date.distantPast
     private let accountId: Data
@@ -348,16 +559,25 @@ public final class StreamSession: @unchecked Sendable {
     private var decoder = H264FrameDecoder()
     private var throttle = FrameThrottle(minInterval: 1.0 / 20)
     private var policy = ReconnectPolicy()
+    /// Dinlenmedeki PS5 yalnız çeviri başlarken uyandırılır (yalnız `queue`).
+    private var wakePolicy = WakePolicy()
+    /// Bağlantı sık koparsa görüntü 720p'ye düşürülür (yalnız `queue`).
+    private var quality = QualityFallback()
+    /// Geçerli oturum bağlandı mı (yalnız `queue`): yalnız akış sürerken olan kopmalar sayılır.
+    private var streaming = false
     /// Yalnız `queue` üzerinde okunup yazılır.
     private var box: ChiakiSessionBox?
     /// Bağlıyken görüntü gelmezse oturum yeniden kurulur. Kare çözme kuyruğundan da yazılır; `watchLock` ile korunur.
     private var watchdog = PictureWatchdog()
     private let watchLock = NSLock()
+    /// PS5'teki Uzaktan Oynatma çöktüyse en çok iki kez yeniden denenir (yalnız `queue`).
+    private var crashLimit = CrashRetryLimit()
 
     /// Durdurma isteği ve kuşak numarası; her başlat/durdur yeni bir kuşak açar ve eski
     /// bloklar (yeniden deneme, eski oturumun kapanma olayı) kendini iptal eder.
     private let stateLock = NSLock()
     private var running = false
+    private var gaveUp = false
     private var generation = 0
 
     public init(console: RegisteredConsole, accountId: Data, loginPasscode: String? = nil) {
@@ -372,9 +592,13 @@ public final class StreamSession: @unchecked Sendable {
     }
 
     public func start() {
+        DeviceDiagnostics.raiseOpenFileLimitOnce()
         let current = bump(running: true)
         queue.async { [weak self] in
             self?.policy.reset()
+            self?.wakePolicy.reset()
+            self?.crashLimit.reset()
+            self?.search.reset()
             self?.watch { $0.reset() }
             self?.connect(current)
         }
@@ -394,6 +618,7 @@ public final class StreamSession: @unchecked Sendable {
             guard let self else { return }
             self.closeBox()
             self.policy.reset()
+            self.crashLimit.reset()
             self.watch { $0.reset() }
             self.connect(current)
         }
@@ -407,12 +632,30 @@ public final class StreamSession: @unchecked Sendable {
         return running
     }
 
+    /// Oturum yeniden denemeyi kendisi bıraktı mı (görüntü hiç gelmiyor, PS5'te Uzaktan Oynatma çöktü, kayıt ya da giriş
+    /// şifresi geçersiz). `reconnectNow` o zaman bir şey yapmaz; uygulama yeni oturum açmalıdır. Eskiden iPhone'da bu
+    /// durumda öne dönmek de bağlantıyı kurmuyordu, kullanıcı uygulamayı kapatıp açmak zorunda kalıyordu.
+    public var hasGivenUp: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return gaveUp
+    }
+
     private func bump(running: Bool) -> Int {
         stateLock.lock()
         defer { stateLock.unlock() }
         self.running = running
+        gaveUp = false
         generation += 1
         return generation
+    }
+
+    /// Yeniden deneme bırakılır (`stop`tan farkı: kullanıcı durdurmadı).
+    private func giveUp() {
+        _ = bump(running: false)
+        stateLock.lock()
+        gaveUp = true
+        stateLock.unlock()
     }
 
     private func isCurrent(_ value: Int) -> Bool {
@@ -428,18 +671,38 @@ public final class StreamSession: @unchecked Sendable {
         emit(.connecting)
 
         // PS5 uyuyorsa uyandır; uyanmayı kuyruğu bloklamadan, aralıklı kontrollerle bekle.
-        let info = Console.blockingDiscover(timeout: 2, host: console.host).first ?? relocate()
-        searchAnswered = info != nil
+        // Kayıtlı adreste başka bir PS5 yanıt verirse (aynı evde iki PS5, modem adresleri değiştirmiş; GitHub #425)
+        // kayıtlı PS5 adıyla ağda aranır; bulunamazsa eskisi gibi o adrese bağlanılır.
+        let atHost = Console.blockingDiscover(timeout: 2, host: console.host).first
+        let info: ConsoleInfo?
+        if let atHost, Self.isRegistered(atHost, name: console.name) {
+            info = atHost
+        } else {
+            if let atHost {
+                RemotePlayLog.write("PS5 oturumu: \(console.host) adresinde başka PS5 yanıt verdi (\(atHost.name)), \(console.name) aranıyor")
+            }
+            info = relocate() ?? atHost
+        }
+        if search.searched(answered: info != nil) {
+            RemotePlayLog.write("PS5 aranıyor: art arda \(search.unanswered). yanıtsız arama; bu cihaz: \(DeviceDiagnostics.line())")
+        }
+        let action = wakePolicy.action(awake: info?.isAwake)
         if let info {
-            RemotePlayLog.write("PS5 oturumu: \(info.name) \(info.host) \(info.isAwake ? "uyanık" : "dinlenmede, uyandırılıyor")")
+            let detail = info.isAwake ? "uyanık" : action == .wake ? "dinlenmede, uyandırılıyor" : "dinlenmede, açılması bekleniyor"
+            RemotePlayLog.write("PS5 oturumu: \(info.name) \(info.host) \(detail)")
         } else {
             RemotePlayLog.write("PS5 oturumu: \(console.host) aramaya yanıt vermedi, yine de bağlanılıyor")
         }
-        if let info, !info.isAwake {
+        switch action {
+        case .connect:
+            openSession(current)
+        case .wake:
             do { try Console.wake(console) } catch { RemotePlayLog.write("PS5 uyandırılamadı: \(error)") }
-            return waitForWake(current, deadline: Date().addingTimeInterval(20))
+            waitForWake(current, deadline: Date().addingTimeInterval(20))
+        case .waitUntilOn:
+            // Kullanıcı PS5'i kapattı: yeniden açılmaz; aralıklı bakılır, PS5 açılınca bağlanılır.
+            scheduleReconnect(current, reason: .consoleAsleep)
         }
-        openSession(current)
     }
 
     /// Kayıtlı adreste PS5 yoksa (modem adresini değiştirmiş olabilir) ağda arar; bulursa adresi günceller.
@@ -455,11 +718,17 @@ public final class StreamSession: @unchecked Sendable {
         return moved
     }
 
-    /// Taramada bulunanlar arasından kayıtlı PS5: tek PS5 varsa odur, birden çoksa adı tek eşleşen; emin değilse nil.
+    /// Taramada bulunanlar arasından kayıtlı PS5: adı (kayıtta PS5'in verdiği ad) tek eşleşen; emin değilse nil.
+    /// Eskiden ağda tek PS5 varsa adına bakılmadan o seçiliyordu; aynı evde iki PS5 varken biri yeniden başlarken
+    /// uygulama diğerine geçip onun adresini kaydediyordu (GitHub #425).
     static func pickMoved(_ found: [ConsoleInfo], name: String) -> ConsoleInfo? {
-        if found.count == 1 { return found[0] }
         let named = found.filter { $0.name == name }
         return named.count == 1 ? named[0] : nil
+    }
+
+    /// Aramaya yanıt veren PS5 kayıtlı PS5 mi (ad eşleşmesi; kayıtta ad yoksa her yanıt kabul edilir).
+    static func isRegistered(_ info: ConsoleInfo, name: String) -> Bool {
+        name.isEmpty || info.name == name
     }
 
     private func waitForWake(_ current: Int, deadline: Date) {
@@ -481,7 +750,7 @@ public final class StreamSession: @unchecked Sendable {
         decodeQueue.async { [weak self] in self?.decoder = H264FrameDecoder() }
 
         let box = ChiakiSessionBox(generation: current, owner: self)
-        let error = box.initialize(console: console, accountId: accountId)
+        let error = box.initialize(console: console, accountId: accountId, lowQuality: quality.lowered)
         guard error.isSuccess else {
             return scheduleReconnect(current, reason: .other(ChiakiError(code: error).description), initialized: false, box: box)
         }
@@ -494,6 +763,13 @@ public final class StreamSession: @unchecked Sendable {
         }, user)
         chiaki_session_set_video_sample_cb(box.pointer, { buffer, size, _, _, user in
             guard let buffer, let user else { return true }
+            // libchiaki'nin `size_t` boyu Swift'te `Int`; üst biti dolu (eksi) gelirse `Data(bytes:count:)` önkoşulu
+            // uygulamayı kapatıyordu (iPhone 1.0.3, Crashlytics: EXC_BREAKPOINT, StreamSession.swift:688). Kare atılır;
+            // false, libchiaki'ye karenin işlenmediğini söyler (sonraki kareler için yeni anahtar kare istenir).
+            guard StreamSession.isPlausibleSample(size: size) else {
+                RemotePlayLog.write("PS5 görüntü: geçersiz kare boyu (\(size)), kare atıldı")
+                return false
+            }
             Unmanaged<ChiakiSessionBox>.fromOpaque(user).takeUnretainedValue().owner?.ingest(Data(bytes: buffer, count: size))
             return true
         }, user)
@@ -516,6 +792,7 @@ public final class StreamSession: @unchecked Sendable {
 
     /// Geçerli oturumu kapatır. Kapatma join içerdiği için kuyruğu bekletmemek adına arka planda yapılır.
     private func closeBox() {
+        streaming = false
         watch { $0.ended() }
         guard let box else { return }
         self.box = nil
@@ -529,6 +806,10 @@ public final class StreamSession: @unchecked Sendable {
             queue.async { [weak self] in
                 guard let self, self.box?.generation == eventGeneration else { return }
                 self.policy.connected()
+                self.wakePolicy.streamed()
+                self.crashLimit.reset()
+                self.search.connected()
+                self.streaming = true
                 self.watch { $0.connected() }
                 self.emit(.streaming)
                 self.scheduleWatch(eventGeneration)
@@ -546,23 +827,47 @@ public final class StreamSession: @unchecked Sendable {
                     }
                 case .stop(let reason):
                     // Şifre yok ya da yanlış: yeniden denemek aynı yere çıkar, oturum kapatılır.
-                    _ = self.bump(running: false)
+                    self.giveUp()
                     self.closeBox()
                     self.emit(.disconnected(reason))
                 }
             }
         case CHIAKI_EVENT_QUIT:
-            let reason = DisconnectReason(quit: event.quit.reason, sessionRequestHint: sessionRequestHint)
+            let reason = DisconnectReason(quit: event.quit.reason, sessionRequestHint: sessionRequestHint,
+                                          remoteText: event.quit.reason_str.map { String(cString: $0) })
             queue.async { [weak self] in
                 // Eski bir oturumun (ör. reconnectNow ile kapatılanın) kapanma olayı yeni oturumu etkilemez.
                 guard let self, self.box?.generation == eventGeneration else { return }
+                let wasStreaming = self.streaming
+                // Bekçi değil libchiaki kapattı (PS5 ya da ağ); görüntünün son ana kadar gelip gelmediği nedeni ayırır.
+                if let summary = self.watch({ $0.summary() }) {
+                    RemotePlayLog.write("PS5 oturumunu libchiaki kapattı (\(reason)); \(summary)")
+                }
+                if case .consoleClosed(let text) = reason {
+                    RemotePlayLog.write("PS5 Uzaktan Oynatma'yı kendisi kapattı (PS5'in nedeni: \"\(text)\"); ağ kopması değil, "
+                        + "çoğunlukla PS5'te kullanıcı değişince olur; yeniden bağlanılıyor")
+                }
                 self.closeBox()
                 self.policy.ended()
+                if wasStreaming, QualityFallback.countsAsDrop(reason) { self.noteDrop() }
                 if reason == .registrationInvalid {
                     // Kayıt geçersiz: yeniden denemek aynı yere çıkar (eskiden sonsuza kadar "Yeniden bağlanılıyor…").
-                    _ = self.bump(running: false)
+                    self.giveUp()
                     return self.emit(.disconnected(.registrationInvalid))
                 }
+                if reason == .consoleRemotePlayCrashed {
+                    let retry = self.crashLimit.crashed()
+                    RemotePlayLog.write("PS5'teki Uzaktan Oynatma çöktü (art arda \(self.crashLimit.crashes)); "
+                        + (retry ? "yeniden deneniyor" : "yeniden bağlanma bırakıldı, PS5 tamamen kapatılıp açılmalı"))
+                    if !retry {
+                        // PS5 kapatılıp açılmadan her deneme aynı yanıtı alır (eskiden sonsuz "Yeniden bağlanılıyor…").
+                        self.giveUp()
+                        return self.emit(.disconnected(reason))
+                    }
+                }
+                // PS5'in adresi TCP bağlantısını reddetti: PS5 yeni uyanıyor olabilir ya da adres başka bir cihaza geçmiş
+                // olabilir. Bir sonraki denemede beklemeden ağda da aranır (eşlemeyi yenilemek bunu çözmez).
+                if reason == .refused { self.nextRelocate = .distantPast }
                 self.scheduleReconnect(eventGeneration, reason: reason)
             }
         default:
@@ -584,25 +889,44 @@ public final class StreamSession: @unchecked Sendable {
             guard let gap = self.watch({ $0.stalled() }) else { return self.scheduleWatch(boxGeneration) }
             let next = self.watch { $0.afterStall() }
             let streak = self.watch { $0.noPictureSessions }
-            RemotePlayLog.write("PS5'ten \(Int(gap)) sn'dir görüntü gelmiyor (bağlantı açık, art arda görüntüsüz oturum \(streak)): \(next)")
+            let summary = self.watch { $0.summary() } ?? ""
+            RemotePlayLog.write("PS5'ten \(Int(gap)) sn'dir görüntü gelmiyor (bağlantı açık, art arda görüntüsüz oturum \(streak)); "
+                + "oturumu görüntü bekçisi kapatıyor: \(next); \(summary)")
             self.closeBox()
             self.policy.ended()
+            self.noteDrop()
             if next == .giveUp {
                 // Görüntü hiç gelmiyor: sonsuz yeniden bağlanma döngüsü yerine dur ve nedenini söyle.
-                _ = self.bump(running: false)
+                self.giveUp()
                 return self.emit(.disconnected(.noPicture))
             }
             self.scheduleReconnect(boxGeneration, reason: .other(PictureWatchdog.reason))
         }
     }
 
+    /// Akış sürerken bağlantı koptu: sık oluyorsa sonraki oturumlar 720p açılır.
+    private func noteDrop() {
+        guard quality.dropped() else { return }
+        RemotePlayLog.write("PS5 bağlantısı \(Int(QualityFallback.window / 60)) dk içinde \(QualityFallback.dropsToLower) kez koptu; "
+            + "görüntü 720p'ye düşürülüyor (daha az bant genişliği). Kalıcı çözüm: PS5'i modeme kabloyla bağlayın")
+    }
+
     private func scheduleReconnect(_ current: Int, reason: DisconnectReason, initialized: Bool = true, box failed: ChiakiSessionBox? = nil) {
         // Başlatılamamış kutunun join edilecek iş parçacığı yok; yalnız belleği bırakılır.
         if let failed, !initialized { failed.markUnused() }
-        emit(.disconnected(DisconnectReason.classify(reason, searchAnswered: searchAnswered, host: console.host)))
+        emit(.disconnected(search.classify(reason, host: console.host)))
         guard isCurrent(current) else { return }
         let delay = policy.nextDelay(inUse: reason == .inUse)
+        RemotePlayLog.write("PS5 oturumu: \(delay) sn sonra yeniden denenecek")
         queue.asyncAfter(deadline: .now() + .seconds(delay)) { [weak self] in self?.connect(current) }
+    }
+
+    /// Bir H.264 karesinin en büyük kabul edilen boyu; 1080p anahtar kare birkaç MB'ı geçmez.
+    static let maxSampleBytes = 64 << 20
+
+    /// libchiaki'den gelen kare boyu makul mü (boş, eksi ya da akla yatmayacak kadar büyük değil).
+    static func isPlausibleSample(size: Int) -> Bool {
+        size > 0 && size <= maxSampleBytes
     }
 
     /// Her kare çözülür (sonraki kareler öncekilere dayanır); görüntü saniyede en çok 20 kez üretilir.

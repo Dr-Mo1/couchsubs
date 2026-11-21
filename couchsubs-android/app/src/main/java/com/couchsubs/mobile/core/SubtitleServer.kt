@@ -30,7 +30,7 @@ data class SubtitleStyle(
     val fontSize: Int = 46,
     val bottomPercent: Int = 7,
     val placement: SubtitlePlacement = SubtitlePlacement.COVER,
-    val background: Int = 72,
+    val background: Int = 90,
     val backgroundShape: SubtitleBackgroundShape = SubtitleBackgroundShape.FIT,
     val bold: Boolean = false,
     val textColor: SubtitleTextColor = SubtitleTextColor.WHITE,
@@ -52,11 +52,16 @@ interface SubtitleSender {
 
 /** Sunucudan geçen ve telefon ekranındaki altyazı görünümünün de gösterdiği olay. */
 sealed class SubtitleEvent {
-    /** [replaces]: satır öncekinin uzamış ya da düzelmiş okumasıdır; öncekinin üstüne yığılmaz, yerine geçer. */
-    data class Subtitle(val text: String, val durationMs: Int, val replaces: Boolean = false) : SubtitleEvent()
+    /**
+     * [replaces]: satır öncekinin uzamış ya da düzelmiş okumasıdır; öncekinin üstüne yığılmaz, yerine geçer. [box]: oyundaki
+     * altyazının karedeki yeri (Mac ve Windows'taki altyazı penceresi "Yazı kadar" kutuyu onu örtecek kadar büyütür; telefon
+     * ekranı oyunun üstünde durmadığından kullanmaz, iPhone'daki gibi).
+     */
+    data class Subtitle(val text: String, val durationMs: Int, val replaces: Boolean = false, val box: TextBox? = null) : SubtitleEvent()
     data object Cleared : SubtitleEvent()
     /** Ek alanın (görev, telefon, bildirim) çevirisi; [text] boşsa o alanın kutusu kalkar. */
-    data class Region(val id: String, val text: String, val box: TextBox?) : SubtitleEvent()
+    /** [blocks]: alandaki ayrı yazı gruplarının çevirileri kendi yerleri ve (otomatik ekran yazısında) özgün stilleriyle. */
+    data class Region(val id: String, val text: String, val box: TextBox?, val blocks: List<ScreenTranslation.Item>? = null) : SubtitleEvent()
     /** Bütün ek alan kutuları kalktı (çeviri durdu). */
     data object RegionsCleared : SubtitleEvent()
     /** "Ekranı çevir" sonuçları: her çeviri yazının yerinde gösterilir. */
@@ -74,9 +79,49 @@ class SubtitleServer(
     private val port: Int = DEFAULT_PORT,
     private val pingIntervalMs: Long = 15_000,
     private val clock: () -> Long = System::currentTimeMillis,
+    /**
+     * Bu kurulumun kalıcı kimliği (`/hello` yanıtında). Aynı ağda iki CouchSubs varken TV uygulaması kendi telefonunu ya da
+     * bilgisayarını adres değişse de bununla tanır; eskiden ağda ilk bulduğuna bağlanıyordu (GitHub #425).
+     */
+    val instanceId: String = "",
+    key: String = SubtitleAccess.createKey(),
+    private val allowLegacy: Boolean = SubtitleAccess.ALLOW_LEGACY_CLIENTS,
+    private val obsOverlay: String = "",
+    /** İkinci ekran sayfası (`/view`, assets/second-screen.html; Mac ve Windows ile aynı dosya). */
+    private val secondScreenPage: String = "",
+    /**
+     * Eşleştirme durumu. Sunucu yeni örnekle yeniden kurulunca (port değişti) eskisininki verilir: onay bekleyen istek,
+     * "TV eşleştir" süresi ve onaylanmış istek taşınır (Mac/iPhone ve Windows ile aynı).
+     */
+    val pairing: SubtitlePairing = SubtitlePairing(),
 ) : SubtitleSender, RegionSender {
+    @Volatile var accessKey: String = key
+        private set
+    var onPairingRequest: ((SubtitlePairing.Ticket) -> Unit)? = null
+    @Volatile var hasLegacyClient = false
+        private set
+    var onLegacyClient: (() -> Unit)? = null
+    fun rotateKey(key: String) {
+        val closing = synchronized(lock) {
+            accessKey = key
+            pairing.reset()
+            clients.toList().also { clients.clear() }
+        }
+        closing.forEach { closeQuietly(it.socket) }
+        onClientsChanged?.invoke(0)
+    }
     companion object {
         const val DEFAULT_PORT = 8787
+
+        /** Oyun içi telefonun çevirisini taşıyan ek alanın kimliği (Mac/iPhone ve Windows ile aynı). */
+        const val GAME_PHONE_ID = "game-phone"
+
+        /** `hdmi` parametresi: 1-4 arası tek rakam, değilse null. */
+        fun hdmiPort(value: String?): Int? = value?.singleOrNull()?.takeIf { it in '1'..'4' }?.let { it - '0' }
+
+        /** `/hello` yanıtı: uygulama, kurulum kimliği ve bağlı TV sayısı (Mac ve Windows ile aynı biçim). */
+        fun helloBody(id: String, tvs: Int): String =
+            "{\"app\":\"couchsubs\",\"auth\":1,\"id\":\"${id.filter { it.isLetterOrDigit() && it.code < 128 || it == '-' }}\",\"tvs\":${maxOf(0, tvs)}}"
 
         /** Bağlantı canlı tutma: yorum satırını EventSource görmez; adlı "ping" olayını TV görür. */
         const val PING_FRAME = ": ping\n\nevent: ping\ndata: {}\n\n"
@@ -88,10 +133,18 @@ class SubtitleServer(
             "right" to Json.Decimal(box.right), "top" to Json.Decimal(box.top),
         )
 
-        fun subtitleFrame(text: String, durationMs: Int, box: TextBox?, at: Long, paragraphs: Boolean = false, replaces: Boolean = false): String {
+        /** [speakerColors]: açıksa satırlardaki konuşanlar renkleriyle `speakers` alanında gider (bkz. [SpeakerColors]). */
+        fun subtitleFrame(
+            text: String, durationMs: Int, box: TextBox?, at: Long, paragraphs: Boolean = false, replaces: Boolean = false,
+            speakerColors: Boolean = false,
+        ): String {
             val json = mutableMapOf<String, Any?>("at" to at, "duration" to durationMs, "text" to text)
             if (paragraphs) json["paragraphs"] = true
             if (replaces) json["replace"] = true
+            // Konuşan adı yoksa ya da ayar kapalıysa alan hiç yazılmaz; eski TV uygulamaları alanı yok sayar.
+            if (speakerColors) SpeakerColors.speakers(text).takeIf { it.isNotEmpty() }?.let { speakers ->
+                json["speakers"] = speakers.map { mapOf("color" to it.color, "name" to it.name) }
+            }
             if (box != null) json["box"] = boxJson(box)
             return frame("subtitle", json)
         }
@@ -102,8 +155,15 @@ class SubtitleServer(
          * Ek alanın çevirisi: alanın kimliği (`id`), çeviri (`text`; boşsa kutu kalkar), yazının karedeki yeri (`box`) ve
          * satır yüksekliği (`line`, ekrana oranla). TV çeviriyi o yerde küçük bir kutuda gösterir (Mac/iPhone ile aynı).
          */
-        fun regionFrame(id: String, text: String, box: TextBox?, lineHeight: Double?): String {
+        fun regionFrame(
+            id: String, text: String, box: TextBox?, lineHeight: Double?, icons: List<IconPlacement>? = null,
+            blocks: List<ScreenTranslation.Item>? = null,
+        ): String {
+            val (text, blocks) = guarded(text, box, blocks)
             val json = mutableMapOf<String, Any?>("id" to id, "text" to text)
+            if (!icons.isNullOrEmpty()) json["icons"] = iconsJson(icons)
+            // Alanda ayrı duran yazı gruplarının çevirileri kendi yerleriyle; eski TV uygulamaları birleşik `text`'i gösterir.
+            if (!blocks.isNullOrEmpty() && text.isNotEmpty()) json["blocks"] = blocks.map { itemJson(it, phone = id == GAME_PHONE_ID) }
             if (box != null) json["box"] = boxJson(box)
             if (lineHeight != null) json["line"] = Json.Decimal(Math.round(lineHeight.coerceIn(0.0, 1.0) * 10000) / 10000.0)
             return frame("region", json)
@@ -114,18 +174,64 @@ class SubtitleServer(
          * çok parçalıysa `paragraphs` ile gider (Mac/iPhone `screen` olayı ile aynı). TV öncekinin yerine bunları koyar.
          */
         fun screenFrame(items: List<ScreenTranslation.Item>, durationMs: Int): String {
-            val list = items.map { item ->
-                val json = mutableMapOf<String, Any?>(
-                    "box" to boxJson(item.box), "line" to Json.Decimal(Math.round(item.lineHeight.coerceIn(0.0, 1.0) * 10000) / 10000.0),
-                    "text" to item.translation,
-                )
-                if (item.paragraphs) json["paragraphs"] = true
-                json
-            }
-            return frame("screen", mapOf("duration" to durationMs, "items" to list))
+            val kept = items.filter { area(it.box) <= MAX_BOX_AREA }
+            return frame("screen", mapOf("duration" to durationMs, "items" to kept.map { itemJson(it) }))
         }
 
-        fun styleFrame(style: SubtitleStyle) = frame(
+        /**
+         * Ekranın bu oranından büyük çeviri kutusu gönderilmez. TV ve OBS kutuyu opak zeminle çizer; yanlış bir algılamanın
+         * (otomatik ekran yazısı) ekranın büyük kısmını kaplayan kutusu oyun görüntüsünü kapatıyordu (LG'de "siyah ekran,
+         * ses var"). Windows: SubtitleServer.MaxBoxArea, Mac/iPhone: SubtitleServer.maxBoxArea.
+         */
+        const val MAX_BOX_AREA = 0.4
+
+        fun area(box: TextBox) = maxOf(0.0, box.right - box.left) * maxOf(0.0, box.bottom - box.top)
+
+        /**
+         * Büyük kutu koruması: alanı [MAX_BOX_AREA]'dan büyük bloklar atılır; blokların toplamı da sınırı aşıyorsa ya da
+         * bloksuz alanın kutusu sınırdan büyükse alan boş gönderilir (TV kutuyu kaldırır).
+         */
+        fun guarded(text: String, box: TextBox?, blocks: List<ScreenTranslation.Item>?): Pair<String, List<ScreenTranslation.Item>?> {
+            if (text.isEmpty()) return text to blocks
+            var rest = blocks
+            if (!blocks.isNullOrEmpty()) {
+                val kept = blocks.filter { area(it.box) <= MAX_BOX_AREA }
+                if (kept.sumOf { area(it.box) } > MAX_BOX_AREA) return "" to null
+                if (kept.isNotEmpty()) return text to kept
+                rest = null
+            }
+            return if (box != null && area(box) > MAX_BOX_AREA) "" to null else text to rest
+        }
+
+        /** Yeriyle bir çeviri ("Ekranı çevir" öğesi ya da ek alan bloğu). */
+        private fun itemJson(item: ScreenTranslation.Item, phone: Boolean = false): Map<String, Any?> {
+            val json = mutableMapOf<String, Any?>(
+                "box" to boxJson(item.box), "line" to Json.Decimal(Math.round(item.lineHeight.coerceIn(0.0, 1.0) * 10000) / 10000.0),
+                "text" to item.translation,
+            )
+            if (item.paragraphs) json["paragraphs"] = true
+            item.icons?.takeIf { it.isNotEmpty() }?.let { json["icons"] = iconsJson(it) }
+            // Otomatik ekran yazısının özgün görünüşü; eski TV uygulamaları bu alanları yok sayar.
+            // Oyun telefonunun balonu yalnız zemin ve yazı rengini taşır (Mac/iPhone ve Windows ile aynı; `flat` yok).
+            item.surface?.let {
+                if (!phone) json["surface"] = mapOf("background" to it.background, "flat" to it.flat, "foreground" to it.foreground)
+                else if (isRgb(it.background) && isRgb(it.foreground)) json["surface"] = mapOf("background" to it.background, "foreground" to it.foreground)
+            }
+            item.look?.let { json["style"] = mapOf("align" to it.align, "bold" to it.bold, "condensed" to it.condensed, "upper" to it.upper) }
+            return json
+        }
+
+        private fun isRgb(color: String) =
+            color.length == 7 && color[0] == '#' && color.drop(1).all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
+
+        /** Çevirinin içindeki kumanda simgeleri: düz metindeki yeri (`at`) ve PNG'si (`src`); eski TV uygulamaları yok sayar. */
+        fun iconsJson(icons: List<IconPlacement>) = icons.map { mapOf("at" to it.at, "src" to it.image) }
+
+        /**
+         * [setApart]: "Ekran yazılarını altyazıdan ayır"; TV ek alan kutularını özgün renginde ve kendi yerinde, altyazı
+         * kutusundan farklı zeminde çizer (`setApart`; eski TV uygulamaları yok sayar, yeni olanlar yoksa açık sayar).
+         */
+        fun styleFrame(style: SubtitleStyle, setApart: Boolean = true) = frame(
             "style", mapOf(
                 "background" to style.background.coerceIn(0, 100),
                 "backgroundShape" to style.backgroundShape.name.lowercase(Locale.ROOT),
@@ -134,6 +240,7 @@ class SubtitleServer(
                 "displayMode" to if (style.displayMode == TvDisplayMode.OVERLAY) "overlay" else "inApp",
                 "fontSize" to style.fontSize,
                 "placement" to style.placement.name.lowercase(Locale.ROOT),
+                "setApart" to setApart,
                 "stackPrevious" to style.stackPrevious,
                 "textColor" to style.textColor.name.lowercase(Locale.ROOT),
             )
@@ -150,6 +257,9 @@ class SubtitleServer(
     private var pinger: ScheduledExecutorService? = null
     private var lastStyle: SubtitleStyle? = null
 
+    /** "Ekran yazılarını altyazıdan ayır" (bkz. [styleFrame]); değişince [sendStyle] yeniden çağrılmalı. */
+    @Volatile var setApart: Boolean = true
+
     /** Bağlı TV sayısı değişince çağrılır (sunucunun iş parçacığında). */
     @Volatile var onClientsChanged: ((Int) -> Unit)? = null
 
@@ -158,8 +268,18 @@ class SubtitleServer(
 
     /** false ise altyazı olayları TV'lere gitmez (altyazı yalnız telefon ekranında). */
     @Volatile var sendsToTv: Boolean = true
+    /** "Konuşana göre renk": altyazı olayına konuşanların renkleri eklenir (`speakers`). */
+    @Volatile var speakerColors: Boolean = false
 
     val connectedClients: Int get() = synchronized(lock) { clients.count { !it.viewer } }
+
+    /**
+     * TV uygulamasının gösterdiği HDMI girişi (1-4): altyazı akışına bağlanırken `/events?hdmi=2` ile bildirir. Bağlantı
+     * kopsa da son bildirilen akılda kalır. LG bekçisi PS tuşunun TV'yi konsol girişine geçirmesini kullanıcının başka
+     * girişe geçmesinden bununla ayırır (Windows ve Mac/iPhone ile aynı). Eski TV uygulaması bildirmez: null.
+     */
+    @Volatile var consolePort: Int? = null
+        private set
 
     /** Sunucuyu başlatır ve dinlenen portu döner (port 0 ise rastgele seçilen). */
     fun start(): Int {
@@ -173,7 +293,12 @@ class SubtitleServer(
         return socket.localPort
     }
 
-    fun stop() {
+    /**
+     * `keepPairing`: sunucu hemen yeniden açılacaksa eşleştirme durumu korunur. Sıradan kapanış (çeviri durdu) onay
+     * bekleyen isteği ve "TV eşleştir" süresini siler.
+     */
+    fun stop(keepPairing: Boolean = false) {
+        if (!keepPairing) pairing.setSession(false)
         pinger?.shutdownNow()
         pinger = null
         try {
@@ -187,8 +312,8 @@ class SubtitleServer(
     }
 
     override fun sendSubtitle(text: String, durationMs: Int, box: TextBox?, replaces: Boolean) {
-        broadcast(subtitleFrame(text, durationMs, box, clock(), replaces = replaces), subtitle = true)
-        onEvent?.invoke(SubtitleEvent.Subtitle(text, durationMs, replaces))
+        broadcast(subtitleFrame(text, durationMs, box, clock(), replaces = replaces, speakerColors = speakerColors), subtitle = true)
+        onEvent?.invoke(SubtitleEvent.Subtitle(text, durationMs, replaces, box))
     }
 
     override fun clear() {
@@ -196,9 +321,28 @@ class SubtitleServer(
         onEvent?.invoke(SubtitleEvent.Cleared)
     }
 
-    override fun sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?) {
-        broadcast(regionFrame(id, text, box, lineHeight), subtitle = true)
-        onEvent?.invoke(SubtitleEvent.Region(id, text, box))
+    override fun sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?) = sendRegion(id, text, box, lineHeight, null)
+
+    /** [icons]: çevirinin içindeki kumanda simgeleri ([ButtonIcons]); `icons` alanıyla gider. */
+    override fun sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?, icons: List<IconPlacement>?) =
+        sendRegion(id, text, box, lineHeight, icons, null)
+
+    /** [blocks]: alanda ayrı duran yazı gruplarının çevirileri kendi yerleriyle (`blocks`). */
+    override fun sendRegion(
+        id: String, text: String, box: TextBox?, lineHeight: Double?, icons: List<IconPlacement>?,
+        blocks: List<ScreenTranslation.Item>?,
+    ) {
+        broadcast(regionFrame(id, text, box, lineHeight, icons, blocks), subtitle = true)
+        if (id == GAME_PHONE_ID) {
+            // Telefon ekranında oyun telefonunun çevirisi ek alan kutusu gibi tek kutuda görünür (iPhone ile aynı); büyük
+            // kutu korumasından geçen balonlar gösterilir.
+            val (kept, shown) = guarded(text, box, blocks)
+            val balloons = if (kept.isEmpty()) emptyList() else shown ?: emptyList()
+            onEvent?.invoke(SubtitleEvent.Region(id, balloons.joinToString("\n") { it.translation },
+                balloons.map { it.box }.reduceOrNull { a, b -> a.union(b) }))
+            return
+        }
+        onEvent?.invoke(SubtitleEvent.Region(id, text, box, blocks?.takeIf { text.isNotEmpty() }))
     }
 
     override fun clearRegions() {
@@ -218,9 +362,30 @@ class SubtitleServer(
         onEvent?.invoke(SubtitleEvent.ScreenCleared)
     }
 
+    /** Dublaj sesleri: `/speech/<n>.wav` → WAV; son 16 ses tutulur (Swift SubtitleServer.sendSpeech ile aynı). */
+    private val speechFiles = LinkedHashMap<String, ByteArray>()
+    private var speechNumber = 0
+
+    /** Dublaj sesini TV'ye gönderir: ses `/speech/<n>.wav` adresinden verilir, `speech` olayı adresi bildirir. */
+    fun sendSpeech(wav: ByteArray, durationMs: Int) {
+        val path = synchronized(lock) {
+            speechNumber += 1
+            val path = "/speech/$speechNumber.wav"
+            speechFiles[path] = wav
+            while (speechFiles.size > 16) speechFiles.remove(speechFiles.keys.first())
+            path
+        }
+        broadcast(frame("speech", mapOf("duration" to durationMs, "url" to path)))
+    }
+
+    /** TV'de çalan dublajı durdurur (yeni altyazı, oturum sonu). */
+    fun stopSpeech() {
+        broadcast(frame("speech-stop", emptyMap()))
+    }
+
     fun sendStyle(style: SubtitleStyle) {
         synchronized(lock) { lastStyle = style }
-        broadcast(styleFrame(style), subtitle = true)
+        broadcast(styleFrame(style, setApart), subtitle = true)
     }
 
     private fun acceptLoop(socket: ServerSocket) {
@@ -230,6 +395,7 @@ class SubtitleServer(
             } catch (error: IOException) {
                 return
             }
+            if (!SubtitleAccess.isLocalPeer(client.inetAddress)) { closeQuietly(client); continue }
             thread(name = "CouchSubs SSE client", isDaemon = true) { serve(client) }
         }
     }
@@ -239,17 +405,60 @@ class SubtitleServer(
             // Sessizce kaybolan TV'ler TCP canlılık denetimiyle fark edilir; küçük çerçeveler beklemeden gider.
             socket.keepAlive = true
             socket.tcpNoDelay = true
-            val requestLine = readRequestLine(socket.getInputStream())
-            val parts = requestLine?.split(' ') ?: emptyList()
-            val method = parts.getOrElse(0) { "" }
-            val target = parts.getOrElse(1) { "" }
-            val path = target.substringBefore('?')
+            socket.soTimeout = 10_000
+            val request = readRequestLine(socket.getInputStream())?.let(SubtitleAccess::parse)
+            if (request == null) { respondAndClose(socket, "400 Bad Request"); return }
+            socket.soTimeout = 0
+            val checkedKey = accessKey
+            val access = SubtitleAccess.authorize(request, checkedKey, allowLegacy)
+            val cors = SubtitleAccess.cors(request)
+            if (access.status != 200) {
+                respondAndClose(socket, if (access.status == 403) "403 Forbidden" else "401 Unauthorized", cors = if (access.status == 403) "" else cors)
+                return
+            }
+            val method = request.method
+            val path = request.path
+            if (path == "/pair") {
+                if (method == "POST") {
+                    val ticket = pairing.begin()
+                    if (ticket == null) { respondAndClose(socket, "409 Conflict", cors = cors); return }
+                    onPairingRequest?.invoke(ticket)
+                    respondAndClose(socket, "200 OK", org.json.JSONObject().put("id", ticket.id).put("code", ticket.code).toString(), cors)
+                } else if (method == "GET") {
+                    val body = synchronized(lock) {
+                        val state = if (request.parameter("validate") == "1") {
+                            val check = request.copy(target = "/events?k=" + java.net.URLEncoder.encode(request.parameter("k") ?: "", "UTF-8"))
+                            if (SubtitleAccess.authorize(check, accessKey, false).status == 200) "valid" else "expired"
+                        } else pairing.poll(request.parameter("id") ?: "")
+                        // Eski TV uygulamaları "rejected"ı tanımaz: "expired" görüp durur. Yenisi rejected ile Tamam bekler, yalnız
+                        // "expired"da kendisi yeniden ister (GitHub #737).
+                        if (state == "rejected") org.json.JSONObject().put("state", "expired").put("rejected", true).toString()
+                        else org.json.JSONObject().put("state", state).apply { if (state == "approved") put("key", accessKey) }.toString()
+                    }
+                    respondAndClose(socket, "200 OK", body, cors)
+                } else respondAndClose(socket, "405 Method Not Allowed", cors = cors)
+                return
+            }
             when {
-                method == "OPTIONS" -> respondAndClose(socket, "204 No Content")
-                method == "GET" && path == "/events" -> openStream(socket, target.contains("viewer=obs"))
+                method == "OPTIONS" -> respondAndClose(socket, "204 No Content", cors = cors)
+                method == "GET" && path == "/events" -> {
+                    // OBS katmanı ve ikinci ekran sayfası izleyicidir: TV sayılmaz, altyazı hedefi TV değilken de olayları alır.
+                    val obs = request.parameter("viewer").let { it == "obs" || it == SecondScreen.VIEWER }
+                    // Anahtarsız OBS sayfası eski bir OBS adresidir; TV uygulamasının eski olduğu anlamına gelmez.
+                    val notify = synchronized(lock) { (access.legacy && !obs && !hasLegacyClient).also { if (it) hasLegacyClient = true } }
+                    if (notify) onLegacyClient?.invoke()
+                    if (!obs) hdmiPort(request.parameter("hdmi"))?.let { consolePort = it }
+                    openStream(socket, obs, cors, checkedKey)
+                }
                 // TV uygulaması ağdaki CouchSubs'ı bu yanıtla tanır.
-                method == "GET" && path == "/hello" -> respondAndClose(socket, "200 OK", "{\"app\":\"couchsubs\"}")
-                else -> respondAndClose(socket, "404 Not Found")
+                method == "GET" && path == "/obs" && obsOverlay.isNotEmpty() -> respondAndClose(socket, "200 OK", obsOverlay, cors, "text/html; charset=utf-8")
+                // Anahtar authorize'da denetlendi (anahtarsız istek 401 aldı).
+                method == "GET" && path == SecondScreen.PATH && secondScreenPage.isNotEmpty() ->
+                    respondAndClose(socket, "200 OK", secondScreenPage, cors, "text/html; charset=utf-8")
+                method == "GET" && path.startsWith("/speech/") && synchronized(lock) { speechFiles.containsKey(path) } ->
+                    respondAndClose(socket, "200 OK", synchronized(lock) { speechFiles[path] } ?: ByteArray(0), cors, "audio/wav")
+                method == "GET" && path == "/hello" -> respondAndClose(socket, "200 OK", helloBody(instanceId, connectedClients), cors)
+                else -> respondAndClose(socket, "404 Not Found", cors = cors)
             }
         } catch (error: IOException) {
             closeQuietly(socket)
@@ -265,33 +474,34 @@ class SubtitleServer(
             if (count <= 0) return null
             head.write(buffer, 0, count)
             val text = head.toString(Charsets.ISO_8859_1.name())
-            if (text.contains("\r\n\r\n")) return text.substringBefore("\r\n")
+            if (text.contains("\r\n\r\n")) return text.substringBefore("\r\n\r\n")
         }
         return null
     }
 
-    private fun respondAndClose(socket: Socket, status: String, body: String = "") {
-        val head = "HTTP/1.1 $status\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body"
-        socket.getOutputStream().apply {
-            write(head.toByteArray(Charsets.US_ASCII))
-            flush()
-        }
+    private fun respondAndClose(socket: Socket, status: String, body: String = "", cors: String = "", type: String = "application/json") =
+        respondAndClose(socket, status, body.toByteArray(Charsets.UTF_8), cors, type)
+
+    private fun respondAndClose(socket: Socket, status: String, data: ByteArray, cors: String, type: String) {
+        val head = "HTTP/1.1 $status\r\n${cors}Content-Type: $type\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nContent-Length: ${data.size}\r\nConnection: close\r\n\r\n"
+        socket.getOutputStream().apply { write(head.toByteArray(Charsets.US_ASCII)); write(data); flush() }
         closeQuietly(socket)
     }
 
-    private fun openStream(socket: Socket, viewer: Boolean) {
+    private fun openStream(socket: Socket, viewer: Boolean, cors: String, checkedKey: String) {
         val head = StringBuilder()
             .append("HTTP/1.1 200 OK\r\n")
             .append("Content-Type: text/event-stream; charset=utf-8\r\n")
             .append("Cache-Control: no-cache\r\n")
             .append("Connection: keep-alive\r\n")
-            .append("Access-Control-Allow-Origin: *\r\n\r\n")
+            .append(cors).append("\r\n")
             .append("retry: 2000\n\n")
         val client = Client(socket, viewer)
         // Başlık, listeye girdikten sonra gelebilecek ilk olaydan önce yazılır (istemci kilidi tutulurken eklenir).
         val count = synchronized(client) {
             val count = synchronized(lock) {
-                lastStyle?.let { head.append(styleFrame(it)) }
+                if (accessKey != checkedKey) { closeQuietly(socket); return }
+                lastStyle?.let { head.append(styleFrame(it, setApart)) }
                 clients.add(client)
                 clients.count { !it.viewer }
             }

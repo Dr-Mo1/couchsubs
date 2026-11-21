@@ -13,11 +13,19 @@ yazılır. Kaynaklar ve lisansları THIRD-PARTY-NOTICES.md'de.
 
 ## Havuzdan otomatik paket (sunucuda, her gece)
 
-`server/pool` Worker'ı (`src/autopack.js`) bu dosyadaki temizlik kurallarıyla her gece 03:07–04:57 UTC arasında kendisi
+`server/pool` Worker'ı (`src/autopack.js`) bu dosyadaki temizlik kurallarıyla her gece 03:02–05:57 UTC arasında (beş dakikada bir) kendisi
 paket üretir: en az 2 kurulumun okuduğu satırlar, oyun başına en az 300 temiz satır olunca `pool-<oyun kimliği>` paketi
-(Workers AI, `@cf/google/gemma-4-26b-a4b-it`), R2'ye ve `index.json`'a. Elle paket (aşağıdaki akış) her zaman öncelikli:
+(Worker'da `ANTHROPIC_API_KEY` secret'ı varsa Claude `claude-opus-5-5` Message Batches ile, yoksa Workers AI `@cf/zai-org/glm-5.3-flash`),
+R2'ye ve `index.json`'a. Elle paket (aşağıdaki akış) her zaman öncelikli:
 elle paket yüklenince `server/pool/scripts/build-known.mjs` ile `auto/known-keys.bin` yenilenir, otomatik paket o satırları
 bırakır. Elle akış daha iyi çeviri (Claude + sözlük + denetim) gerektiğinde kullanılır.
+
+Dev oyunlar (yüz binlerce satır) anahtar imleciyle (installs azalan, key artan) sayfa sayfa gezilir. Claude ile bir
+tetiklemede 1000 satır tek Message Batch olarak gider (%50 indirim), sonuç sonraki tetiklemelerde toplanır; bir oyun gecede
+en çok 4000, tüm oyunlar 5500 satır (`CLAUDE_LIMITS`, ~2,6 $), toplanan yanıtların usage'ına göre gecede en çok 3 $
+(`NIGHT_BUDGET_USD`; gecenin harcaması R2 `auto/state.json` içinde `usd`). Model yazı tanıma çöpü satırı boş döndürürse
+satır kalıcı atlanır. Workers AI ile 200 / 2000 / 5000 (`NIGHTLY_LIMIT`, nöron payı). Hesaplar `autopack.js`'te. Çevrilen oyunun paketi gecenin sonunda
+(ya da payı dolunca) kurulur ve sürümü artar: `pool-<oyun>` her gece büyür.
 
 ## Havuzdan hızlı paket (`poolpack.py`)
 

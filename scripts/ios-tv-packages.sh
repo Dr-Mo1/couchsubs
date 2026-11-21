@@ -30,6 +30,7 @@ with open(web + 'index.html', encoding='utf-8') as f:
             lines.append('  <script src="$WEBAPIS/webapis/webapis.js"></script>')
             lines.append(line)
         else:
+            # Görünüm sabit width=1920 kalır (package-tizen.sh, 0.9.55).
             lines.append(line.replace('src="icon.png"', 'src="panel-icon.png"'))
 with zipfile.ZipFile(dst, 'w', zipfile.ZIP_STORED) as z:
     for path, name in sorted(files, key=lambda item: item[1]):

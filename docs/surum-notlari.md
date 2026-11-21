@@ -4,14 +4,72 @@ CouchSubs'ın yeni deneme sürümü. Türkçe dil desteği olmayan PS5 oyunları
 
 **İndir:** [Mac (DMG)](https://github.com/yorulmazsinan/couchsubs/releases/latest/download/CouchSubs-macos.dmg) · [Windows (kurulum)](https://github.com/yorulmazsinan/couchsubs/releases/latest/download/CouchSubs-windows-Setup.exe) · [Android telefon (Google Play)](https://play.google.com/store/apps/details?id=com.couchsubs.mobile)
 
-**Bu sürümde yeni**
+**Bu sürümde yeni** (yalnız hata düzeltmeleri; gerçek oyun kareleriyle gerileme testinden geçti)
 
-- **GTA 6'da kısa etkileşim yazıları artık çevrilmiyor (Mac, Windows, Android, #404, #406):** "TAKE AMMO PACK", "SIT", "CLOSE", "TURN ON" gibi büyük harfli kısa yazılar altyazı sanılıp çevriliyor, aynı anda gelen konuşma kaçabiliyordu. Tek satırlık, küçük harfsiz, en çok üç sözcüklük noktalamasız yazılar artık altyazı sayılmıyor; "Yes.", "Okay." gibi kısa konuşmalar etkilenmiyor. Günlüğüyle bildiren: emiraliarif.
-- **TV'den kaldırılan Android TV uygulaması yeniden kuruluyor (Mac, Windows, #407):** TV'den CouchSubs TV silinince bilgisayar onu hâlâ kurulu sanıyor, "TV uygulaması bekleniyor"da kalıyordu. Artık TV'ye bakılıyor, uygulama yoksa yeniden kuruluyor. TV uygulaması bağlı değilken Samsung ve Android TV'de **TV uygulamasını yeniden kur** düğmesi var; Google TV'de Play sayfası açılırsa "Yükle'ye basın" yazıyor.
-- **TV uygulaması 0.9.25:** Samsung'da birden çok HDMI bağlıyken konsolun girişi soruluyor ve hatırlanıyor (#360, #381; bilgisayar da TV'ye bağlıyken Xbox yerine bilgisayarın ekranı açılıyordu). Samsung'da bilgi panelinde HDMI görüntüsünün çözünürlüğü ve yenileme hızı görünüyor (#405). TV'deki uygulama kendiliğinden güncellenir.
-- **Windows'ta model indirme hatası günlükte (#391, #396):** Ücretsiz çeviri modeli inmezse asıl neden `hata.log`'a yazılıyor.
-- **GTA 6 paketi:** Oyuncular oynadıkça genişliyor (şu an 87 bin satır); uygulama güncellemesi beklemeden kendiliğinden iner.
-- **Android telefon:** [Google Play](https://play.google.com/store/apps/details?id=com.couchsubs.mobile) üzerinden güncelleniyor (0.1.0-beta.57).
+- **Kısa ve iki satırlı altyazılar:** Telefon bildiriminin altyazı sanılması, pencere kaynağında görev satırının ("Follow the plane") kaçması ve oyunun kendi Türkçe altyazısının yeniden çevrilmesi düzeltildi.
+- **GTA 6 bildirimleri:** Telefon bildirimi ve mesaj önizlemesinin çevirisi ekranın ortasına değil, kendi yerine çiziliyor.
+- **LG'de görüntünün önce gelip sonra siyah kalması (#643, TV uygulaması 0.9.61):** TV uygulamasının ses ayarları varsayılan olarak kapatıldı; görüntü takılırsa kendiliğinden yeniden kuruluyor.
+- **LG + telefon eşleşmesinin tamamlanmaması (#737, TV uygulaması 0.9.62):** Telefondaki eşleşme isteği düşerse TV kendiliğinden yeniden istiyor.
+- **Android TV'de "bağlı ama altyazı gelmiyor" (TV uygulaması 0.9.63):** TV uygulaması eski bir adrese bağlı kalıyordu; bilgisayar artık açık uygulamaya kendi adresini bildiriyor.
+- **Mac/iPhone'da PS5 bağlanırken çökme:** Geçersiz görüntü karesi artık atılıyor; Apple çevirisindeki eşzamanlı oturum sorunu giderildi.
+
+**beta.78'de gelenler:** iki satırlı altyazının yarım okunması (çevirilerin çoğunun gelmemesi) düzeltmesi, menü/harita çevirilerinin üst üste binmemesi, Android TV izin istemi ve Ayarlar tuşu.
+
+**beta.77'de gelenler:** kısa altyazıların atılmaması, GTA 6 telefon kartının sohbeti izlemesi, altyazıyı tam örtme, "Yalnız OBS (yayın)", Mac kısayolları, 2015 Samsung TV'ler.
+
+**beta.76'da gelenler:** Android TV'de CouchSubs'ın öne gelip kaybolması ve HDR/bildirimde HDMI'a geçme düzeltmesi (TV uygulaması 0.9.56), GTA 6 telefon çevirisinin gidip gelmemesi, telefonlarda Türkçe dublaj.
+
+**beta.75'te gelenler:** Samsung 4K/8K'da görüntünün sol üstte küçük kalmasının asıl nedeninin giderilmesi (TV uygulaması 0.9.55), tabela/tişört yazılarının çevrilmemesi, "Yeniden bağlan", oyun profilleri, GTA 6 telefon ana ekranı ve Remote Play penceresi.
+
+**beta.74'te gelenler:** QR ile başka cihazda altyazı, "Altyazıyı konumlandır", GTA 6 harita kartı, TV uygulamasının kendiliğinden açılması, LG'de giriş seçimi (1–4 tuşları).
+
+**beta.73'te gelenler:** LG'de çeviri başlayınca siyah ekrana karşı önlem, Samsung parlaklık oynaması ve ultra geniş monitör düzeltmesi, GTA 6 telefon kartı iyileştirmesi.
+
+**beta.72'de gelenler:** "Ekranı çevir" çevirilerinin yazının kendi yerinde ve stilinde çizilmesi, GTA 6 telefon mesaj kartı, Xbox'ta görüntü kesilince yeniden bağlanma, PS5 "bulunamadı" düzeltmesi.
+
+**Daha önce (beta.71):** LG'de PS tuşuna basınca çevirinin kaybolmaması (TV uygulaması 0.9.49), LG Oyun Yöneticisi açıklaması.
+
+**Daha önce (beta.70):** "Ekranı çevir"in GTA 6 telefon mesajlarını yeniden çevirmesi, görev yazısının konuşmanın yerine geçmemesi, LG'de ses için önlemler (TV uygulaması 0.9.48), 2016 Samsung TV'lerde elle kurulan uygulamanın korunması (#638).
+
+**Daha önce (beta.69):** Ekran çevirisi kapalıyken GTA 6'da menülerin çevrilmemesi (hazır alanlar varsayılan kapalı), oyun paketlerinde aynı oyunun tek görünmesi, Samsung 4K/8K TV'lerde görüntünün sol üstte kalmaması ve Sarı tuş (TV uygulaması 0.9.47).
+
+**Daha önce (beta.68):** Windows'ta uyarısız kapanmaya karşı önlemler ve çökme kaydı (#587), çevirinin iki kez görünmemesi, ekran yazısı türlerinin ayrı açılıp kapanması, Samsung'da yeni adres alan TV'ye bağlanma, TV eşleştirme düzeltmesi, PS5 bağlantı kopmasına karşı önlemler, 2016 Samsung TV'ler için yeni imza (#638).
+
+**beta.67'de gelenler:** İki satırlı altyazının üst satırının da çevrilmesi (#715), Mac'te yazı okuma takılmasında altyazının sürmesi (#678, #679), Mac'te Xbox (Beta), "Paketleri şimdi güncelle", Windows'ta deneme modu.
+
+**Daha önce (beta.66):** Mac'te uygulama içi güncellemenin yeniden gelmesi (#696), Windows kurulumunda "Yükleme Kısmen Başarılı" (#676), elle yazılan TV adresinde Android TV'nin tanınması, LG'de "TV uygulamasını yeniden kur" ve "TV'yi değiştir" (#700).
+
+**beta.65'te gelenler:** Android TV'de katman modunda altyazının yeniden görünmesi (TV uygulaması 0.9.45), ekran yazılarını otomatik çevirmenin varsayılan kapalı olması (deneysel), Samsung TV'de uygulamanın açılması (#685), LG TV'nin sürekli CouchSubs'a dönmemesi (#688), PSN girişinde "Tarayıcıda giriş yap" (Mac, #683), TV kurulum günlüğü (#686).
+
+**beta.64'te gelenler:** LG TV'de düşen oyun görüntüsünün kendiliğinden yeniden kurulması (TV uygulaması 0.9.44), görev yazısı ekrandayken altyazıların çevrilmesi (#675), art arda altyazıda yazının küçülmemesi, ekran yazıları ve menülerin yerinde çevrilmesi (deneysel), TV'de konuşana göre renk, 2016 Samsung TV'lere bilgisayardan kurulum (#638), LG eşleşmişken "TV'ye bağlan" (#662).
+
+**beta.63'te gelenler:** Android TV'de katman modunda siyah ekran döngüsünün giderilmesi (TV uygulaması 0.9.42, #643), konuşana göre renkli altyazı, GTA 6'da hazır ek alanlar, altyazı kutusunun yazıya oturması, Samsung "Sunucu bakım altında (1544007)" (#637, #511), "TV'de test et" yönergeleri (#645).
+
+**beta.62'de gelenler:** uzun oyunda bağlanıp kopma döngüsünün giderilmesi (#593), bir iki harfi yanlış okunan satırların hazır paketten bulunması, 2016 Samsung TV'lere kurulum düzeltmesi (Android telefon, #621).
+
+**beta.61'de gelenler:** GTA 6'da oyun telefonu çevirisi (deneysel, katkı: lones8888), GTA 6 için 39 bin satırlık topluluk çevirisi, altyazı okunmayınca yedek yakalama ve "oyunun altyazısını açın" ipucu, Android'de yeni paket güncelleme ekranı, Android TV'de uygulamanın kapanmaması (TV uygulaması 0.9.41), Linux sunucu düzeltmeleri.
+
+**beta.60'ta gelenler:** PS5'e bağlanma ve eşleştirmenin daha güvenilir olması, "PS5 bağlanmayı reddetti"nin kendiliğinden yeniden bağlanması, LG TV'de ekran koruyucu (TV uygulaması 0.9.40), Android telefonda kilit ekranı ve PSN girişi düzeltmeleri, ek alanlarda kontrolcü simgeleri (katkı: erayslyrt00), paket sunucusuna yedek adres, Mac güncelleme imzasının yenilenmesi.
+
+**beta.59'da gelenler:** 4K Samsung TV'de PS5 görüntüsünün ekranı kaplaması (TV uygulaması 0.9.39), telefonda paket güncelleme hatasının görünmesi, ek alan çevirilerinin daha doğru olması (katkı: erayslyrt00), Windows güncelleme kartında sürüm notları (katkı: erayslyrt00), pencere yakalama tanısı, ortak havuzun daha az veri göndermesi.
+
+**beta.58'de gelenler:** Windows'ta TV aranırken uygulamanın kapanmasının düzelmesi, Ekranı çevir'in ekrandaki bütün yazıları çevirmesi, TV eşleştirme kodunun her durumda görünmesi (TV uygulaması 0.9.37), ek alan çevirilerinin ekrana sığması (0.9.38, katkı: erayslyrt00), GTA 6 "Altyazı zeminini izle" (katkı: erayslyrt00), telefonda altyazı ekranının kararmaması ve "Ekranı döndür" (Play, 0.1.0-beta.65).
+
+**beta.57'de gelenler:** Android TV'de "Eşleştirme tamamlanmadı" ekranında kalmanın düzelmesi (TV uygulaması 0.9.36), PS5 "Remote Play on Console has crashed" döngüsünün durması, kol kendiliğinden kapanınca ana hesap ipucu, Samsung ultra geniş monitörde HDMI penceresi (0.9.35), telefonlarda "Ağda TV bulunamadı" yönergesi, uzun oyunda telefon kapanması için tanı (Play, 0.1.0-beta.64).
+
+**beta.56'da gelenler:** TV eşleştirme kodu ve anahtarlı TV/OBS bağlantısı (TV uygulaması 0.9.34, katkı: erayslyrt00), Android TV'de Ana ekrana geçince katmanın kapanmaması (0.9.33, katkı: erenbati), Android 5.1'li eski Android TV'lerde elle kurulum (katkı: goktugorgn), Xbox (Beta) görüntüsü başlamayınca anahtar kare isteği ve tanı, GTA 6 altyazı zemini ayarının Mac'te çalışması (Play, 0.1.0-beta.63).
+
+**beta.55'te gelenler:** yazı okuma takılınca altyazının durmaması (Mac, iPhone), Samsung ultra geniş monitörde PS5 görüntüsünün ortada küçük kalmaması (TV uygulaması 0.9.32), oyun modu ya da HDR kayboluyorsa Katman ipucu, Android TV'de başka profilde kalan uygulamanın yeniden kurulması (katkı: bcansiz74), Samsung "26101 Connection refused" hatasında doğru yönerge (Play, 0.1.0-beta.62).
+
+**beta.54'te gelenler:** kapatılan PS5'in yeniden bağlanırken uyandırılmaması ve "bağlı" görünmemesi, GTA 6'da "yalnız altyazıyı çevir"in Mac'te düzelmesi (katkı: Berkovant), eski LG TV'lerin (webOS 3.x) bulunması ve TV adresinin elle yazılabilmesi, 2016 Samsung TV'lerde kurulum, Android TV katmanında örtünün İngilizce satırı tam kaplaması (TV uygulaması 0.9.31), Android TV kurulumunda kablosuz hata ayıklama, telefonlarda yeni görünüm (Play, 0.1.0-beta.61).
+
+**beta.53'te gelenler:** TV uygulamasının telefonu bulması (eski LG webOS, bazı Samsung'lar; TV uygulaması 0.9.30), Samsung ultra geniş monitörlerde tam ekran, Android TV'de yeşil/siyah ekranın giderilmesi (0.9.29), ek alanda ayrı yazıların kendi yerinde çevrilmesi ve GTA 6 etkileşim menüsü (katkı: erayslyrt00), Gemini ücretli anahtar seçeneği (katkı: erenbati), Samsung soundbar'ın TV sanılmaması (katkı: ismkdc), OBS katmanında dengeli satırlar, ana ekranda "Görüntü kaynağı", iPhone'dan LG kurulumu, iPhone arka plan uyarısı, telefonlarda tanıtım penceresi (Play, 0.1.0-beta.60).
+
+**beta.52'de gelenler:** DeepL'in daha kararlı çalışması (katkı: DevBoX11), aynı evde iki PS5, iki TV ya da iki CouchSubs olduğunda cihazların karışmaması, "Ekranı çevir"de tuş simgelerinin korunması (katkı: erayslyrt00) ve son satırın çevrilmesi, GTA 6'da yalnız altyazıyı çevirme seçeneği (katkı: Berkovant), Windows model indirmesinin takılmaması (katkı: erenbati), TV'de örtü modunda satır bölme, TV uygulaması 0.9.28, 32 bit Android telefonlar (Play, 0.1.0-beta.59).
+
+**beta.51'de gelenler:** GTA 6'da tuş ipuçlarının çevrilmemesi, PS5 bağlantısında sık kopmada 720p ve hata kodu açıklamaları, Samsung kurulum ve bağlantı düzeltmeleri (Host PC IP, "TV'de test et", arka plana düşen uygulama), TV uygulaması 0.9.26 (sade altyazı kutusu, panel ipucu), Xbox ses açıklaması. Katkı: erayslyrt00, erenbati.
+
+**beta.50'de gelenler:** GTA 6'da kısa etkileşim yazılarının çevrilmemesi, TV'den kaldırılan Android TV uygulamasının yeniden kurulması, TV uygulaması 0.9.25 (Samsung HDMI seçimi ve görüntü bilgisi), Windows'ta model indirme hatasının günlüğe yazılması.
 
 **beta.49'da gelenler:** GTA 6'da görev yazısında altyazının takılı kalmasının giderilmesi, GTA 6 Türkçe paketi (topluluk katkısı: lones8888), Windows'ta oyun kapağı seçimi (katkı: erenbati).
 

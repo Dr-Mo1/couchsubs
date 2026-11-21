@@ -10,6 +10,7 @@ import com.couchsubs.mobile.core.AreaProfile
 import com.couchsubs.mobile.core.AreaProfiles
 import com.couchsubs.mobile.core.AreaSet
 import com.couchsubs.mobile.core.AreaStore
+import com.couchsubs.mobile.core.SubtitlePipeline
 import com.couchsubs.mobile.core.SubtitlePlacement
 import com.couchsubs.mobile.core.toJson
 import com.couchsubs.mobile.core.SubtitleStyle
@@ -30,11 +31,47 @@ import javax.crypto.spec.GCMParameterSpec
 /** Okunan konsol: PlayStation (varsayılan, Remote Play) ya da Xbox (Beta, ev yayını). */
 enum class ConsolePlatform { PLAYSTATION, XBOX }
 
-/** Altyazının gösterileceği yer. */
-enum class SubtitleTarget { TV, PHONE }
+/**
+ * Altyazının gösterildiği yer; [BOTH]: TV'de ve bu telefonda (Mac ve Windows'taki "İkisi de", iPhone ile aynı). [OBS]: yalnız
+ * OBS katmanı (Mac ve Windows'taki "Yalnız OBS (yayın)"): TV aranmaz ve açılmaz, bu telefonda altyazı ekranı açılmaz; aynı
+ * ağdaki bilgisayarda OBS'in tarayıcı kaynağı telefonun /obs adresini açar.
+ */
+enum class SubtitleTarget {
+    TV, PHONE, BOTH, OBS;
+
+    val showsOnTv: Boolean get() = this == TV || this == BOTH
+    val showsOnPhone: Boolean get() = this == PHONE || this == BOTH
+}
 
 /** Çeviri motoru: ücretsiz cihaz üstü (ML Kit) ya da kullanıcının anahtarıyla çevrimiçi hizmet. */
-enum class EngineChoice { FREE, DEEPL, GEMINI, OPENAI, CLAUDE }
+/** LOCAL: aynı ağdaki bilgisayarda Ollama / LM Studio (Mac ve Windows'taki "Yerel model"). */
+enum class EngineChoice { FREE, DEEPL, GEMINI, OPENAI, CLAUDE, LOCAL }
+
+/**
+ * "Ekran yazılarını otomatik çevir" bir kerelik göçü (Windows AutoScreenTextMigration, Mac/iPhone
+ * migratingAutoScreenText ile aynı kural). Göç işareti varsa null (bir şey yapılmaz); yoksa ayar kapatılıp işaret
+ * konur. Ayar açıktıysa — açık kaydedilmiş ya da hiç değiştirilmemiş eski kurulumda (beta.63 varsayılanı açıktı) —
+ * kullanıcıya bir kez bilgi gösterilir; yeni kurulumda (kayıt yok) gösterilmez.
+ */
+object AutoScreenTextMigration {
+    data class Step(val notice: Boolean)
+
+    /** [stored]: kayıttaki değer (yoksa null); [existing]: kayıt dosyasında başka ayar var (eski kurulum). */
+    fun apply(reset: Boolean, stored: Boolean?, existing: Boolean): Step? =
+        if (reset) null else Step(notice = stored ?: existing)
+}
+
+/**
+ * "Bilinen oyunlarda hazır alanları kullan" ve "GTA 6 telefonunu otomatik çevir" bir kerelik göçü (Windows
+ * ScreenTextExtrasMigration, Mac/iPhone migratingScreenTextExtras ile aynı kural); [AutoScreenTextMigration]'dan sonra
+ * uygulanır. Hazır alanlar beta.63–68'de varsayılan açık geliyordu ve otomatik ekran yazısı kapalıyken de GTA 6'da menüyü
+ * ve bildirimleri çeviriyordu. İşaret varsa null (bir şey yapılmaz); yoksa işaret konur ve otomatik ekran yazısı
+ * kapalıysa ikisi de kapatılır (true); kullanıcı onu açmışsa dokunulmaz (false).
+ */
+object ScreenTextExtrasMigration {
+    /** [reset]: göç işareti; [autoScreenText]: otomatik ekran yazısı (önceki göçten sonraki) değeri. */
+    fun apply(reset: Boolean, autoScreenText: Boolean): Boolean? = if (reset) null else !autoScreenText
+}
 
 /**
  * Anahtarlar ve PS5 kaydı Android Keystore'daki (donanım destekli, dışarı çıkarılamayan) AES-GCM anahtarıyla şifrelenip
@@ -96,6 +133,17 @@ class AppSettings(context: Context) : AreaStore {
     private val prefs: SharedPreferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     val secrets = SecretStore(context)
 
+    /** Kuruluma özel; sunucu durdurulup başlatılınca değişmez. */
+    val subtitleAccessKey: String
+        get() = synchronized(AppSettings::class.java) {
+            secrets.get("subtitleAccessKey")?.takeIf { it.isNotEmpty() }
+                ?: com.couchsubs.mobile.core.SubtitleAccess.createKey().also { secrets.put("subtitleAccessKey", it) }
+        }
+
+    fun renewSubtitleAccessKey(): String = synchronized(AppSettings::class.java) {
+        com.couchsubs.mobile.core.SubtitleAccess.createKey().also { secrets.put("subtitleAccessKey", it) }
+    }
+
     var onboarded: Boolean
         get() = prefs.getBoolean("onboarded", false)
         set(value) = prefs.edit().putBoolean("onboarded", value).apply()
@@ -132,7 +180,25 @@ class AppSettings(context: Context) : AreaStore {
         AiProvider.GEMINI -> "geminiModel"
         AiProvider.OPENAI -> "openAIModel"
         AiProvider.CLAUDE -> "claudeModel"
+        AiProvider.LOCAL -> "localAIModel"
     }
+
+    /**
+     * Yerel model sunucusunun adresi ("http://192.168.1.20:11434/v1"; Mac/iPhone localAIBaseURL). Telefonda varsayılan
+     * yoktur: 127.0.0.1 telefonun kendisidir, sunucu aynı ağdaki bir bilgisayardadır.
+     */
+    var localAiBaseUrl: String
+        get() = prefs.getString("localAIBaseURL", null).orEmpty()
+        set(value) = prefs.edit().putString("localAIBaseURL", value.trim()).apply()
+
+    /** Yerel modelin adı (Mac/iPhone localAIModel); varsayılan qwen2.5:7b. */
+    var localAiModel: String
+        get() = prefs.getString("localAIModel", null)?.takeIf { it.isNotBlank() } ?: com.couchsubs.mobile.translation.LocalAiServer.DEFAULT_MODEL
+        set(value) = prefs.edit().putString("localAIModel", value.trim()).apply()
+
+    /** Geçerli adres ve model varsa sunucu; yoksa null (yerel model seçilemez). */
+    val localAiServer: com.couchsubs.mobile.translation.LocalAiServer?
+        get() = com.couchsubs.mobile.translation.LocalAiServer.of(localAiBaseUrl, localAiModel)
 
     var packsEnabled: Boolean
         get() = prefs.getBoolean("packsEnabled", true)
@@ -158,6 +224,97 @@ class AppSettings(context: Context) : AreaStore {
         set(value) = prefs.edit().putBoolean("showSpeakerNames", value).apply()
 
     /**
+     * "Bilinen oyunlarda hazır alanları kullan": tabloda satırı olan oyunda (GTA 6) yardım kutusu ve mesajlar
+     * kendiliğinden okunur ([com.couchsubs.mobile.core.GameAreaPresets]). Varsayılan kapalı (beta.63–68'de açık
+     * geliyordu: otomatik ekran yazısı kapalıyken de GTA 6'da menüyü ve bildirimleri çeviriyordu); kullanıcı açmadıkça
+     * altyazı alanı dışında hiçbir şey çevrilmez.
+     */
+    var gameAreaPresets: Boolean
+        get() = prefs.getBoolean("gameAreaPresets", false)
+        set(value) = prefs.edit().putBoolean("gameAreaPresets", value).apply()
+
+    /**
+     * "Ekran yazılarını otomatik çevir": ekranda beliren yazı kutuları (görev, yardım, mesaj) bulunup kendi yerinde
+     * çevrilir; oyundan bağımsızdır. Deneysel: varsayılan kapalı (beta.63'te açık geliyordu; oyun dünyasındaki poster ve
+     * plakaları da çeviriyordu). Kullanıcı Ayarlar'dan açar. Değiştirilince göç bilgisi kalkar.
+     */
+    var autoScreenText: Boolean
+        get() = prefs.getBoolean("autoScreenText", false)
+        set(value) {
+            prefs.edit().putBoolean("autoScreenText", value).apply()
+            autoScreenTextNotice = false
+        }
+
+    /**
+     * Otomatik ekran yazısında hangi türler çevrilir ([com.couchsubs.mobile.core.ScreenTextKind]). Eski kayıtlarda
+     * yoktur; varsayılanla gelir (telefon, görev, yardım/eylemler açık; menüler ve diğerleri kapalı).
+     */
+    var screenTextPhone: Boolean
+        get() = prefs.getBoolean("screenTextPhone", true)
+        set(value) = prefs.edit().putBoolean("screenTextPhone", value).apply()
+    var screenTextMission: Boolean
+        get() = prefs.getBoolean("screenTextMission", true)
+        set(value) = prefs.edit().putBoolean("screenTextMission", value).apply()
+    var screenTextHelp: Boolean
+        get() = prefs.getBoolean("screenTextHelp", true)
+        set(value) = prefs.edit().putBoolean("screenTextHelp", value).apply()
+    var screenTextMenus: Boolean
+        get() = prefs.getBoolean("screenTextMenus", false)
+        set(value) = prefs.edit().putBoolean("screenTextMenus", value).apply()
+    var screenTextOther: Boolean
+        get() = prefs.getBoolean("screenTextOther", false)
+        set(value) = prefs.edit().putBoolean("screenTextOther", value).apply()
+
+    /** Türlerin şu anki hali. */
+    val screenTextKinds: com.couchsubs.mobile.core.ScreenTextKinds
+        get() = com.couchsubs.mobile.core.ScreenTextKinds(screenTextPhone, screenTextMission, screenTextHelp, screenTextMenus, screenTextOther)
+
+    /** Bu tür ekran yazısı çevrilir mi (ana ayar kapalıyken hepsi). */
+    fun screenTextAllows(kind: com.couchsubs.mobile.core.ScreenTextKind): Boolean = screenTextKinds.allows(autoScreenText, kind)
+
+    /** GTA 6 telefonu okunur mu: kendi ayarı ya da otomatik ekran yazısında Telefon türü açık. */
+    val readsGamePhone: Boolean get() = screenTextKinds.readsGamePhone(autoReadGamePhone, autoScreenText)
+
+    init {
+        migrateAutoScreenText()
+        migrateScreenTextExtras()
+    }
+
+    /** Hazır alanlar ve GTA 6 telefonu bir kerelik göçü ([ScreenTextExtrasMigration]). */
+    private fun migrateScreenTextExtras() {
+        val turnOff = ScreenTextExtrasMigration.apply(prefs.getBoolean("screenTextExtrasReset", false), autoScreenText) ?: return
+        val edit = prefs.edit().putBoolean("screenTextExtrasReset", true)
+        if (turnOff) edit.putBoolean("gameAreaPresets", false).putBoolean("autoReadGamePhone", false)
+        edit.apply()
+    }
+
+    /**
+     * Bir kerelik göç (Windows AutoScreenTextMigration, Mac/iPhone migratingAutoScreenText ile aynı kural): işaret yoksa
+     * ayar kapatılır, işaret konur. Ayar açıktıysa (beta.63'te açık kaydedilmiş ya da hiç değiştirilmemiş eski kurulum)
+     * bu süreçte bir kez "deneysel; Ayarlar'dan açabilirsiniz" bilgisi gösterilir. Yeni kurulumda bilgi yok.
+     */
+    private fun migrateAutoScreenText() {
+        val stored = if (prefs.contains("autoScreenText")) prefs.getBoolean("autoScreenText", false) else null
+        val step = AutoScreenTextMigration.apply(prefs.getBoolean("autoScreenTextReset", false), stored, prefs.all.isNotEmpty())
+            ?: return
+        prefs.edit().putBoolean("autoScreenText", false).putBoolean("autoScreenTextReset", true).apply()
+        if (step.notice) autoScreenTextNotice = true
+    }
+
+    /**
+     * "Ekran yazılarını altyazıdan ayır": ek alan ve otomatik ekran yazısı kutuları özgün rengini ve zeminini korur,
+     * altyazı kutusuna benzemez (zemin yoksa zeminsiz, koyu gölgeli). Eski kayıtlarda yoktur; açık başlar.
+     */
+    var setTextApart: Boolean
+        get() = prefs.getBoolean("setTextApart", true)
+        set(value) = prefs.edit().putBoolean("setTextApart", value).apply()
+
+    /** "Konuşana göre renk": konuşan adlı satır (ad ve cümle) o konuşanın renginde görünür. Eski kayıtlarda yoktur; açık başlar. */
+    var speakerColors: Boolean
+        get() = prefs.getBoolean("speakerColors", true)
+        set(value) = prefs.edit().putBoolean("speakerColors", value).apply()
+
+    /**
      * Xbox ev yayınında oyunun sesi bu telefonda çalınır. Xbox uzaktan oynatma sürerken sesi istemciye verip TV'yi
      * susturabilir; kapalıyken ses hiçbir yerden gelmeyebilir, bu yüzden varsayılan açık. PS5'i etkilemez.
      */
@@ -169,6 +326,50 @@ class AppSettings(context: Context) : AreaStore {
     var fastSubtitleDetection: Boolean
         get() = prefs.getBoolean("fastSubtitleDetection", false)
         set(value) = prefs.edit().putBoolean("fastSubtitleDetection", value).apply()
+
+    /** "Çeviriyi Türkçe seslendir" (Türkçe dublaj; Mac/iPhone settings.dubbing.enabled); varsayılan kapalı. */
+    var dubbingEnabled: Boolean
+        get() = prefs.getBoolean("dubbing.enabled", false)
+        set(value) = prefs.edit().putBoolean("dubbing.enabled", value).apply()
+
+    /** "Sesi çal": TV ya da bu telefon; varsayılan TV (masaüstüyle aynı). */
+    var dubbingOutput: com.couchsubs.mobile.core.DubbingOutput
+        get() = com.couchsubs.mobile.core.DubbingOutput.of(prefs.getString("dubbing.output", null))
+        set(value) = prefs.edit().putString("dubbing.output", value.id).apply()
+
+    /** Karakter sesleri (JSON, bkz. VoiceCast.toJson). */
+    var dubbingCast: String?
+        get() = prefs.getString("dubbing.cast", null)
+        set(value) = prefs.edit().putString("dubbing.cast", value).apply()
+
+    /**
+     * "Bozuk okunan satır için bekleme" (ms): sözlükte olmayan sözcüklerle okunan satırın daha iyi okuması için en çok bu
+     * kadar beklenir (Windows MisreadWaitMs, Mac/iPhone misreadWaitMs); önerilen 800.
+     */
+    var misreadWaitMs: Int
+        get() = prefs.getInt("misreadWaitMs", SubtitlePipeline.PACK_WAIT_MS)
+        set(value) = prefs.edit().putInt("misreadWaitMs", value).apply()
+
+    /** "Yarım okunan satır için bekleme" (ms): yarım görünen satırın tamamı için en çok bu kadar beklenir; önerilen 300. */
+    var partialWaitMs: Int
+        get() = prefs.getInt("partialWaitMs", SubtitlePipeline.CLEAN_WAIT_MS)
+        set(value) = prefs.edit().putInt("partialWaitMs", value).apply()
+
+    /**
+     * "GTA 6'daki telefonu otomatik çevir (deneysel)": GTA 6 oynanırken oyun içi telefon açılınca ekranı okunup çevrilir
+     * (Mac/Windows autoReadGamePhone); varsayılan kapalı.
+     */
+    var autoReadGamePhone: Boolean
+        get() = prefs.getBoolean("autoReadGamePhone", false)
+        set(value) = prefs.edit().putBoolean("autoReadGamePhone", value).apply()
+
+    /**
+     * "Altyazı zeminini izle (GTA 6, deneysel)": yalnız GTA 6'nın koyu lacivert opak altyazı zeminindeki yazı çevrilir
+     * (Mac/Windows watchSubtitleBackground); varsayılan kapalı.
+     */
+    var watchSubtitleBackground: Boolean
+        get() = prefs.getBoolean("watchSubtitleBackground", false)
+        set(value) = prefs.edit().putBoolean("watchSubtitleBackground", value).apply()
 
     /** Bu PS5'te son seçilen oyun ("Hangi oyunu oynuyorsunuz?" kartının ilk önerisi). */
     fun lastGame(console: String): String? = prefs.getString("lastGame.$console", null)
@@ -190,7 +391,7 @@ class AppSettings(context: Context) : AreaStore {
 
     /** TV'deki altyazı kutusunun koyuluğu, yüzde (100: tamamen opak; oyundaki İngilizce yazıyı kapatır). */
     var tvBackground: Int
-        get() = prefs.getInt("tvBackground", 72).coerceIn(0, 100)
+        get() = prefs.getInt("tvBackground", 90).coerceIn(0, 100)
         set(value) = prefs.edit().putInt("tvBackground", value.coerceIn(0, 100)).apply()
 
     var tvBackgroundShape: com.couchsubs.mobile.core.SubtitleBackgroundShape
@@ -295,10 +496,13 @@ class AppSettings(context: Context) : AreaStore {
         get() = AreaSet.fromJson(prefs.getString("generalAreas", null)?.let { runCatching { JSONObject(it) }.getOrNull() })
         set(value) = prefs.edit().apply { if (value == null) remove("generalAreas") else putString("generalAreas", value.toJson().toString()) }.apply()
 
-    /** Bölge ya da ek alanlar değişince (çeviri sürerken yeni bölge hemen okunur). */
+    /**
+     * Bölge, hazır seçimi ya da ek alanlar değişince (çeviri sürerken yeni bölge hemen okunur). Hazır seçim de dinlenir:
+     * Tam ekran seçilince ek alanlar okunmaz, başka seçime dönünce yeniden okunur.
+     */
     fun onAreasChanged(action: () -> Unit): SharedPreferences.OnSharedPreferenceChangeListener {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == "region" || key == "extraAreas") action()
+            if (key == "region" || key == "areaPreset" || key == "extraAreas" || key == "activeAreaProfile" || key == "gameAreaPresets") action()
         }
         prefs.registerOnSharedPreferenceChangeListener(listener)
         return listener
@@ -332,6 +536,9 @@ class AppSettings(context: Context) : AreaStore {
         prefs.unregisterOnSharedPreferenceChangeListener(listener)
 
     companion object {
+        /** Otomatik ekran yazısı bu süreçte göçle kapatıldı: ana ekranda bir kez bilgi görünür. */
+        @Volatile
+        var autoScreenTextNotice = false
         /**
          * Yazı ölçeğinin sınırları, yüzde (iPhone ile aynı). Alt sınır eskiden %80'di (TV'de 37 piksel); TV'de en küçüğü
          * bile büyük kalıyordu (#218). %40, TV'de 18 piksel: Mac'teki (20) ve Windows'taki (16) en küçük boya denk.
@@ -400,6 +607,11 @@ class AppSettings(context: Context) : AreaStore {
         get() = prefs.getLong("lastSessionMs", 0)
         set(value) = prefs.edit().putLong("lastSessionMs", value).apply()
 
+    /** Çeviri sürerken son yazılan sağlık satırı (SessionHealth); süreç ölürse kapanış raporuna eklenir. */
+    var lastHealth: String?
+        get() = prefs.getString("lastHealth", null)
+        set(value) = prefs.edit().putString("lastHealth", value).apply()
+
     /** Çeviri hizmeti çalışıyor mu; süreç ölünce true kalır, sonraki açılışta kapanışın çeviri sırasında olduğu anlaşılır. */
     var translating: Boolean
         get() = prefs.getBoolean("translating", false)
@@ -415,6 +627,16 @@ class AppSettings(context: Context) : AreaStore {
         get() = prefs.getInt("subtitleScale", 100).coerceIn(MIN_SUBTITLE_SCALE, MAX_SUBTITLE_SCALE)
         set(value) = prefs.edit().putInt("subtitleScale", value.coerceIn(MIN_SUBTITLE_SCALE, MAX_SUBTITLE_SCALE)).apply()
 
+    /** "Bu telefonda" ekranında iki parmakla verilen yazı boyu çarpanı (TV'ye dokunmaz; iPhone ile aynı sınırlar). */
+    var phoneSubtitleScale: Float
+        get() = com.couchsubs.mobile.core.PhoneSubtitleLayout.clampScale(prefs.getFloat("phoneSubtitleScale", 1f))
+        set(value) = prefs.edit().putFloat("phoneSubtitleScale", com.couchsubs.mobile.core.PhoneSubtitleLayout.clampScale(value)).apply()
+
+    /** "Bu telefonda" ekranında parmakla verilen yer: varsayılan yerden ekran yüksekliğine oranla kaydırma (negatif: yukarı). */
+    var phoneSubtitleOffset: Float
+        get() = com.couchsubs.mobile.core.PhoneSubtitleLayout.clampOffset(prefs.getFloat("phoneSubtitleOffset", 0f))
+        set(value) = prefs.edit().putFloat("phoneSubtitleOffset", com.couchsubs.mobile.core.PhoneSubtitleLayout.clampOffset(value)).apply()
+
     /** Profil › Kullanım verisi: hata ve kullanım istatistikleri (Firebase, Meta olay adları). Varsayılan açık. */
     var usageData: Boolean
         get() = prefs.getBoolean("usageData", true)
@@ -428,6 +650,14 @@ class AppSettings(context: Context) : AreaStore {
     var tourShown: Boolean
         get() = prefs.getBoolean("tourShown", false)
         set(value) = prefs.edit().putBoolean("tourShown", value).apply()
+
+    /**
+     * "Arka planda sürdür (Resim içinde resim)": çeviri sürerken uygulamadan çıkınca oyun görüntüsü ve canlı altyazı
+     * küçük pencerede kalır (iPhone ile aynı ad ve açıklama). Çeviri ön plan hizmetinde zaten sürer; bu yalnız pencereyi açar.
+     */
+    var backgroundPip: Boolean
+        get() = prefs.getBoolean("backgroundPip", true)
+        set(value) = prefs.edit().putBoolean("backgroundPip", value).apply()
 
     /** Bildirim tercihleri: bağlantı koptuğunda ve yeni paket geldiğinde. */
     var notifyDisconnect: Boolean
@@ -447,6 +677,14 @@ class AppSettings(context: Context) : AreaStore {
      * Bu telefonun TV uygulamasını kurduğu (ya da sürümüne baktığı) TV: marka, adres ve TV'deki sürüm. Uygulama açılınca
      * ve TV her bağlandığında bu TV'deki sürüme bakılır; telefondaki paketten eskiyse güncelleme önerilir.
      */
+    /**
+     * TV uygulamasının daha önce bağlandığı Samsung TV'nin adresi: o TV'de uygulamanın kurulu olduğu bilinir, açma
+     * komutundan önce TV'nin kurulu uygulama listesine bakılmaz (bkz. TvSessionLauncher.samsungKnownInstalled).
+     */
+    var samsungAppSeenHost: String?
+        get() = prefs.getString("tvApp.samsungSeenHost", null)
+        set(value) = prefs.edit().putString("tvApp.samsungSeenHost", value).apply()
+
     var installedTv: InstalledTv?
         get() {
             val brand = prefs.getString("tvApp.brand", null)?.let { runCatching { enumValueOf<TvBrand>(it) }.getOrNull() } ?: return null
@@ -471,6 +709,20 @@ class AppSettings(context: Context) : AreaStore {
 
     fun apiKey(engine: EngineChoice): String? = secrets.get("key." + engine.name)
     fun setApiKey(engine: EngineChoice, key: String?) = secrets.put("key." + engine.name, key?.trim())
+
+    /**
+     * Denenmiş anahtarı gizli depoya yazar ve geri okur; Keystore yazamadıysa ya da değer geri okunamadıysa false (kayıt
+     * başarılı sayılmaz, Mac'teki Anahtar Zinciri ve Windows'taki şifreli depo kuralıyla aynı).
+     */
+    fun storeApiKey(engine: EngineChoice, key: String): Boolean {
+        val trimmed = key.trim()
+        try {
+            setApiKey(engine, trimmed)
+        } catch (error: Exception) {
+            return false
+        }
+        return apiKey(engine) == trimmed
+    }
 
     private inline fun <reified T : Enum<T>> enumOr(name: String?, fallback: T): T =
         name?.let { runCatching { enumValueOf<T>(it) }.getOrNull() } ?: fallback

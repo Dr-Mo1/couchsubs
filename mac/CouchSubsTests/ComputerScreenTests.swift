@@ -92,6 +92,45 @@ final class ComputerScreenTests: XCTestCase {
         model.stop()
     }
 
+    /// "Yalnız OBS (yayın)": TV eşleşmiş olsa da aranmaz ve açık tutulmaz, bilgisayar ekranında pencere açılmaz; çeviri TV'siz de
+    /// başlar (OBS katmanı olayları sunucudan alır).
+    func testOBSOnlyStartsWithoutTVAndOpensNoWindow() async {
+        let services = FakeServices()
+        let store = storeWithoutTV()
+        store.save(LGTV(name: "LG TV", host: "127.0.0.1"), for: StoreKey.tv)
+        store.save("tv-key", for: StoreKey.tvKey)
+        let model = AppModel(services: services, store: store, defaults: .isolated())
+        model.settings.output = .obs
+        XCTAssertTrue(model.canStart)
+        await model.start()
+        XCTAssertTrue(model.isRunning)
+        XCTAssertTrue(services.keepers.isEmpty)
+        model.overlayReceive(.subtitle(text: "Merhaba", durationMs: 4000, paragraphs: false))
+        XCTAssertTrue(model.overlayLines.isEmpty)
+        XCTAssertFalse(model.overlayVisible)
+        model.stop()
+        let alone = AppModel(services: FakeServices(), store: storeWithoutTV(), defaults: .isolated())
+        alone.settings.output = .obs
+        XCTAssertTrue(alone.canStart)
+    }
+
+    /// "Örtsün": yeri gelmeyen satır son bilinen yeri örter; yazı boyu bir kademeden fazla küçülmez ve geri zıplamaz.
+    func testCoverKeepsTheLastBoxAndAStableFontScale() {
+        let model = AppModel(services: FakeServices(), store: storeWithoutTV(), defaults: .isolated())
+        model.settings.output = .computer
+        model.settings.style.placement = .cover
+        let box = TextBox(left: 0.3, top: 0.8, right: 0.7, bottom: 0.9)
+        model.overlayReceive(.subtitle(text: "Çaldın mı?", durationMs: 4000, paragraphs: false, box: box))
+        XCTAssertEqual(model.overlayCover?.box, box)
+        XCTAssertEqual(model.overlayCover?.scale, 1)
+        let long = String(repeating: "Annenin arabası demiştin hani, unuttun mu yoksa? ", count: 4)
+        model.overlayReceive(.subtitle(text: long, durationMs: 4000, paragraphs: false))
+        XCTAssertEqual(model.overlayCover?.box, box)
+        XCTAssertEqual(model.overlayCover?.scale, CoverFontScale.step)
+        model.overlayReceive(.subtitle(text: "Evet.", durationMs: 4000, paragraphs: false))
+        XCTAssertEqual(model.overlayCover?.scale, CoverFontScale.step)
+    }
+
     func testTVOnlyWithoutTVCannotStart() async {
         let services = FakeServices()
         let model = AppModel(services: services, store: storeWithoutTV(), defaults: .isolated())
@@ -123,6 +162,56 @@ final class ComputerScreenTests: XCTestCase {
         model.settings.output = .computer
         try await model.pair(LGTV(name: "LG TV", host: "192.168.1.153"))
         XCTAssertEqual(model.settings.output, .tv)
+    }
+
+    func testClosingPhoneKeepsTheOtherOverlayRegions() {
+        let model = AppModel(services: FakeServices(), store: storeWithoutTV(), defaults: .isolated())
+        model.settings.output = .computer
+        let box = TextBox(left: 0.4, top: 0.3, right: 0.6, bottom: 0.4)
+        let message = ScreenTranslation.Item(source: "Hello", translation: "Merhaba", box: box, lineHeight: 0.03)
+        model.overlayReceive(.gamePhone([message]))
+        XCTAssertEqual(model.overlayPhoneItems, [message])
+        XCTAssertTrue(model.overlayVisible)
+        model.overlayReceive(.region(id: "quest", text: "Görev", box: box))
+        model.overlayReceive(.gamePhone([]))
+        XCTAssertTrue(model.overlayPhoneItems.isEmpty)
+        XCTAssertEqual(model.overlayRegions.map(\.id), ["quest"])
+    }
+
+    /// Kendiliğinden bulunan ekran yazısı blokları stilleriyle saklanır; boş region olayı onları kaldırır.
+    func testScreenTextBlocksAreKeptWithTheirStyleUntilCleared() {
+        let model = AppModel(services: FakeServices(), store: storeWithoutTV(), defaults: .isolated())
+        model.settings.output = .computer
+        var item = ScreenTranslation.Item(source: "ROB VICKI'S BOSS", translation: "VİCKİ'NİN PATRONUNU SOY",
+                                          box: TextBox(left: 0.02, top: 0.05, right: 0.3, bottom: 0.09), lineHeight: 0.03)
+        item.style = PhoneTextStyle(background: "#14161E", foreground: "#F0F0F0")
+        item.look = TextLook(bold: true, condensed: true, align: .left, upper: true, flat: true)
+        model.overlayReceive(.screenText(id: "auto-1", items: [item]))
+        XCTAssertEqual(model.overlayRegions.map(\.id), ["auto-1"])
+        XCTAssertEqual(model.overlayRegions.first?.items, [item])
+        XCTAssertEqual(model.overlayRegions.first?.box, item.box)
+        // #687: saydam altyazı penceresi yalnız altyazıyı gösterir; ekran yazısı blokları yayın penceresi için saklanır,
+        // saydam pencereyi tek başına açmaz.
+        XCTAssertFalse(model.overlayVisible)
+        model.overlayReceive(.region(id: "auto-1", text: "", box: nil))
+        XCTAssertTrue(model.overlayRegions.isEmpty)
+    }
+
+    /// Yayın penceresinde ekran yazısı kutusu altyazıyla çakışınca yalnız gerektiği kadar kayar; altyazı yerinde kalır.
+    func testScreenTextBoxMovesAwayFromTheSubtitle() {
+        let height: CGFloat = 1080
+        let subtitle = CGRect(x: 400, y: 900, width: 1120, height: 100)
+        let gap = height * 0.006
+        // Çakışmayan kutu yerinde.
+        XCTAssertEqual(ScreenTextBlocks.top(CGRect(x: 100, y: 100, width: 300, height: 40), avoiding: subtitle, height: height), 100)
+        // Altyazının üst kenarına binen kutu yukarı kayar (aşağısı daha uzak).
+        XCTAssertEqual(ScreenTextBlocks.top(CGRect(x: 600, y: 880, width: 300, height: 40), avoiding: subtitle, height: height),
+                       900 - gap - 40, accuracy: 0.001)
+        // Altyazının alt kenarına binen kutu aşağı kayar.
+        XCTAssertEqual(ScreenTextBlocks.top(CGRect(x: 600, y: 990, width: 300, height: 40), avoiding: subtitle, height: height),
+                       1000 + gap, accuracy: 0.001)
+        // Altyazı yoksa yerinde.
+        XCTAssertEqual(ScreenTextBlocks.top(CGRect(x: 600, y: 920, width: 300, height: 40), avoiding: nil, height: height), 920)
     }
 
     func testTestSubtitleAppearsInComputerWindow() async {

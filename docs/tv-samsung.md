@@ -9,13 +9,18 @@ adımları: [tv-kurulum.md](tv-kurulum.md#samsung-tv).
 |---|---|---|
 | 5.0 ve üstü | 2019+ | Desteklenir, gerçek TV'de denendi |
 | 3.0–4.0 | 2017–2018 | Deneysel (bkz. aşağı) |
-| 2.x ve Orsay | 2016 ve öncesi | Desteklenmez: kurulum `TooOld` ile durur |
+| 2.4 | 2016 | Deneysel: dört uygulama da (Mac, Windows, Android telefon, iPhone) kurulumu dener (en eski sürüm 2.4); paket imzalanmadan önce sadeleştirilir (`LegacyTizenPackage`) |
+| 2.3 | 2015 | Deneysel, yalnız elle kurulum: CouchSubs'ın kendi kurulumu `TooOld` ile durur; Tizen Studio ile kurulan paket TV uygulaması 0.9.57'den beri çalışmalı ([aşağıda](#2015-modeller-tizen-23)) |
+| Orsay | 2014 ve öncesi | Desteklenmez |
 
 Tizen 3.0 için yapılanlar ve neyin doğrulandığı:
 
-- `config.xml`'de `required_version="3.0"` (önceden 5.0'dı; TV, paketin istediğinden eski sürümde kurulumu reddeder).
+- `config.xml`'de `required_version="2.4"` (önce 5.0, sonra 3.0 idi; #71; TV, paketin istediğinden eski sürümde kurulumu reddeder).
   Yeni TV'ler daha düşük isteyen paketi de kurar (Jellyfin'in Tizen paketi de düşük sürüm ister). İzinlerin hepsi
-  `public` düzeyinde: `tv.window`, `tv.inputdevice`, `application.launch`, `internet`, `network.get`;
+  `public` düzeyinde: `tv.window`, `tv.inputdevice`, `application.launch`, `internet`, `network.get`,
+  `network.public` (Samsung, `webapis.network.getIp`). Samsung TV'nin izin listesinde olmayan izin eklenmez: Tizen 2.4
+  böyle paketi sebep yazmadan `install failed[118]` ile reddeder (#497'de `power`; Power API TV'de yok).
+  `scripts/tv-tizen.test.js` izinleri bu listeye göre denetler;
   `<access origin="*">` ve `tizen:allow-navigation` zaten vardı.
 - Sayfa ES5 ile yazılıdır (Tizen 3.0'ın tarayıcısı Chromium 47'dir; Tizen 4.0: 56). `acorn` ile `ecmaVersion: 5`
   ayrıştırmasından geçer; CSS'te değişken, grid, `gap`, `inset` yoktur. M47'de olmayan söz döndüren `play()` ve
@@ -23,15 +28,167 @@ Tizen 3.0 için yapılanlar ve neyin doğrulandığı:
 - `tizen.*` ve `webapis.*` çağrılarının hepsi `try/catch` içindedir; API yoksa sessizce geçilir (`tizen` nesnesi
   olmadan sayfa hatasız açılıyor, başsız Chrome'da denendi). `webapis.js` yüklenemezse yalnız ekran koruyucuyu
   kapatma çalışmaz.
-- Kurulum: `SamsungTvInstaller` Tizen 3.0'dan eskisini reddeder. Tizen 3.0–4.0'da, Apps2Samsung'un
+- Kurulum: dört uygulamada da alt sınır Tizen 2.4'tür (Mac ve Windows `SamsungTvInstaller.MinimumTizen`, Android
+  `SamsungInstaller.MINIMUM_TIZEN`, iPhone `SamsungInstaller.minimumTizen`); 2.3 ve eskisi `TooOld` ile durur (#638'de
+  masaüstü 2016 TV'yi reddediyordu). Tizen 2.x'te dördü de imzalamadan önce paketin `config.xml`'ini #71'de çalışan hâle
+  döndürür: `network.public` izni ve `base_screen_resolution` ayarı çıkarılır (`LegacyTizenPackage`, #621; Android
+  `.kt`, iPhone `.swift`, Mac ve Windows `.cs`). Tizen 2.4–4.0'da, Apps2Samsung'un
   `TizenPermitInstall`'ı gibi, sertifika alınırken saklanan `device-profile.xml`'i kurulumdan önce TV'nin
   `sdk_toolpath` klasörüne gönderir. Sertifika aynı uç noktalardan, aynı `public` düzeyle alınır.
 - **Gerçek TV'de doğrulanan:** bir kullanıcı (UE43MU7000U, Tizen 3.0) paketi Tizen Studio sertifikası ve Apps2Samsung
   ile elle kurdu; çeviri ve HDMI görüntüsü (`tvwindow` `BEHIND`) çalıştı. İlk açılıştaki "bağlantı hatası" TV yeniden
   başlatılınca geçti.
 - **Doğrulanmayan:** CouchSubs'ın kendi kurulumunun (Samsung sertifikası + cihaz profili + `vd_appinstall`) Tizen
-  3.0–4.0'da çalışması, `0 vd_applist` çıktısının bu TV'lerde aynı biçimde gelmesi, `webapis.appcommon` ekran koruyucu
+  2.4–4.0'da çalışması, `0 vd_applist` çıktısının bu TV'lerde aynı biçimde gelmesi, `webapis.appcommon` ekran koruyucu
   ayarı ve Web Audio dublajı.
+
+### Tizen 2.4'te `install failed[118]` (#497, #621, #638)
+
+Tizen 2.4 kurulumu reddederken sebep yazmaz; yalın `[118]` imza, sertifika, config ya da TV'de kalmış yarım kopya
+olabilir. `power` izni (#497) ve `network.public` + `base_screen_resolution` (#621) çıkarıldıktan sonra da gerçek bir
+UE60KU7000 aynı hatayı verdi (#638; sdb, DUID, Samsung sertifikası, cihaz profili ve imza adımları başarılıydı).
+
+- **İmza biçimi:** dört uygulama da paketi `rsa-sha512` + `sha512` özetle imzalıyordu (bugünkü Tizen Studio ve TizenSdb
+  gibi). Tizen 2.x'te artık `rsa-sha256` + `sha256` kullanılır (W3C Widget Signature'ın zorunlu tuttuğu, Tizen 2.x
+  SDK'sının ürettiği biçim); Tizen 3.0 ve üstünde imza değişmedi. Telefonlarda `WgtSigner`'ın `Digest` seçeneği, Mac ve
+  Windows'ta `WgtSigner.cs` (3.0 ve üstünde imzayı yine TizenSdb atar). Kanonikleştirme (exclusive C14N; `#prop` için
+  C14N 1.1), referans sırası, `#prop` nesnesi ve zincir (yaprak + ara sertifika, kök yok) aynıdır.
+- **Deneme zinciri (yalnız Tizen 2.x):** 1) tam paket, SHA-256; 2) yalın `[118]` gelirse eski kopya kaldırılıp aynı
+  paket; 3) yine yalın `[118]` ise "yalın paket" (`tizen:profile` satırı ile `application.launch` ve `network.get`
+  izinleri de çıkar), SHA-256. Her adım ve hangisinin tuttuğu günlüğe yazılır ("tam paket SHA-256 imzayla kuruldu" /
+  "yalın paket …").
+- **Bilinen ama yapılmayan:** başka projelerdeki gerçek TV raporlarına göre (free-my-tv #349: KU6300, KU6640, KU6400;
+  hepsi Tizen 2.4) bu TV'lerde Samsung'un DUID'li dağıtıcı sertifikasıyla imzalı paket tek sayfalık deneme
+  uygulamasında bile `[118]` alıyor; Tizen Studio'nun kendi "Tizen" sertifikasıyla (yazar: Tizen Developers CA,
+  dağıtıcı: SDK'daki eski `tizen-distributor-signer.p12`) imzalı paket kuruluyor, KU6300'de SHA-512 imzayla bile.
+  Aynı kaynaklarda bir Full HD modelde (UA40K5300) ayrıca SHA-256 gerektiği yazıyor. CouchSubs bu sertifikayı
+  kullanmıyor: SDK'nın CA anahtarını ve imzalayıcı dosyasını uygulamaya gömmek ayrı bir karar. SHA-256 de yetmezse
+  sıradaki aday budur; o zamana kadar elle kurulumda Tizen Studio'da **Tizen** türünde sertifika profili denenebilir
+  (aşağıda). #638'de beta.68 (SHA-256 + yalın paket) de UE60KU7000'de `[118]` aldı.
+- **Elle kurulmuş kopya korunur:** Tizen 2.x'te TV'de CouchSubs görünüyorsa ya da `vd_applist` okunamıyorsa (2.4'te sık)
+  kurtarma adımı TV'deki kopyayı kaldırmaz (`keepExisting`); yalnız tam paket ve sebepsiz `[118]`'de yalın paket denenir.
+  TV'de bir sürüm görünüyor ve yeni paket kurulamıyorsa hata yerine o sürüm açılır. Böylece Tizen Studio ile elle
+  kurulmuş, çalışan uygulamayı bilgisayardaki ya da telefondaki CouchSubs güncellerken silmez.
+
+## 2016 modellerde elle kurulum (Tizen Studio)
+
+CouchSubs'ın kendi kurulumu 2016 TV'de `install failed[118]` ile bitiyorsa (#497, #621, #638) paketi kendi
+bilgisayarınızda Tizen Studio'nun **Tizen** sertifikasıyla imzalayıp kurabilirsiniz. CouchSubs bu sertifikayı (Tizen
+SDK'nın anahtarları) içermez; imzayı sizin bilgisayarınızdaki Tizen Studio atar. Başka projelerden gelen raporlara göre
+aynı Tizen 2.4 serisinde (KU6300, KU6400, KU6640) Samsung sertifikası `[118]` alırken Tizen sertifikasıyla imzalı paket
+kuruluyor; KU6640 ve KU6400'de ancak TV'de kalmış eski kopya kaldırıldıktan sonra
+([free-my-tv #349](https://github.com/simbasjungles/free-my-tv/issues/349)). UE60KU7000'de henüz denenmedi. Bazı 2016
+Full HD modeller (ör. K5670) geliştirici kurulumunu hiç kabul etmiyor.
+
+Menü adları Tizen Studio sürümüne göre biraz farklı olabilir.
+
+### 1. Tizen Studio
+
+1. [Samsung'un TV SDK sayfasındaki](https://developer.samsung.com/smarttv/develop/getting-started/setting-up-sdk/installing-tv-sdk.html)
+   adımlarla Tizen Studio'yu kurun (bugünkü kurulum dosyaları:
+   [download.tizen.org/sdk/Installer/tizen-studio_6.1](https://download.tizen.org/sdk/Installer/tizen-studio_6.1/)).
+2. Package Manager'ın **Extension SDK** sekmesinden **TV Extensions** ve **Samsung Certificate Extension**'ı kurun
+   (aynı sayfada yazdığı gibi). Tizen sertifikası için Samsung Certificate Extension şart değildir, ama kuruluysa
+   sertifika sihirbazı önce tür sorar. Tizen 2.4'e özel bir TV profili gerekmez: paket hazır klasörden imzalanır, proje
+   açılmaz.
+3. Komut satırı araçları varsayılan kurulumda `tizen-studio/tools/ide/bin/tizen` (Windows'ta `tizen.bat`) ve
+   `tizen-studio/tools/sdb` klasöründedir; aşağıdaki komutları bu klasörlerden ya da PATH'e ekleyerek çalıştırın.
+
+### 2. TV'de geliştirici modu
+
+CouchSubs kurulumundaki gibi: **Apps** paneli › **12345** › **Developer mode** açık › **Host PC IP**'ye bu bilgisayarın
+yerel IP adresi › TV'yi yeniden başlatın (fişten çekip 30 sn beklemek en garantisi). Host PC IP başka bir bilgisayarı
+gösterirse TV sdb bağlantısını keser.
+
+### 3. Paket
+
+1. [Sürümler](https://github.com/yorulmazsinan/couchsubs/releases) sayfasından `CouchSubs-samsung-kaynak.zip`'i indirip
+   boş bir klasöre açın (imzasız uygulama klasörü; `config.xml` doğrudan bu klasörde olmalı). İmzalı `.wgt`
+   yayınlanmaz: Samsung paketi TV'ye göre imzalanır.
+2. `config.xml`'den Tizen 2.4'ün tanımadığı satırı silin (CouchSubs'ın 2016 TV'ler için yaptığıyla aynı,
+   `LegacyTizenPackage`; 0.9.54 ve eskisinin paketinde `base_screen_resolution` satırı da vardı, o da silinir):
+   ```xml
+   <tizen:privilege name="http://developer.samsung.com/privilege/network.public"/>
+   ```
+   `network.public` Samsung'a özgü bir izindir; Tizen sertifikasıyla imzalanan pakette olmaması daha güvenli. #71'de
+   40KU7000'de elle kurulup çalışan paket bu satırı içermiyordu.
+
+### 4. Tizen sertifika profili
+
+Tizen Studio'da **Tools › Certificate Manager** › **+**:
+
+1. Tür sorulursa **Tizen**'i seçin (Samsung'u değil), profile bir ad verin (ör. `CouchSubsTizen`).
+2. **Create a new author certificate**: dosya adı, yazar adı ve parola girin.
+3. Dağıtıcı adımında varsayılan **Tizen distributor certificate**'ı bırakın, yetki düzeyi **Public**. Sürüm seçeneği
+   varsa **old**'u seçin: Tizen belgelerine göre Tizen 7.0 ve eskisi için "old", 8.0 ve sonrası için "new".
+4. **Finish**. Profilde DUID istenmez; TV'nin DUID'ini kimseye göndermeniz gerekmez.
+
+Komut satırında da olur (dağıtıcı verilmezse SDK'daki varsayılan Tizen dağıtıcısı kullanılır; "old/new" seçimi
+için Certificate Manager daha kolay):
+
+```bash
+tizen certificate -a couchsubs -p PAROLA -n "Adınız" -f couchsubs
+tizen security-profiles add -n CouchSubsTizen -a <tizen-studio-data>/keystore/author/couchsubs.p12 -p PAROLA
+```
+
+`-a`'ya tam yol verin; göreli yolda "Not found" hatası verdiği bildiriliyor.
+
+### 5. İmzala, eski kopyayı kaldır, kur
+
+```bash
+tizen security-profiles list                      # profil listede olmalı
+tizen package -t wgt -s CouchSubsTizen -- KLASOR  # KLASOR/CouchSubs.wgt üretilir
+sdb connect TV_IP
+sdb devices                                       # TV_IP:26101 "device" görünmeli
+tizen uninstall -p CouchSubsT -s TV_IP:26101      # TV'de kalmış kopyayı kaldırır
+tizen install -n CouchSubs.wgt -s TV_IP:26101 -- KLASOR
+```
+
+- `security-profiles list` profili göstermezse Certificate Manager'ın yazdığı `profiles.xml`'i
+  `tizen cli-config "default.profiles.path=<profiles.xml yolu>"` ile gösterin.
+- Paketi yeniden üretirken klasördeki eski `CouchSubs.wgt`'yi silin.
+- Kaldırma TV'de bir şey görünmese de önemlidir: CouchSubs'ın denediği Samsung imzalı kurulumlar yarım kopya bırakmış
+  olabilir ve TV başka sertifikalı paketi `[118]` ile reddeder. `tizen uninstall` çalışmazsa aynısı
+  `sdb -s TV_IP:26101 shell 0 vd_appuninstall CouchSubsT` ile yapılır; "uninstall completed" ya da (kopya yoksa)
+  `uninstall failed[132]` döner. İkisi de sorun değil.
+- Kurulum yine yalın `install failed[118]` derse yalın paketi deneyin: `config.xml`'den
+  `<tizen:profile name="tv-samsung"/>` satırını ve `application.launch`, `network.get` izinlerini de silip 5. adımı
+  tekrarlayın.
+
+### 6. Kurduktan sonra
+
+- Uygulama TV'nin uygulama listesinde görünür; açınca bilgisayardaki CouchSubs'ı ağda bulur.
+- Bilgisayardaki ya da telefondaki CouchSubs, TV'deki uygulamayı güncellemeye kalkarsa (geliştirici modu açıkken)
+  Samsung sertifikasıyla yine `[118]` alabilir ve kart "kurulamadı" diyebilir; ama Tizen 2.x'te TV'deki kopyayı
+  silmez (yukarıda "Elle kurulmuş kopya korunur"). TV uygulamasının yeni sürümü gerektiğinde bu adımları yeni
+  `CouchSubs-samsung-kaynak.zip` ile tekrarlayın.
+- Sonucu (kuruldu mu, hangi adımda ne dedi) #638'e yazarsanız 2016 modeller için yolu netleştiririz. `tizen install`
+  çıktısı yeterli; DUID ve IP satırlarını silebilirsiniz.
+
+## 2015 modeller (Tizen 2.3)
+
+CouchSubs'ın kendi kurulumu Tizen 2.3'ü `TooOld` ile reddeder; paket yukarıdaki 2016 adımlarıyla elle kurulabilir
+(#761'de Tizen Studio ve Apps2Samsung ile kuruldu). 3. adımda `config.xml`'deki
+`required_version="2.4"` değerini `2.3` yapın; yoksa TV paketi reddeder.
+
+**0.9.56 ve eskisinde uygulama 2-3 saniye görünüp kayboluyordu (#761).** Neden: TVWindow `show()`'un `zPosition`
+değişkeni (`BEHIND`, HDMI görüntüsü sayfanın arkasında) Tizen 2.4'te geldi. Samsung'un TVWindow belgesi: değer
+verilmezse ya da `FRONT` ise "Tizen 2.4'ten önceki gibi" davranır, pencere sayfanın **önünde** çizilir. Tizen 2.3'te
+`'100%'` pencere HDMI girişi açılır açılmaz (2-3 sn) sayfanın tamamını örtüyordu: bekleme ekranı, panel ve çeviri
+görünmüyor, çeviri yalnız telefonda/bilgisayarda kalıyordu. Sayfanın betikleri zaten ES5'tir
+(`scripts/tv-es5.test.js`); `tizen.*`/`webapis.*` çağrıları `try/catch` içindedir, sorun sözdizimi değildi.
+
+0.9.57'den beri `tv-tizen/platform.js` Tizen sürümünü (`platform.version`) okur; 2.4'ten eskiyse:
+
+- HDMI penceresi `zPosition` verilmeden ekranın üst %75'inde, ortada 16:9 açılır (`12.5%, 0%, 75%, 75%`).
+- Çeviri alttaki %25'lik şeritte gösterilir (`platform.subtitleBand`); oyundaki altyazının yerine göre yerleşim ve
+  ekran çevirisi kutuları pencerenin altında kalacağı için kullanılmaz. Kumandanın yukarı/aşağı okları altyazıyı
+  yalnız şerit içinde taşır.
+- Bekleme ekranı, panel, eşleştirme kodu, ipuçları ya da demo görünürken pencere gizlenir (`tvwindow.hide`), kapanınca
+  yeniden açılır. Bağlanınca panel 8 sn açık kaldığı için görüntü o kadar gecikir.
+- Sarı tuşun görüntü yöntemleri yoktur. Bilgi panelindeki "Pencere" satırı `tizen 2.3 front ... ok` yazar.
+
+Gerçek bir 2015 TV'de doğrulanmadı (yalnız Node'da sahte TVWindow ile, `scripts/tv-tizen.test.js`).
 
 ## Yapı
 
@@ -67,14 +224,16 @@ TV'sine kurmak mümkün değildir. Mac ve Windows uygulamaları bunu kullanıcı
 3. Yazar ve dağıtıcı CSR'lerini `svdca.samsungqbe.com`'a gönderir (dağıtıcı CSR'sinde `URN:tizen:deviceid=<DUID>`),
    gelen sertifikaları Samsung ara sertifikasıyla PKCS#12'ye yazar (Mac: `~/Library/Application Support/CouchSubs/samsung`,
    Windows: `%LOCALAPPDATA%\CouchSubs\samsung`).
-4. Tizen 3.0–4.0'da cihaz profilini (`device-profile.xml`) `sdk_toolpath`'e gönderir.
-5. Uygulamayla gelen imzasız `couchsubs-samsung_<sürüm>.wgt`'yi imzalar, `vd_appinstall` ile kurar ve `was_execute` ile açar.
+4. Tizen 2.4–4.0'da cihaz profilini (`device-profile.xml`) `sdk_toolpath`'e gönderir.
+5. Uygulamayla gelen imzasız `couchsubs-samsung_<sürüm>.wgt`'yi (Tizen 2.x'te sadeleştirilmiş kopyasını) imzalar, `vd_appinstall` ile kurar ve `was_execute` ile açar.
    TV başka sertifikalı eski kopya ya da paket kimliği yüzünden reddederse (`[118, -12]`, `[118, -11]`, `[118, -22]`)
    eski kopyayı kaldırıp bir kez daha dener; TV sertifikayı reddederse kayıtlı sertifika bırakılır, bir sonraki
    denemede yenisi alınır. Hata kodlarının anlamı `SamsungInstallDiagnostics.cs`'te.
 
 Her adım ve TV'nin, Samsung'un bütün yanıtları `tvinstall.log`'a yazılır (Mac: `~/Library/Logs/CouchSubs/`,
-Windows: `%LOCALAPPDATA%\CouchSubs\`); hata iletisi bu dosyayı da söyler.
+Windows: `%LOCALAPPDATA%\CouchSubs\`); hata iletisi bu dosyayı da söyler. LG ve Android TV kurulumu da aynı dosyaya
+yazar. Kurulum hatasında kart, üç markada da **Kurulum günlüğünü göster** (Finder / Explorer) ve **Günlüğü kopyala**
+düğmelerini gösterir (telefonlardaki **Kurulum günlüğünü paylaş**ın karşılığı).
 
 Uç noktalar belgesizdir ve Apps2Samsung'dan alınmıştır; Samsung değiştirirse burası güncellenir. Herkes için kalıcı
 yol yine mağaza yayınıdır (`docs/magaza.md`).

@@ -359,7 +359,22 @@ public sealed class RemotePlayWindowStream : IStreamSession
         private int blackFrames;
         private bool warnedBlack;
         private Windows.Graphics.SizeInt32 size;
-        private bool disposed;
+        /// <summary>Kare ve zamanlayıcı iş parçacıklarından okunur.</summary>
+        private volatile bool disposed;
+        /// <summary>Bu iş parçacığı şu an bir kareyi kopyalıyor ya da dağıtıyor (kapatma kendi kendini beklemesin).</summary>
+        [ThreadStatic] private static bool deliveringFrame;
+        /// <summary>Kapatma sırasında PrintWindow çağrısı hâlâ sürüyordu: DIB'i çağrı bitince o bırakır.</summary>
+        private PrintWindowGrabber? abandonedGrabber;
+        /// <summary>Kare gelmiyor ya da kopyalanamıyorsa nedeni altyazi.log'a yazılır (GitHub #566).</summary>
+        private readonly WindowCaptureWatch watch = new();
+        private readonly System.Threading.Timer watchTimer;
+        private readonly IntPtr window;
+        /// <summary>Windows'un yakalaması kare vermedi; pencere PrintWindow ile okunuyor (GitHub #566).</summary>
+        private volatile bool fallback;
+        private System.Threading.Timer? fallbackTimer;
+        private PrintWindowGrabber? grabber;
+        private int fallbackBusy;
+        private bool fallbackFailureNoted;
 
         public string Name { get; }
         public int Width => size.Width;
@@ -369,6 +384,7 @@ public sealed class RemotePlayWindowStream : IStreamSession
         {
             this.owner = owner;
             this.number = number;
+            this.window = window;
             Native.GetWindowThreadProcessId(window, out var pid);
             try
             {
@@ -386,6 +402,90 @@ public sealed class RemotePlayWindowStream : IStreamSession
             item.Closed += (_, _) => owner.CaptureEnded(this, number, "pencere kapandı");
             pool.FrameArrived += OnFrameArrived;
             session.StartCapture();
+            SubtitleLog.Write($"pencere yakalanıyor: {Name}, {size.Width}x{size.Height}");
+            watchTimer = new System.Threading.Timer(_ => CheckFrames(), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        }
+
+        /// <summary>Yakalama başladı ama okumaya kare gitmiyorsa nedeni iki günlüğe de yazılır.</summary>
+        private void CheckFrames()
+        {
+            if (disposed || watch.Delivered)
+            {
+                watchTimer.Change(Timeout.Infinite, Timeout.Infinite);
+                return;
+            }
+            if (watch.Tick(clock.Elapsed) is { } note)
+            {
+                RemotePlayLog.Note($"{Name}: {note}");
+                SubtitleLog.Write(note);
+            }
+            if (!fallback && watch.ShouldFallBack(clock.Elapsed)) StartFallback();
+        }
+
+        /// <summary>
+        /// Windows.Graphics.Capture okumaya kare vermedi (bazı Windows 10 bilgisayarlarda hiç kare gelmiyor, #566): pencere
+        /// saniyede beş kez PrintWindow (PW_RENDERFULLCONTENT) ile okunur. Üstteki altyazı penceremiz bu yolla da okunmaz.
+        /// </summary>
+        private void StartFallback()
+        {
+            lock (this)
+            {
+                if (fallback || disposed) return;
+                fallback = true;
+                grabber = new PrintWindowGrabber();
+                fallbackTimer = new System.Threading.Timer(_ => GrabFallback(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(1000 / FallbackFramesPerSecond));
+            }
+            const string text = "Windows pencereden kare vermiyor; pencere yedek yolla (PrintWindow) okunuyor";
+            RemotePlayLog.Note($"{Name}: {text}");
+            SubtitleLog.Write(text);
+        }
+
+        private const int FallbackFramesPerSecond = 5;
+
+        private void GrabFallback()
+        {
+            if (disposed || Interlocked.Exchange(ref fallbackBusy, 1) == 1) return;
+            deliveringFrame = true;
+            try
+            {
+                if (!Native.IsWindow(window))
+                {
+                    // Bu iş parçacığı bırakılınca kapatılır (Dispose süren çağrının bitmesini bekler).
+                    _ = Task.Run(() => owner.CaptureEnded(this, number, "pencere kapandı"));
+                    return;
+                }
+                // Simge durumundaki pencere çizilemez; açılınca okuma kendiliğinden sürer.
+                if (Native.IsIconic(window) || grabber is not { } current) return;
+                if (current.Grab(window) is not { } frame)
+                {
+                    if (!fallbackFailureNoted)
+                    {
+                        fallbackFailureNoted = true;
+                        RemotePlayLog.Note($"{Name}: PrintWindow pencereyi çizemedi");
+                        SubtitleLog.Write("yedek yakalama: PrintWindow pencereyi çizemedi");
+                    }
+                    return;
+                }
+                CheckBlack(frame.Pixels);
+                if (watch.FrameDelivered()) SubtitleLog.Write($"pencereden ilk kare (PrintWindow): {frame.Width}x{frame.Height}");
+                owner.Deliver(frame);
+            }
+            catch (Exception error)
+            {
+                if (!fallbackFailureNoted)
+                {
+                    fallbackFailureNoted = true;
+                    RemotePlayLog.Note($"{Name}: yedek yakalama hatası: {error.GetType().Name}: {error.Message}");
+                    SubtitleLog.Write($"yedek yakalama hatası: {error.GetType().Name}: {error.Message}");
+                }
+            }
+            finally
+            {
+                deliveringFrame = false;
+                Volatile.Write(ref fallbackBusy, 0);
+                // Kapatma bu çağrıyı bekleyemediyse DIB burada, artık kimse kullanmazken bırakılır.
+                Interlocked.Exchange(ref abandonedGrabber, null)?.Dispose();
+            }
         }
 
         /// <summary>Windows yakalanan pencerenin çevresine sarı bir çerçeve çizer. Destekleyen sürümlerde (Windows 11;
@@ -427,8 +527,11 @@ public sealed class RemotePlayWindowStream : IStreamSession
 
         private void OnFrameArrived(Direct3D11CaptureFramePool sender, object args)
         {
+            if (disposed) return;
             using var frame = sender.TryGetNextFrame();
-            if (frame is null || disposed) return;
+            // Yedek yakalamaya geçildiyse aynı kare iki yoldan verilmez.
+            if (frame is null || disposed || fallback) return;
+            watch.Arrived();
             if (frame.ContentSize.Width != size.Width || frame.ContentSize.Height != size.Height)
             {
                 // Pencere büyütüldü ya da tam ekrana geçti: havuz yeni boya kurulur, bu kare atlanır.
@@ -441,22 +544,29 @@ public sealed class RemotePlayWindowStream : IStreamSession
             // Önceki kare hâlâ kopyalanıyorsa bu kare atlanır.
             if (Interlocked.Exchange(ref busy, 1) == 1) return;
             lastFrameMs = now;
+            watch.CopyStarted(clock.Elapsed);
+            deliveringFrame = true;
             try
             {
                 using var bitmap = SoftwareBitmap.CreateCopyFromSurfaceAsync(frame.Surface, BitmapAlphaMode.Premultiplied).AsTask().GetAwaiter().GetResult();
                 var (width, height) = (bitmap.PixelWidth, bitmap.PixelHeight);
                 if (width < 2 || height < 2) return;
-                var pixels = new byte[width * height * 4];
-                bitmap.CopyToBuffer(pixels.AsBuffer());
-                CheckBlack(pixels);
-                owner.Deliver(new Frame(pixels, width, height, width * 4));
+                var captured = BitmapPixels.Read(bitmap);
+                watch.CopyEnded();
+                CheckBlack(captured.Pixels);
+                if (watch.FrameDelivered()) SubtitleLog.Write($"pencereden ilk kare: {width}x{height}");
+                owner.Deliver(captured);
             }
             catch (Exception error)
             {
-                RemotePlayLog.Note($"Remote Play karesi kopyalanamadı: {error.GetType().Name}: {error.Message}");
+                var text = $"{error.GetType().Name}: {error.Message}";
+                RemotePlayLog.Note($"Remote Play karesi kopyalanamadı: {text}");
+                if (watch.Failed(text)) SubtitleLog.Write($"pencere karesi kopyalanamadı: {text}");
             }
             finally
             {
+                watch.CopyEnded();
+                deliveringFrame = false;
                 Volatile.Write(ref busy, 0);
             }
         }
@@ -491,10 +601,142 @@ public sealed class RemotePlayWindowStream : IStreamSession
         {
             if (disposed) return;
             disposed = true;
+            try { watchTimer.Dispose(); } catch (Exception) { }
+            lock (this)
+            {
+                try { fallbackTimer?.Dispose(); } catch (Exception) { }
+                fallbackTimer = null;
+            }
+            // Süren PrintWindow çağrısı bitince DIB bırakılır (GrabFallback aynı anda onu kullanıyor olabilir). Hedef pencere
+            // yanıt vermiyorsa çağrı bir saniyeden uzun sürebilir: eskiden DIB yine de bırakılıyordu, biten çağrı
+            // bırakılmış belleği kopyalayabiliyordu (erişim ihlali). Şimdi DIB'i süren çağrı kendi bitince bırakır.
+            var lastGrabber = Interlocked.Exchange(ref grabber, null);
+            if (lastGrabber is not null)
+            {
+                if (WaitWhile(ref fallbackBusy)) lastGrabber.Dispose();
+                else
+                {
+                    Volatile.Write(ref abandonedGrabber, lastGrabber);
+                    if (Volatile.Read(ref fallbackBusy) == 0) Interlocked.Exchange(ref abandonedGrabber, null)?.Dispose();
+                }
+            }
+            // Süren kare kopyası Direct3D aygıtını ve kare havuzunu kullanır; onlar kopya bitmeden kapatılmaz.
+            try { pool.FrameArrived -= OnFrameArrived; } catch (Exception) { }
+            WaitWhile(ref busy);
             try { session.Dispose(); } catch (Exception) { }
             try { pool.Dispose(); } catch (Exception) { }
             try { device.Dispose(); } catch (Exception) { }
         }
+
+        /// <summary>Süren kare işi bitene kadar (en çok bir saniye) bekler; bittiyse true. Kapatma kare işinin kendi iş
+        /// parçacığından geldiyse (okuma hattı kareyi alırken oturumu durdurdu) beklenmez.</summary>
+        private static bool WaitWhile(ref int flag)
+        {
+            if (deliveringFrame) return Volatile.Read(ref flag) == 0;
+            var spins = 0;
+            while (Volatile.Read(ref flag) == 1 && spins++ < 100) Thread.Sleep(10);
+            return Volatile.Read(ref flag) == 0;
+        }
+    }
+
+    /// <summary>
+    /// Yedek yakalama: pencere PrintWindow(PW_RENDERFULLCONTENT) ile bellekteki bir DIB'e çizdirilir. Direct3D/OpenGL ile
+    /// çizen pencereler (OBS projektörü, Remote Play) de bu bayrakla çizilir; çizilemezse kare simsiyah gelir ve siyah kare
+    /// uyarısı çıkar. DIB boyut değişmedikçe yeniden kullanılır. Tek iş parçacığından çağrılır.
+    /// </summary>
+    private sealed class PrintWindowGrabber : IDisposable
+    {
+        private const uint RenderFullContent = 2; // PW_RENDERFULLCONTENT (Windows 8.1+)
+        private IntPtr memoryDc;
+        private IntPtr bitmap;
+        private IntPtr oldBitmap;
+        private IntPtr bits;
+        private int width, height;
+
+        /// <summary>Pencerenin (çerçevesiyle, Windows.Graphics.Capture'daki gibi) BGRA karesi; çizilemezse null.</summary>
+        public Frame? Grab(IntPtr window)
+        {
+            if (!Native.GetWindowRect(window, out var rect)) return null;
+            var (w, h) = (rect.Right - rect.Left, rect.Bottom - rect.Top);
+            if (w < 2 || h < 2) return null;
+            if (w != width || h != height || bitmap == IntPtr.Zero)
+            {
+                Release();
+                if (!Allocate(w, h)) return null;
+            }
+            if (!Gdi.PrintWindow(window, memoryDc, RenderFullContent)) return null;
+            var pixels = new byte[w * h * 4];
+            Marshal.Copy(bits, pixels, 0, pixels.Length);
+            // GDI alfa kanalını doldurmaz (0 kalır); okuma opak kare bekler.
+            for (var i = 3; i < pixels.Length; i += 4) pixels[i] = 255;
+            return new Frame(pixels, w, h, w * 4);
+        }
+
+        private bool Allocate(int w, int h)
+        {
+            var screen = Gdi.GetDC(IntPtr.Zero);
+            try
+            {
+                memoryDc = Gdi.CreateCompatibleDC(screen);
+                if (memoryDc == IntPtr.Zero) return false;
+                var info = new Gdi.BitmapInfoHeader
+                {
+                    Size = (uint)Marshal.SizeOf<Gdi.BitmapInfoHeader>(),
+                    Width = w,
+                    Height = -h, // üstten alta
+                    Planes = 1,
+                    BitCount = 32,
+                    Compression = 0, // BI_RGB
+                };
+                bitmap = Gdi.CreateDIBSection(screen, ref info, 0, out bits, IntPtr.Zero, 0);
+                if (bitmap == IntPtr.Zero || bits == IntPtr.Zero)
+                {
+                    Release();
+                    return false;
+                }
+                oldBitmap = Gdi.SelectObject(memoryDc, bitmap);
+                (width, height) = (w, h);
+                return true;
+            }
+            finally
+            {
+                Gdi.ReleaseDC(IntPtr.Zero, screen);
+            }
+        }
+
+        private void Release()
+        {
+            if (memoryDc != IntPtr.Zero && oldBitmap != IntPtr.Zero) Gdi.SelectObject(memoryDc, oldBitmap);
+            if (bitmap != IntPtr.Zero) Gdi.DeleteObject(bitmap);
+            if (memoryDc != IntPtr.Zero) Gdi.DeleteDC(memoryDc);
+            memoryDc = bitmap = oldBitmap = bits = IntPtr.Zero;
+            width = height = 0;
+        }
+
+        public void Dispose() => Release();
+    }
+
+    private static class Gdi
+    {
+        [StructLayout(LayoutKind.Sequential)]
+        public struct BitmapInfoHeader
+        {
+            public uint Size;
+            public int Width, Height;
+            public ushort Planes, BitCount;
+            public uint Compression, SizeImage;
+            public int XPelsPerMeter, YPelsPerMeter;
+            public uint ClrUsed, ClrImportant;
+        }
+
+        [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
+        [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr window);
+        [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr window, IntPtr dc);
+        [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleDC(IntPtr dc);
+        [DllImport("gdi32.dll")] public static extern IntPtr CreateDIBSection(IntPtr dc, ref BitmapInfoHeader info, uint usage, out IntPtr bits, IntPtr section, uint offset);
+        [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr dc, IntPtr gdiObject);
+        [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr gdiObject);
+        [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr dc);
     }
 
     /// <summary>Pencereden yakalama öğesi (IGraphicsCaptureItemInterop).</summary>
@@ -524,6 +766,26 @@ public sealed class RemotePlayWindowStream : IStreamSession
     private static class Direct3D
     {
         private static readonly Guid DxgiDeviceIid = new("54ec77fa-1377-44e6-8c32-88fd5f44c84c");
+        private static readonly Guid MultithreadIid = new("9B7E4E00-342C-4106-A19F-4F2704F689F0"); // ID3D11Multithread
+
+        /// <summary>
+        /// Serbest iş parçacıklı kare havuzunda kareler Windows'un iş parçacığından gelir ve kopyalama aygıtın bağlamını
+        /// oradan kullanır; aygıt çok iş parçacıklı korumaya alınır (Microsoft'un yakalama örneklerindeki gibi). Desteklenmezse
+        /// sessizce geçilir.
+        /// </summary>
+        private static unsafe void ProtectMultithread(IntPtr device)
+        {
+            var iid = MultithreadIid;
+            if (Marshal.QueryInterface(device, in iid, out var multithread) != 0 || multithread == IntPtr.Zero) return;
+            try
+            {
+                // IUnknown (3) + Enter, Leave, SetMultithreadProtected: 5. yuva.
+                var table = *(IntPtr**)multithread;
+                var set = (delegate* unmanaged[Stdcall]<IntPtr, int, int>)table[5];
+                set(multithread, 1);
+            }
+            finally { Marshal.Release(multithread); }
+        }
 
         [DllImport("d3d11.dll", ExactSpelling = true)]
         private static extern int D3D11CreateDevice(IntPtr adapter, int driverType, IntPtr software, uint flags, IntPtr featureLevels,
@@ -539,6 +801,7 @@ public sealed class RemotePlayWindowStream : IStreamSession
             Marshal.ThrowExceptionForHR(D3D11CreateDevice(IntPtr.Zero, 1, IntPtr.Zero, 0x20, IntPtr.Zero, 0, 7, out var device, out _, out var context));
             try
             {
+                ProtectMultithread(device);
                 var iid = DxgiDeviceIid;
                 Marshal.ThrowExceptionForHR(Marshal.QueryInterface(device, in iid, out var dxgi));
                 try
@@ -569,6 +832,7 @@ public sealed class RemotePlayWindowStream : IStreamSession
         [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
         [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
         [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr window);
+        [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr window);
         [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr window, uint command);
         [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
         [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);

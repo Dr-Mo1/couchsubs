@@ -32,7 +32,10 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -42,9 +45,11 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -68,12 +73,16 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.couchsubs.mobile.R
 import com.couchsubs.mobile.Services
+import com.couchsubs.mobile.core.GameCatalog
+import com.couchsubs.mobile.packs.PackUpdateOutcome
+import com.couchsubs.mobile.packs.PackUpdateSummary
 import com.couchsubs.mobile.service.FramePreview
 import com.couchsubs.mobile.service.LiveStatus
 import com.couchsubs.mobile.settings.SubtitleTarget
 import com.couchsubs.mobile.tv.InstalledTv
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Turda vurgulanan öğeler (TASARIM-MOBIL.md §10, tuval Telefon-Tur); [radius] öğenin köşesi (delik ona göre çizilir). */
@@ -83,6 +92,9 @@ private enum class TourStep(val title: Int, val body: Int, val radius: Dp) {
     PACKS(R.string.tour3_title, R.string.tour3_body, Tokens.Radius.tile),
     PROFILE(R.string.tour4_title, R.string.tour4_body, Tokens.Radius.control),
 }
+
+/** Tanıtım popup'ı açıkken ana ekranın bulanıklığı. */
+private val PROMO_BLUR = 16.dp
 
 /** Boşta ↔ çeviri ekranı geçişinin süresi (ms). */
 private const val MOTION_MS = 250
@@ -122,6 +134,8 @@ fun MainScreen(
     onSettings: () -> Unit,
     onHistory: () -> Unit = {},
     onTvUpdate: (InstalledTv) -> Unit = {},
+    /** Ana ekran en üstte (geçişte ya da üstünde başka ekran varken false): tanıtım popup'ı yalnız o zaman açılır. */
+    onHome: Boolean = true,
 ) {
     val context = LocalContext.current
     val settings = Services.settings
@@ -139,71 +153,85 @@ fun MainScreen(
         }
     }
 
+    // Kendi ürünlerimizin tanıtımı (promo.json): yalnız boştaki ana ekranda, girişten 10 sn sonra; oturum, deneme,
+    // kurulum ve tur sırasında asla. Açıkken ana ekran bulanıklaşır (Android 12+; altında yalnız karartma).
+    val promo by com.couchsubs.mobile.promo.PromoController.ready.collectAsState()
+    val promoShown = promo?.let { ready ->
+        val moment = com.couchsubs.mobile.promo.PromoMoment(onHome = onHome, sessionActive = status.running, demo = status.demo,
+            onboarding = Routes.next() != Routes.MAIN, tour = tour != null && !status.demo,
+            inAppMs = System.currentTimeMillis() - com.couchsubs.mobile.promo.PromoController.foregroundAtMs)
+        val record = com.couchsubs.mobile.promo.PromoController.record(context)
+        ready.takeIf { com.couchsubs.mobile.promo.PromoPolicy.shouldShow(it.popup, record, System.currentTimeMillis(), moment) }
+    }
     Box(Modifier.fillMaxSize()) {
-        // Başlatınca ve durdurunca boşta ve çeviri ekranları solarak yer değiştirir.
-        AnimatedContent(status.running, transitionSpec = { fadeIn(tween(MOTION_MS)) togetherWith fadeOut(tween(MOTION_MS)) },
-            label = "running") { running ->
-            if (running) RunningScreen(status, topBar, if (status.demo) onExitDemo else onStop, onPhoneView)
-            else ScreenScaffold(top = topBar, bottom = {
-                // PS5 eşlenmemişse (kurulum atlandı) başlatmak yerine eşleme açılır.
-                if (paired) PrimaryButton(stringResource(R.string.start), modifier = mark(TourStep.START), onClick = onStart)
-                else {
-                    PrimaryButton(stringResource(R.string.main_pair_button), modifier = mark(TourStep.START), onClick = onPairing)
-                    // Kurulum bitmeden de uygulama örnek görüntülerle denenebilir.
-                    GhostButton(stringResource(R.string.demo_mode_try), Modifier.fillMaxWidth(), onClick = onDemo)
-                }
-            }) {
-                if (paired) Heading(stringResource(R.string.main_ready), stringResource(R.string.main_ready_body))
-                else {
-                    Heading(stringResource(R.string.main_unpaired), stringResource(R.string.main_unpaired_body))
-                    NoteTile(stringResource(R.string.main_unpaired_note), Tokens.Color.secondary)
-                }
-                AnimatedNote(status.error)
-                TvAppUpdateCard(onTvUpdate)
-                // Telefon ana ekranı (TASARIM.md): PS5 ve Altyazı durum karoları ilgili ayarı açar (`›`).
-                TwoColumns(
-                    { if (xbox) StatusTile(CouchIcons.Gamepad, "Xbox", settings.xboxConsole?.name ?: stringResource(R.string.profile_not_paired), it,
-                        corner = { Pill(stringResource(R.string.beta)) }, chevron = true, onClick = onPairing)
-                      else StatusTile(CouchIcons.Gamepad, "PS5", settings.console?.name ?: stringResource(R.string.profile_not_paired), it,
-                        corner = { if (settings.console != null) StatusLabel(stringResource(R.string.main_paired)) }, chevron = true, onClick = onPairing) },
-                    { StatusTile(if (settings.target == SubtitleTarget.TV) CouchIcons.Tv else CouchIcons.Smartphone, stringResource(R.string.main_target),
-                        if (settings.target == SubtitleTarget.TV) settings.tvName ?: stringResource(R.string.main_target_tv) else stringResource(R.string.main_target_phone),
-                        it.then(mark(TourStep.TARGET)), chevron = true, onClick = onTarget) },
-                )
-                // Paket karosu: başlık ve not tek satır, sağda yalnız `›`; paketler kapalıysa nötr "Kapalı" etiketi.
-                Box(mark(TourStep.PACKS)) {
-                    Tile(Modifier.fillMaxWidth(), onClick = onPacks) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
-                            TileIcon(CouchIcons.Package, Tokens.Color.pro)
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
-                                Text(stringResource(R.string.main_packs_title), style = Tokens.Type.headline, color = Tokens.Color.text,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(stringResource(R.string.main_packs_games), style = Tokens.Type.caption, color = Tokens.Color.secondary,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Box(Modifier.fillMaxSize().then(if (promoShown != null) Modifier.blur(PROMO_BLUR) else Modifier)) {
+            // Başlatınca ve durdurunca boşta ve çeviri ekranları solarak yer değiştirir.
+            AnimatedContent(status.running, transitionSpec = { fadeIn(tween(MOTION_MS)) togetherWith fadeOut(tween(MOTION_MS)) },
+                label = "running") { running ->
+                if (running) RunningScreen(status, topBar, if (status.demo) onExitDemo else onStop, onPhoneView, onTvUpdate)
+                else ScreenScaffold(top = topBar, bottom = {
+                    // PS5 eşlenmemişse (kurulum atlandı) başlatmak yerine eşleme açılır.
+                    if (paired) PrimaryButton(stringResource(R.string.start), modifier = mark(TourStep.START), onClick = onStart)
+                    else {
+                        PrimaryButton(stringResource(R.string.main_pair_button), modifier = mark(TourStep.START), onClick = onPairing)
+                        // Kurulum bitmeden de uygulama örnek görüntülerle denenebilir.
+                        GhostButton(stringResource(R.string.demo_mode_try), Modifier.fillMaxWidth(), onClick = onDemo)
+                    }
+                }) {
+                    if (paired) Heading(stringResource(R.string.main_ready), stringResource(R.string.main_ready_body))
+                    else {
+                        Heading(stringResource(R.string.main_unpaired), stringResource(R.string.main_unpaired_body))
+                        NoteTile(stringResource(R.string.main_unpaired_note), Tokens.Color.secondary)
+                    }
+                    AnimatedNote(status.error)
+                    TvAppUpdateCard(onTvUpdate)
+                    // Telefon ana ekranı (TASARIM.md): PS5 ve Altyazı durum karoları ilgili ayarı açar (`›`).
+                    TwoColumns(
+                        { if (xbox) StatusTile(CouchIcons.Gamepad, "Xbox", settings.xboxConsole?.name ?: stringResource(R.string.profile_not_paired), it,
+                            corner = { Pill(stringResource(R.string.beta)) }, chevron = true, onClick = onPairing)
+                          else StatusTile(CouchIcons.Gamepad, "PS5", settings.console?.name ?: stringResource(R.string.profile_not_paired), it,
+                            corner = { if (settings.console != null) StatusLabel(stringResource(R.string.main_paired)) }, chevron = true, onClick = onPairing) },
+                        { StatusTile(if (settings.target.showsOnTv) CouchIcons.Tv else CouchIcons.Smartphone, stringResource(R.string.main_target),
+                            targetName(settings),
+                            it.then(mark(TourStep.TARGET)), chevron = true, onClick = onTarget) },
+                    )
+                    // Paket karosu: başlık ve not tek satır, sağda yalnız `›`; paketler kapalıysa nötr "Kapalı" etiketi.
+                    Box(mark(TourStep.PACKS)) {
+                        Tile(Modifier.fillMaxWidth(), onClick = onPacks) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
+                                TileIcon(CouchIcons.Package, Tokens.Color.pro)
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
+                                    Text(stringResource(R.string.main_packs_title), style = Tokens.Type.headline, color = Tokens.Color.text,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(stringResource(R.string.main_packs_games), style = Tokens.Type.caption, color = Tokens.Color.secondary,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                if (!settings.packsEnabled) Pill(stringResource(R.string.main_packs_off))
+                                Chevron()
                             }
-                            if (!settings.packsEnabled) Pill(stringResource(R.string.main_packs_off))
-                            Chevron()
                         }
                     }
+                    // Çeviri motoru ve son oturum durum değil ayar bilgisidir: tek bilgi karosunda iki satır.
+                    InfoCard(listOf(
+                        { InfoRow(stringResource(R.string.main_engine), status.engineLabel.ifEmpty { engineName(context) }, onClick = onSettings) },
+                        { InfoRow(stringResource(R.string.main_last_session),
+                            if (settings.lastSessionMs > 0) durationText(context, settings.lastSessionMs) else "—", onClick = onHistory) },
+                    ))
+                    DeveloperSignature()
                 }
-                // Çeviri motoru ve son oturum durum değil ayar bilgisidir: tek bilgi karosunda iki satır.
-                InfoCard(listOf(
-                    { InfoRow(stringResource(R.string.main_engine), status.engineLabel.ifEmpty { engineName(context) }, onClick = onSettings) },
-                    { InfoRow(stringResource(R.string.main_last_session),
-                        if (settings.lastSessionMs > 0) durationText(context, settings.lastSessionMs) else "—", onClick = onHistory) },
-                ))
+            }
+            if (!status.demo) tour?.let { step ->
+                TourOverlay(step, bounds[step], onSkip = {
+                    settings.tourShown = true
+                    tour = null
+                }, onNext = {
+                    val next = TourStep.entries.getOrNull(step.ordinal + 1)
+                    if (next == null) settings.tourShown = true
+                    tour = next
+                })
             }
         }
-        if (!status.demo) tour?.let { step ->
-            TourOverlay(step, bounds[step], onSkip = {
-                settings.tourShown = true
-                tour = null
-            }, onNext = {
-                val next = TourStep.entries.getOrNull(step.ordinal + 1)
-                if (next == null) settings.tourShown = true
-                tour = next
-            })
-        }
+        promoShown?.let { ready -> PromoOverlay(ready) { com.couchsubs.mobile.promo.PromoController.dismissed(context, ready.popup) } }
     }
 }
 
@@ -224,6 +252,7 @@ fun engineName(context: Context): String = when (Services.settings.engine) {
     com.couchsubs.mobile.settings.EngineChoice.GEMINI -> "Gemini"
     com.couchsubs.mobile.settings.EngineChoice.OPENAI -> "OpenAI"
     com.couchsubs.mobile.settings.EngineChoice.CLAUDE -> "Claude"
+    com.couchsubs.mobile.settings.EngineChoice.LOCAL -> context.getString(R.string.engine_local)
 }
 
 /** Deneme modunda çeviri ekranının üstü: "Deneme modu" rozeti, "Çık" ve hattın okuduğu örnek kare (iPhone ile aynı). */
@@ -250,7 +279,8 @@ private fun DemoHeader(onExit: () -> Unit) {
 
 /** Çeviri sürerken (tuval Telefon-Calisiyor): süre, paket, canlı satır ve önceki satırlar, sayılar. */
 @Composable
-private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, onStop: () -> Unit, onPhoneView: () -> Unit) {
+private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, onStop: () -> Unit, onPhoneView: () -> Unit,
+                          onTvInstall: (InstalledTv) -> Unit = {}) {
     val context = LocalContext.current
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -260,11 +290,18 @@ private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, on
         }
     }
     ScreenScaffold(top = topBar, bottom = {
-        // İki ikincil düğme yan yana (Geçmiş ekranındaki gibi); "Ekranı çevir" yalnız görüntü gelirken.
-        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
-            SecondaryButton(stringResource(R.string.main_phone_view), Modifier.weight(1f), onClick = onPhoneView)
-            if (status.streaming) ScreenTranslateButton(status, Modifier.weight(1f))
-        }
+        // İkincil düğmeler yan yana (iPhone ile aynı): altyazı ekranı telefonda gösterirken ya da deneme modunda, "TV'de
+        // dene" TV'ye çevirirken, "Ekranı çevir" yalnız görüntü gelirken.
+        val target = Services.settings.target
+        if (target.showsOnPhone || status.demo || target.showsOnTv || status.streaming)
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
+                if (target.showsOnPhone || status.demo)
+                    SecondaryButton(stringResource(R.string.main_phone_view), Modifier.weight(1f), onClick = onPhoneView)
+                if (target.showsOnTv) SecondaryButton(stringResource(R.string.settings_test_subtitle), Modifier.weight(1f)) {
+                    com.couchsubs.mobile.service.TranslationService.sendTestSubtitle(context.getString(R.string.test_subtitle_text))
+                }
+                if (status.streaming) ScreenTranslateButton(status, Modifier.weight(1f))
+            }
         DestructiveButton(stringResource(if (status.demo) R.string.demo_mode_exit else R.string.stop), onClick = onStop)
     }) {
         if (status.demo) DemoHeader(onStop)
@@ -279,10 +316,31 @@ private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, on
         // Görüntü gelirken durum metni ("Altyazılar okunuyor") üstteki "Çeviri sürüyor" satırını tekrarlar; yalnız
         // bağlanırken ve bağlantı sorunlarında gösterilir.
         if (!status.streaming && status.phase.isNotEmpty()) Text(status.phase, style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        // Oturum yeniden denemeyi bıraktıysa hemen, süren denemelerde 45 sn sonra: uygulamayı kapatıp açmadan bağlantı
+        // baştan kurulur (ReconnectOffer; Mac/iPhone ile aynı).
+        if (status.running && !status.demo && !status.streaming &&
+            com.couchsubs.mobile.remoteplay.ReconnectOffer.shows(status.notLiveSince, status.gaveUp, now))
+            SecondaryButton(stringResource(R.string.reconnect)) { com.couchsubs.mobile.service.TranslationService.reconnect() }
         AnimatedNote(status.error)
+        // TV'ye çevirirken telefon kilitlenebilir: pil kısıtlaması açıksa çeviri ekran kapanınca durabilir.
+        if (!status.demo && Services.settings.target.showsOnTv) BackgroundLimitNote()
+        // TV uygulaması bağlı değil: CouchSubs TV'de nerede bulunur (markaya göre), otomatik açma neden olmadı ve
+        // "Otomatik açmayı dene" (Windows, Mac ve iPhone ile aynı).
+        if (!status.demo && Services.settings.target.showsOnTv && status.connectedTvs == 0)
+            Services.settings.installedTv?.let { tv -> TvOpenCard(tv.brand, status.tvOpenProblem) { onTvInstall(tv) } }
         val current = status.recent.firstOrNull()
-        // İlk altyazı gelene kadar: kolu açınca PS5'te ana hesap seçilmeli (GitHub #231).
-        if (current == null && !Services.settings.xbox && !status.demo) NoteTile(stringResource(R.string.psn_main_account), Tokens.Color.secondary)
+        // İlk altyazı gelene kadar ve bağlantı koptuğunda: kolu açınca PS5'te ana hesap seçilmeli (GitHub #231, MainAccountTip).
+        if (com.couchsubs.mobile.remoteplay.MainAccountTip.visible(ps5 = !Services.settings.xbox, demo = status.demo,
+                hasSubtitle = current != null, streaming = status.streaming))
+            NoteTile(stringResource(R.string.psn_main_account_steps), Tokens.Color.secondary)
+        // Otomatik ekran yazısı beta.63'te açık geliyordu; bir kez kapatıldı, kullanıcıya söylenir.
+        if (com.couchsubs.mobile.settings.AppSettings.autoScreenTextNotice)
+            NoteTile(stringResource(R.string.auto_screen_text_notice), Tokens.Color.secondary)
+        // Görüntü bir dakikadır geliyor ama hiç altyazı satırı okunmadı (GitHub #503, #566, #572; SubtitleOffTip).
+        if (status.subtitleOffTip) {
+            NoteTile(stringResource(R.string.subtitle_off_tip), Tokens.Color.secondary)
+            if (Services.settings.watchSubtitleBackground) NoteTile(stringResource(R.string.subtitle_background_tip), Tokens.Color.secondary)
+        }
         if (!status.demo) GameSection(status)
         Tile(Modifier.fillMaxWidth()) {
             TileLabel(stringResource(R.string.running_now))
@@ -298,7 +356,8 @@ private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, on
                 metricsText(context, it)?.let { line -> Text(line, style = Tokens.Type.caption, color = Tokens.Color.secondary) }
             }
         }
-        val previous = status.recent.drop(1).take(4)
+        // Önceki 8 satır (iPhone ile aynı).
+        val previous = status.recent.drop(1).take(8)
         if (previous.isNotEmpty()) RowList(previous.map { pair ->
             {
                 // Satır iki ya da daha çok satıra uzayınca kaynak etiketi ilk satırın hizasında kalır.
@@ -320,10 +379,31 @@ private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, on
             } },
             { Tile(it) {
                 TileLabel(stringResource(R.string.main_tvs_label))
-                Text(if (Services.settings.target == SubtitleTarget.TV) status.connectedTvs.toString() else stringResource(R.string.main_target_phone),
+                Text(if (Services.settings.target.showsOnTv) status.connectedTvs.toString()
+                    else stringResource(if (Services.settings.target == SubtitleTarget.OBS) R.string.target_obs else R.string.main_target_phone),
                     style = Tokens.Type.titleNumeric, color = Tokens.Color.text)
             } },
         )
+    }
+}
+
+/**
+ * Çeviri sürüyor ama TV uygulaması bağlı değil: kullanıcı CouchSubs'ı TV'de kendisinin açması gerektiğini bilmiyordu
+ * ("ilk başta olmadı, TV'den de uygulamayı açmak lazımmış", 21 Kas). Düğme açma döngüsünü beklemeden yeniden denetir.
+ */
+@Composable
+private fun TvOpenCard(brand: com.couchsubs.mobile.tv.TvBrand, problem: com.couchsubs.mobile.tv.TvOpenProblem?, onInstall: () -> Unit) {
+    Tile(Modifier.fillMaxWidth()) {
+        Text(stringResource(com.couchsubs.mobile.tv.TvOpenProblem.openOnTv(brand)), style = Tokens.Type.body, color = Tokens.Color.text)
+        com.couchsubs.mobile.tv.TvOpenProblem.reason(problem)?.let {
+            Text(stringResource(it), style = Tokens.Type.caption, color = Tokens.Color.warning)
+        }
+        SecondaryButton(stringResource(R.string.tv_open_try)) {
+            com.couchsubs.mobile.tv.TvOpenRetry.request()
+            com.couchsubs.mobile.service.LiveState.update { it.copy(tvOpenProblem = null) }
+        }
+        // TV uygulaması kurulu değilse ya da açılmıyorsa bu telefondan kurulur (iPhone'daki "TV uygulamasını bu telefondan kur").
+        GhostButton(stringResource(R.string.tvinstall_entry), onClick = onInstall)
     }
 }
 
@@ -369,57 +449,174 @@ fun PacksScreen(onBack: () -> Unit, packInUse: String?) {
     val context = LocalContext.current
     val settings = Services.settings
     val version by Services.packsVersion.collectAsState()
+    val status by Services.packStatus.collectAsState()
     var catalog by remember { mutableStateOf<List<Services.CatalogEntry>?>(null) }
     var disabled by remember { mutableStateOf(settings.disabledPacks) }
     var packsOn by remember { mutableStateOf(settings.packsEnabled) }
     LaunchedEffect(version) { catalog = withContext(Dispatchers.IO) { Services.catalog(context) } }
     val unlocked = packsOn
-    val list = catalog.orEmpty()
-    ScreenScaffold(top = {
-        TopBar(stringResource(R.string.packs_title), onBack = onBack) {
-            Pill(if (list.isEmpty()) stringResource(R.string.packs_free) else stringResource(R.string.packs_free_count, list.size))
-        }
-    }, bottom = {
-        SecondaryButton(stringResource(R.string.packs_refresh)) { Services.refreshPacks(force = true) }
-    }) {
-        Text(stringResource(R.string.packs_auto), style = Tokens.Type.body, color = Tokens.Color.secondary)
-        RowList(listOf({
-            RowItem(stringResource(R.string.settings_packs), stringResource(R.string.packs_switch_note)) {
-                androidx.compose.material3.Switch(packsOn, { packsOn = it; settings.packsEnabled = it })
+    // Oyunun "(ek satırlar)" paketi asıl paketin karosunda; ikisi birlikte açılıp kapanır (#353).
+    val list = GameCatalog.packShelf(catalog.orEmpty(), { it.id }, { it.title }, { it.entries })
+    // "Paketleri güncelle"ye basıldı, sonuç bekleniyor: sayfa bulanıklaşır (Android 12+; öncesinde koyu perde), ortada
+    // gösterge döner; bitince ne geldiği uyarıda yazar (iPhone ile aynı).
+    var updating by remember { mutableStateOf(false) }
+    var outcome by remember { mutableStateOf<PackUpdateOutcome?>(null) }
+    val scope = rememberCoroutineScope()
+    val busy = updating || status == Services.PackStatus.DOWNLOADING
+    fun updateNow() {
+        if (updating) return
+        updating = true
+        outcome = null
+        scope.launch {
+            val before = withContext(Dispatchers.IO) {
+                catalog?.filter { it.installed }?.map { it.id to it.entries }
+                    ?: Services.packLibrary(context).infos.map { it.id to it.entries }
             }
-        }))
-        if (catalog == null) Text(stringResource(R.string.packs_loading), style = Tokens.Type.body, color = Tokens.Color.secondary)
-        else if (list.isEmpty()) NoteTile(stringResource(R.string.packs_none_yet), Tokens.Color.secondary)
-        list.chunked(2).forEach { row ->
-            Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
-                row.forEach { entry ->
-                    val (code, short) = packShort(entry.id, entry.title)
-                    val on = entry.id !in disabled
-                    val playing = packInUse != null && packInUse == entry.title
-                    PackTile(code, short, linesText(context, entry.entries), Modifier.weight(1f).fillMaxHeight(),
-                        style = if (playing) TileStyle.ACTIVE else TileStyle.NORMAL, dim = !unlocked || !on,
-                        corner = { if (playing) StatusLabel(stringResource(R.string.packs_now)) else if (unlocked && !on) Pill(stringResource(R.string.packs_off)) },
-                        // Karo paketin anahtarıdır: ekran okuyucu "açık/kapalı" diye okur.
-                        toggled = on,
-                        onClick = {
-                            disabled = if (on) disabled + entry.id else disabled - entry.id
-                            settings.disabledPacks = disabled
-                        })
-                }
-                if (row.size == 1) Spacer(Modifier.weight(1f))
+            val result = try {
+                Services.updatePacksNow(before)
+            } finally {
+                updating = false
             }
-        }
-        ImportedPacksSection()
-        Tile(Modifier.fillMaxWidth()) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
-                TileIcon(Icons.Filled.Refresh)
-                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
-                    Text(stringResource(R.string.packs_next), style = Tokens.Type.headline, color = Tokens.Color.text)
-                    Text(stringResource(R.string.packs_next_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
-                }
-            }
+            outcome = result
         }
     }
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().then(if (updating) Modifier.blur(12.dp) else Modifier)) {
+            ScreenScaffold(top = {
+                TopBar(stringResource(R.string.packs_title), onBack = onBack) {
+                    Pill(if (list.isEmpty()) stringResource(R.string.packs_free) else stringResource(R.string.packs_free_count, list.size))
+                }
+            }, bottom = {
+                SecondaryButton(stringResource(if (busy) R.string.packs_updating_short else R.string.packs_refresh),
+                    enabled = !busy) { updateNow() }
+            }) {
+                Text(stringResource(R.string.packs_auto), style = Tokens.Type.body, color = Tokens.Color.secondary)
+                RowList(listOf({
+                    RowItem(stringResource(R.string.settings_packs), stringResource(R.string.packs_switch_note)) {
+                        androidx.compose.material3.Switch(packsOn, { packsOn = it; settings.packsEnabled = it })
+                    }
+                }))
+                // Güncelleme hatası sessizce yutulmaz (iPhone'daki gibi): ulaşılamazsa telefondaki paketlerin kullanıldığı yazar.
+                when (status) {
+                    Services.PackStatus.DOWNLOADING -> Text(stringResource(R.string.packs_updating), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+                    Services.PackStatus.OFFLINE -> NoteTile(stringResource(R.string.packs_offline))
+                    Services.PackStatus.FAILED -> NoteTile(stringResource(R.string.packs_failed))
+                    else -> {}
+                }
+                if (catalog == null) Text(stringResource(R.string.packs_loading), style = Tokens.Type.body, color = Tokens.Color.secondary)
+                else if (list.isEmpty()) NoteTile(stringResource(R.string.packs_none_yet), Tokens.Color.secondary)
+                list.chunked(2).forEach { row ->
+                    Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
+                        row.forEach { entry ->
+                            val (code, short) = packShort(entry.id, entry.title)
+                            val on = entry.packIds.none { it in disabled }
+                            val playing = packInUse != null && packInUse in entry.titles
+                            PackTile(code, short, linesText(context, entry.entries), Modifier.weight(1f).fillMaxHeight(),
+                                style = if (playing) TileStyle.ACTIVE else TileStyle.NORMAL, dim = !unlocked || !on,
+                                corner = { if (playing) StatusLabel(stringResource(R.string.packs_now)) else if (unlocked && !on) Pill(stringResource(R.string.packs_off)) },
+                                // Karo paketin anahtarıdır: ekran okuyucu "açık/kapalı" diye okur.
+                                toggled = on,
+                                onClick = {
+                                    disabled = if (on) disabled + entry.packIds else disabled - entry.packIds.toSet()
+                                    settings.disabledPacks = disabled
+                                })
+                        }
+                        if (row.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                }
+                ImportedPacksSection()
+                Tile(Modifier.fillMaxWidth()) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
+                        TileIcon(Icons.Filled.Refresh)
+                        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
+                            Text(stringResource(R.string.packs_next), style = Tokens.Type.headline, color = Tokens.Color.text)
+                            Text(stringResource(R.string.packs_next_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+                        }
+                    }
+                }
+            }
+        }
+        if (updating) PacksUpdatingOverlay()
+    }
+    outcome?.let { shown ->
+        val failed = shown is PackUpdateOutcome.Failed
+        AlertDialog(
+            onDismissRequest = { outcome = null },
+            title = { Text(stringResource(when (shown) {
+                PackUpdateOutcome.UpToDate -> R.string.packs_result_current_title
+                is PackUpdateOutcome.Updated -> R.string.packs_result_updated_title
+                is PackUpdateOutcome.Failed -> R.string.packs_result_failed_title
+            })) },
+            text = { Text(packUpdateMessage(context, shown)) },
+            confirmButton = {
+                TextButton({
+                    outcome = null
+                    if (failed) updateNow()
+                }) { Text(stringResource(if (failed) R.string.packs_retry else R.string.ok)) }
+            },
+            dismissButton = if (failed) ({ TextButton({ outcome = null }) { Text(stringResource(R.string.close)) } }) else null,
+            containerColor = Tokens.Color.surface2,
+        )
+    }
+}
+
+/** Güncelleme sürerken sayfanın üstündeki perde: dokunuş ve Geri tuşu geçmez, ortada gösterge ve "Paketler güncelleniyor…". */
+@Composable
+private fun PacksUpdatingOverlay() {
+    BackHandler { }
+    // Bulanıklık Android 12'den önce çalışmaz; orada perde daha koyu.
+    val scrim = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) 0.45f else 0.7f
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = scrim)).pointerInput(Unit) { detectTapGestures { } },
+        contentAlignment = Alignment.Center) {
+        Column(Modifier.background(Tokens.Color.surface2, RoundedCornerShape(Tokens.Radius.tile)).padding(Tokens.Space.tile),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
+            CircularProgressIndicator(color = Tokens.Color.pro)
+            Text(stringResource(R.string.packs_updating), style = Tokens.Type.headline, color = Tokens.Color.text)
+        }
+    }
+}
+
+/** "2 paket güncellendi: Grand Theft Auto VI (+12.300 satır), Red Dead Redemption 2 (+800 satır)." */
+fun packUpdateMessage(context: Context, outcome: PackUpdateOutcome): String = when (outcome) {
+    PackUpdateOutcome.UpToDate -> context.getString(R.string.packs_result_current)
+    is PackUpdateOutcome.Updated -> packSummaryText(context, outcome.summary)
+    is PackUpdateOutcome.Failed -> {
+        val reason = when (outcome.reason) {
+            PackUpdateOutcome.Reason.OFFLINE -> context.getString(R.string.packs_error_offline)
+            PackUpdateOutcome.Reason.RATE_LIMITED -> context.getString(R.string.packs_error_rate)
+            PackUpdateOutcome.Reason.SERVER -> context.getString(R.string.packs_error_server, outcome.status ?: 0)
+            PackUpdateOutcome.Reason.PARTIAL -> context.getString(R.string.packs_error_partial)
+            PackUpdateOutcome.Reason.UNKNOWN -> context.getString(R.string.packs_error_unknown)
+        }
+        (listOf(reason, context.getString(R.string.packs_result_still_used)) +
+            listOfNotNull(packSummaryText(context, outcome.summary).takeIf { it.isNotEmpty() })).joinToString("\n\n")
+    }
+}
+
+private fun packSummaryText(context: Context, summary: PackUpdateSummary): String {
+    val locale = context.resources.configuration.locales[0]
+    val number = { value: Int -> java.text.NumberFormat.getIntegerInstance(locale).format(value) }
+    val parts = mutableListOf<String>()
+    val updated = summary.updated
+    if (updated.isNotEmpty()) {
+        val items = updated.joinToString(", ") { change ->
+            when {
+                change.lineDelta > 0 -> context.getString(R.string.packs_result_item_more, change.title, number(change.lineDelta))
+                change.lineDelta < 0 -> context.getString(R.string.packs_result_item_fewer, change.title, number(-change.lineDelta))
+                else -> context.getString(R.string.packs_result_item_revised, change.title)
+            }
+        }
+        parts += if (updated.size == 1) context.getString(R.string.packs_result_updated_one, items)
+        else context.getString(R.string.packs_result_updated_many, updated.size, items)
+    }
+    val added = summary.added
+    if (added.isNotEmpty()) {
+        val items = added.joinToString(", ") { context.getString(R.string.packs_result_item_lines, it.title, number(it.lines)) }
+        parts += if (added.size == 1) context.getString(R.string.packs_result_added_one, items)
+        else context.getString(R.string.packs_result_added_many, added.size, items)
+    }
+    if (summary.newLines > 0) parts += context.getString(R.string.packs_result_total, number(summary.newLines))
+    return parts.joinToString("\n")
 }
 
 /** Tur deliğinin öğeden taşma payı. */

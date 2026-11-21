@@ -8,6 +8,7 @@ import SwiftUI
 struct TVAppCard: View {
     @EnvironmentObject private var model: AppModel
     @State private var passphrase = ""
+    @State private var logCopied = false
 
     private var brand: TVBrand { model.tv?.brand ?? .lg }
 
@@ -94,16 +95,32 @@ struct TVAppCard: View {
                     // TV bu Mac'i kabul etmediyse Host PC IP'ye yazılacak adres de görünür (#343).
                     if brand == .samsung, error == .unreachable {
                         HintText(text: "This computer's address (Host PC IP): \(model.computerAddress ?? "?")")
+                        otherAddresses
                     }
                     Button("Try again") { Task { await model.refreshTVApp() } }.buttonStyle(.secondary)
+                    logActions
+                }
+            case .chooseAndroidTV(let hosts):
+                // Aynı ağda iki Android TV: izin sorusu yanlış odadaki TV'de çıkmasın diye TV sorulur (#425).
+                Card(title: "CouchSubs TV app") {
+                    Text("More than one Android TV with debugging on was found on the network. Which one is yours?")
+                    HintText(text: "You can see the TV's address on the TV in Settings › Network & Internet.")
+                    ForEach(hosts, id: \.self) { host in
+                        Button(String(format: String(localized: "Install on the TV at %@"), host)) {
+                            Task { await model.chooseAndroidTV(host) }
+                        }
+                        .buttonStyle(.secondary)
+                    }
+                    Button("Search again") { Task { await model.refreshTVApp() } }.buttonStyle(.secondary)
                 }
             case .hostPcMismatch(let tvIp, let computer):
                 Card(title: "CouchSubs TV app") {
-                    ErrorText(error: String(format: String(localized: "The TV's Host PC IP is %1$@, but this computer's address is %2$@. In the TV's Developer Mode window, set Host PC IP to %2$@ and restart the TV fully (hold the power button for about 2 seconds)."), tvIp, computer))
+                    ErrorText(error: String(format: String(localized: "The TV's Host PC IP is %1$@, but this computer's address is %2$@. In the TV's Developer Mode window, set Host PC IP to %2$@ and restart the TV fully (hold the power button until the Samsung logo appears, about 5 seconds)."), tvIp, computer))
                     HintText(text: "1. On the TV, open Apps and scroll to the very bottom of the page.")
                     HintText(text: "2. There, press 1 2 3 4 5 on the remote (or type 12345 on the on-screen keypad). The Developer Mode window opens.")
                     HintText(text: "3. Turn Developer mode On, type this computer's address as Host PC IP: \(computer) and press OK.")
-                    HintText(text: "4. Restart the TV: hold the power button on the remote for about 2 seconds until the TV turns off, then turn it on again. This screen continues by itself.")
+                    otherAddresses
+                    HintText(text: "4. Restart the TV: hold the power button on the remote and keep holding until the TV turns off and comes back on with the Samsung logo (about 5 seconds); letting go when it turns off only puts it on standby. If no logo appears, unplug the TV for 30 seconds. This screen continues by itself.")
                     Button("Try again") { Task { await model.refreshTVApp() } }.buttonStyle(.secondary)
                 }
                 // Host PC IP düzeltilip TV yeniden başlayınca kendiliğinden devam eder.
@@ -114,6 +131,42 @@ struct TVAppCard: View {
                     }
                 }
             }
+        }
+    }
+
+    /// Kurulum hatasında günlük (tvinstall.log) üç markada da Finder'da gösterilir ya da panoya kopyalanır
+    /// (telefonlardaki "Kurulum günlüğünü paylaş"ın karşılığı).
+    private var logActions: some View {
+        HStack(spacing: Theme.space("s")) {
+            Button("Show the install log") { Self.showLogInFinder() }.buttonStyle(.secondary)
+            Button(logCopied ? "Copied" : "Copy the log") {
+                let log = TVInstallLog.tail()
+                guard !log.isEmpty else { return }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(log, forType: .string)
+                logCopied = true
+            }.buttonStyle(.secondary)
+        }
+    }
+
+    /// Günlük dosyasını Finder'da seçili gösterir; dosya henüz yoksa klasörünü açar.
+    static func showLogInFinder() {
+        let file = TVInstallLog.file
+        if FileManager.default.fileExists(atPath: file.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([file])
+        } else {
+            let folder = file.deletingLastPathComponent()
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(folder)
+        }
+    }
+
+    /// Wi-Fi ve Ethernet ikisi de bağlıysa ya da birden çok ağ varsa Host PC IP için diğer adresler de yazılır.
+    @ViewBuilder
+    private var otherAddresses: some View {
+        let others = model.otherComputerAddresses
+        if !others.isEmpty {
+            HintText(text: "If the TV does not accept this address, try one of this computer's other addresses: \(others.joined(separator: ", "))")
         }
     }
 
@@ -133,10 +186,13 @@ struct TVAppCard: View {
         case .samsung:
             Card(title: "CouchSubs TV app") {
                 Text("The TV app is not installed. CouchSubs installs it once Developer Mode is on.")
+                // Telefonlardaki kurulum ekranıyla aynı not: 2016 (Tizen 2.4) ve sonrası kurulur, 2016–2018 deneysel.
+                HintText(text: "Samsung TVs and smart monitors (2016 and later; 2016–2018 models are experimental).")
                 HintText(text: "1. On the TV, open Apps and scroll to the very bottom of the page.")
                 HintText(text: "2. There, press 1 2 3 4 5 on the remote (or type 12345 on the on-screen keypad). The Developer Mode window opens.")
                 HintText(text: "3. Turn Developer mode On, type this computer's address as Host PC IP: \(model.computerAddress ?? "?") and press OK.")
-                HintText(text: "4. Restart the TV: hold the power button on the remote for about 2 seconds until the TV turns off, then turn it on again. This screen continues by itself.")
+                otherAddresses
+                HintText(text: "4. Restart the TV: hold the power button on the remote and keep holding until the TV turns off and comes back on with the Samsung logo (about 5 seconds); letting go when it turns off only puts it on standby. If no logo appears, unplug the TV for 30 seconds. This screen continues by itself.")
                 HintText(text: "Later you sign in once with a free Samsung account; Samsung needs it to sign the app for your TV.")
                 HintText(text: "If the TV keeps switching to HDMI 1 or another source while the CouchSubs TV app is open, turn off Anynet+ (HDMI-CEC) and Auto Source Switching on the TV: Settings › All Settings › Connection › External Device Manager.")
             }
@@ -175,10 +231,12 @@ struct TVAppCard: View {
                 .disabled(passphrase.trimmingCharacters(in: .whitespaces).isEmpty)
         }
         ErrorText(error: error.map { Self.message(for: $0, brand: .lg) })
+        if error != nil { logActions }
     }
 
     /// `reason`: TV'nin verdiği sebep; varsa mesajın altına eklenir. Samsung'da ayrıntı (TV'nin kurulum çıktısı,
-    /// Samsung'un yanıtı) ve gönderilecek günlük dosyası da yazılır: hiçbir hata genel mesajda kalmasın.
+    /// Samsung'un yanıtı) da yazılır: hiçbir hata genel mesajda kalmasın. Gönderilecek günlük dosyası üç markada da
+    /// yazılır (önceden yalnız Samsung'da).
     static func message(for error: DevModeError, brand: TVBrand, reason: String?) -> String {
         var text = message(for: error, brand: brand, hasReason: reason != nil)
         let samsung = brand == .samsung
@@ -191,19 +249,19 @@ struct TVAppCard: View {
         if Distribution.isAppStore, error == .installFailed {
             text += "\n\n" + String(localized: "If the Mac App Store version cannot install the TV app, install it once with the GitHub (DMG) version of CouchSubs. After that, this version is enough.")
         }
-        guard samsung else { return text }
+        let send = String(format: String(localized: "If this keeps happening, send us this file: %@"), TVInstallLog.displayPath)
+        guard samsung else { return text + "\n\n" + send }
         if error == .installFailed || error == .certificateRejected {
             text += "\n\n" + String(localized: "If the TV shows “Server under maintenance”, it cannot reach Samsung's servers: check the TV's internet connection and its date and time, restart the TV and try again.")
         }
         // Samsung kısa basışta yalnız bekleme moduna geçer; "yeniden başlatın" diyen hatalarda nasıl yapılacağı yazılır.
         if error == .unreachable || error == .installFailed || error == .certificateRejected {
-            text += "\n\n" + String(localized: "To restart a Samsung TV fully, hold the power button on the remote for about 2 seconds until it turns off; a short press only puts it on standby.")
+            text += "\n\n" + String(localized: "To restart a Samsung TV fully, hold the power button on the remote until the TV turns off and comes back on with the Samsung logo (about 5 seconds), or unplug it for 30 seconds. Letting go when it turns off only puts it on standby.")
         }
         // TV kurulum sırasında HDMI-CEC yüzünden başka kaynağa geçerse bağlantı kopar.
         if error == .connectionLost {
             text += "\n\n" + String(localized: "If the TV keeps switching to HDMI 1 or another source while the CouchSubs TV app is open, turn off Anynet+ (HDMI-CEC) and Auto Source Switching on the TV: Settings › All Settings › Connection › External Device Manager.")
         }
-        let send = String(format: String(localized: "If this keeps happening, send us this file: %@"), TVInstallLog.displayPath)
         return text + "\n\n" + send
     }
 
@@ -220,7 +278,7 @@ struct TVAppCard: View {
             String(localized: "The TV app could not be installed. Try again; if it fails again, send us the reason below.")
         case .installFailed: String(localized: "The TV app could not be installed. Try again.")
         case .notEnoughSpace: String(localized: "The TV is out of free space. Remove an app you do not use from the TV and try again.")
-        case .tooOld: String(localized: "This Samsung TV is too old for the CouchSubs TV app (2017 models and later are supported).")
+        case .tooOld: String(localized: "This Samsung TV is too old for the CouchSubs TV app (2016 models and later are supported).")
         case .signInFailed: String(localized: "Samsung sign-in did not complete. Try again and finish signing in on the page that opens.")
         case .certificateFailed: String(localized: "Samsung did not issue the signing certificate. Try again in a few minutes.")
         case .notApproved: String(localized: "Debugging was not allowed on the TV. Try again and choose Allow on the TV.")

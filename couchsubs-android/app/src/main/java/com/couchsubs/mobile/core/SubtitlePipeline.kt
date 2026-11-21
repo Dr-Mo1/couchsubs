@@ -70,6 +70,9 @@ class SubtitlePipeline(
          * görünüyordu (Windows: CleanWaitMs).
          */
         const val CLEAN_WAIT_MS = 300
+        /** Ayarlardaki bekleme kaydırıcılarının üst sınırı ve hatta uygulanan en uzun bekleme (ms). */
+        const val WAIT_SLIDER_MAX_MS = 1000
+        const val MAX_WAIT_MS = 2000
         /** Çevrilen satırın daha iyi olmayan yeniden okuması bu süre içinde yeni satır sayılmaz. */
         const val REREAD_WITHIN_MS = 4000
 
@@ -105,6 +108,42 @@ class SubtitlePipeline(
     private val stabilizer = SubtitleStabilizer(clock = now)
     /** Konuşma değişirken sabit duran görev/HUD satırları (GTA 6). */
     private val stickyRows = StickyRows()
+    /** Bu oturumda kesin altyazının okunduğu yükseklikler: oradaki kısa satır sahne yazısı sayılmaz ([SceneText]). */
+    private val subtitleBand = SubtitleBand()
+    /** Günlüğe yazılmış son sahne yazıları (her karede yeniden yazılmasın). */
+    private val loggedSceneText = ArrayDeque<String>()
+
+    /** Altyazı günlüğü (Mac/iPhone `onLog`, Windows `Log`): şimdilik sahne yazısı sayılıp atılan bloklar. */
+    var onLog: ((String) -> Unit)? = null
+
+    /** Sahne yazısı sayılıp atılan blok günlüğe nedeniyle bir kez yazılır (GitHub #822). */
+    private fun logSceneText(text: String, reason: String) {
+        val key = "$text|$reason"
+        if (key in loggedSceneText) return
+        loggedSceneText.addLast(key)
+        if (loggedSceneText.size > 20) loggedSceneText.removeFirst()
+        val excerpt = text.replace('\n', ' ').let { if (it.length > 120) it.take(120) + "…" else it }
+        onLog?.invoke("sahne yazısı: \"$excerpt\" altyazı sayılmadı ($reason)")
+    }
+    private val mission = MissionLine()
+
+    /**
+     * Görev satırının bölgesi değişti (null: görev kalktı). Görev altyazıya girmez; bölgesi "auto-mission" ek alanı olarak
+     * kendi yerinde ve özgün stilinde gösterilir (bkz. [MissionLine]).
+     */
+    @Volatile var onMissionChanged: ((CropRegion?) -> Unit)? = null
+    private val notices = ScreenNotices()
+
+    /**
+     * Ekranın kenarındaki bildirim kartlarının alanları değişti (boş: hiç yok). Bildirim altyazıya girmez; alanları
+     * "auto-notice-<n>" ek alanı olarak kendi yerinde ve özgün stilinde gösterilir (bkz. [ScreenNotices]).
+     */
+    @Volatile var onNoticesChanged: ((List<ExtraArea>) -> Unit)? = null
+    /**
+     * Altyazının son okunan satırları ve alanı; ekran yazısı okuyucuları bunlarla altyazıyı dışlar (bkz. [SubtitleEcho]).
+     * Uygulama [SubtitleEcho.shared] verir.
+     */
+    @Volatile var echo: SubtitleEcho? = null
     private var lastRequested = 0
     private var lastShown = 0
     private var inFlight: Request? = null
@@ -134,6 +173,15 @@ class SubtitlePipeline(
     /** Yarım olabilecek temiz okumanın bekleme süresi (0: beklenmez); testler değiştirir. */
     @Volatile var cleanWait = CLEAN_WAIT_MS
 
+    /**
+     * Ayarlardaki "Bozuk okunan satır için bekleme" ve "Yarım okunan satır için bekleme" sürelerini uygular (Windows
+     * ApplyWaits, Mac/iPhone applyWaits ile aynı sınırlar: 0–2 sn). Hat yeniden kurulmaz.
+     */
+    fun applyWaits(misreadMs: Int, partialMs: Int) {
+        packWait = misreadMs.coerceIn(0, MAX_WAIT_MS)
+        cleanWait = partialMs.coerceIn(0, MAX_WAIT_MS)
+    }
+
     private fun totalMs(request: Request): Int? = request.capturedAt?.let { maxOf(0, (now() - it).toInt()) }
 
     /** Oyun paketi: kararlı satırın hazır Türkçesi (yoksa null). Motordan önce bakılır. */
@@ -162,7 +210,36 @@ class SubtitlePipeline(
         // Kumanda ipuçları ve yazı tanıma çöpleri çevrilmez; yalnız altyazı bloğu çevrilir.
         // Konuşma değişirken sabit duran görev/HUD satırı ("Get in the sea plane", GTA 6) altyazı bloğuna katılmaz.
         val rows = raw.withoutButtonPrompts().withoutOcrNoise().joiningRows()
-        val reading = synchronized(lock) { stickyRows.filter(rows, now()) }.subtitleBlock(area)
+        var missionChanged = false
+        var missionRegion: CropRegion? = null
+        var noticesChanged = false
+        var noticeAreas: List<ExtraArea> = emptyList()
+        val reading = synchronized(lock) {
+            val filtered = stickyRows.filter(rows, now())
+            if (mission.observe(stickyRows.removed, area, now())) {
+                missionChanged = true
+                missionRegion = mission.region
+            }
+            // Bu oturumda altyazının okunduğu yükseklikteki kısa satır tabela sayılmaz; atılan blok günlüğe (GitHub #822).
+            val edge = mutableListOf<Reading>()
+            filtered.subtitleBlock(area, subtitleBand, notices = { block ->
+                edge.add(Reading(block.lines.map { it.copy(box = it.box?.placedIn(area)) }))
+            }) { block, reason -> logSceneText(block.text, reason) }.also {
+                subtitleBand.record(it, area)
+                if (notices.observe(edge, now())) {
+                    noticesChanged = true
+                    noticeAreas = notices.areas
+                }
+            }
+        }
+        // Kenardaki bildirim kartı altyazının yerinde (ekranın ortasında) değil, kendi yerinde çevrilir.
+        if (noticesChanged) {
+            onLog?.invoke(if (noticeAreas.isEmpty()) "kenar bildirimi kalktı" else "kenar bildirimi kendi yerinde gösteriliyor (${noticeAreas.size})")
+            onNoticesChanged?.invoke(noticeAreas)
+        }
+        // Ekran yazısı okuyucuları altyazıyı ikinci kez çizmesin (bkz. [SubtitleEcho]).
+        echo?.record(reading, area)
+        if (missionChanged) onMissionChanged?.invoke(missionRegion)
         var flushed: (() -> Unit)? = null
         val after: (() -> Unit)? = synchronized(lock) {
             var action = stabilizer.feed(reading.text, signature, reading.box)
@@ -515,6 +592,11 @@ class SubtitlePipeline(
         lastShownSource = null
         pairs.clear()
         stickyRows.reset()
+        subtitleBand.reset()
+        loggedSceneText.clear()
+        mission.reset()
+        notices.reset()
+        echo?.reset()
         if (stabilizer.reset() == StabilizerAction.Clear) sender.clear()
     }
 

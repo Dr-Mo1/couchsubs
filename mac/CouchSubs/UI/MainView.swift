@@ -48,6 +48,12 @@ struct MainView: View {
         }
         .padding(Theme.space("screen"))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .alert(item: $model.tvPairingRequest) { ticket in
+            Alert(title: Text("Pair this TV?"),
+                  message: Text(String(format: String(localized: "TV code: %@. You don't type this code anywhere: if your TV shows the same code, approve it here."), ticket.code)),
+                  primaryButton: .default(Text("Approve")) { model.resolveTVPairing(ticket, accept: true) },
+                  secondaryButton: .cancel(Text("Reject")) { model.resolveTVPairing(ticket, accept: false) })
+        }
         .sheet(isPresented: $model.showSettings, onDismiss: { model.settingsSection = .appearance }) {
             SettingsView(section: model.settingsSection).appSurface()
         }
@@ -104,17 +110,49 @@ struct MainControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.space("gap")) {
+            // Önceki çalışma çöktüyse macOS'un raporu bir kez bildirilir.
+            CrashReportCard()
             HStack(spacing: Theme.space("m")) {
                 StartStopButton()
                 TestSubtitleButton()
+            }
+            if model.testTVNotConnected && model.tvClients == 0 {
+                HintText(text: "The test subtitle did not reach the TV because the TV app is not connected. Open CouchSubs on the TV. If the TV shows a 6-digit code, don't type it anywhere: approve it in the “Pair this TV?” window that opens on this computer, then test again.")
+            }
+            // Çeviri sürüyor ama TV uygulaması bağlı değil: CouchSubs TV'de nerede bulunur (markaya göre), otomatik açma neden
+            // olmadı ve "Otomatik açmayı dene" (Windows, iPhone ve Android ile aynı).
+            if model.isRunning, !model.demoMode, model.settings.output.showsOnTV, model.hasTV, model.tvClients == 0, let tv = model.tv {
+                Card {
+                    Text(LocalizedStringKey(TVOpenText.openOnTV(tv.brand))).font(.csCallout).foregroundStyle(Color.csText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let reason = TVOpenText.reason(model.tvOpenProblem) {
+                        Text(LocalizedStringKey(reason)).font(.csCallout).foregroundStyle(Color.csWarning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Button(LocalizedStringKey(TVOpenText.tryButton)) { model.retryTVOpen() }
+                        .buttonStyle(.secondary)
+                }
             }
             HStack(alignment: .top, spacing: Theme.space("gap")) {
                 if model.demoMode {
                     StatusTile(symbol: "play.rectangle", title: "Demo mode", value: model.ps5StatusText,
                                tone: AppModel.ps5Tone(model.sessionState, running: model.isRunning))
+                } else if model.isXbox {
+                    StatusTile(symbol: "gamecontroller", title: "Xbox · Beta", value: model.ps5StatusText,
+                               tone: AppModel.ps5Tone(model.sessionState, running: model.isRunning)) {
+                        // Microsoft girişi ya da Xbox seçimi eksikse buradan tamamlanır.
+                        if model.needsXboxLink {
+                            Button(model.xboxSignedIn ? "Choose your Xbox" : "Sign in with Microsoft") { model.linkXbox() }
+                                .buttonStyle(.secondary)
+                        }
+                        ReconnectButton()
+                    }
                 } else {
-                    StatusTile(symbol: "gamecontroller", title: "PS5", value: model.ps5StatusText,
-                               tone: AppModel.ps5Tone(model.sessionState, running: model.isRunning))
+                    StatusTile(symbol: "gamecontroller", title: model.settings.frameSource == .captureWindow ? "Selected window" : "PS5",
+                               value: model.ps5StatusText,
+                               tone: AppModel.ps5Tone(model.sessionState, running: model.isRunning)) {
+                        ReconnectButton()
+                    }
                 }
                 // Altyazı yalnız bilgisayar ekranındaysa TV durumu gösterilmez.
                 if model.settings.output.showsOnTV { TVStatusTile() }
@@ -126,17 +164,46 @@ struct MainControls: View {
             SubtitleOutputCard()
             // Ayar bilgisi durum karosu gibi değil, satır olarak durur (TASARIM.md › InfoCard).
             InfoCard {
+                // Görüntünün nereden okunduğu; dokununca Ayarlar › Görüntü kaynağı (DM'de ayar bulunamıyordu).
+                if model.isXbox {
+                    // Xbox'ta görüntü kaynağı seçimi yok (Windows'taki gibi gizli); konsol türü gösterilir.
+                    InfoRow("Console", value: String(localized: "Xbox Series / Xbox One (Beta)"), action: { model.openSettings(.console) })
+                } else {
+                    InfoRow("Picture source", value: pictureSourceName, action: { model.openSettings(.source) })
+                }
+                InfoDivider()
                 InfoRow("Translation", value: engineName, action: { model.openSettings(.translation) })
                 InfoDivider()
-                InfoRow("Translate screen") { Keycap("⌥⌘T") }
+                InfoRow("Translate screen") { ScreenKeys(settings: model.settings) }
             }
             MainWarnings()
         }
     }
 
+    private var pictureSourceName: String {
+        AppModel.pictureSourceTitle(model.settings.frameSource)
+    }
+
     private var engineName: String {
         let engine = model.settings.translationEngine
         return engine == .free ? String(localized: "Free") : engine.displayName
+    }
+}
+
+/// Konsol karosunda: oturum yeniden denemeyi bıraktıysa hemen, süren denemelerde 45 sn sonra. Uygulamayı kapatıp açmadan
+/// konsol bağlantısı baştan kurulur, çeviri sürer (ReconnectOffer; iPhone, Android ve Windows ile aynı).
+private struct ReconnectButton: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        if model.isRunning && model.sessionState != .streaming {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                if model.offersReconnect(now: context.date) {
+                    Button { model.reconnect() } label: { Label("Reconnect", systemImage: "arrow.clockwise") }
+                        .buttonStyle(.secondary)
+                }
+            }
+        }
     }
 }
 
@@ -175,17 +242,28 @@ private struct TestSubtitleButton: View {
         Button {
             Task { await model.testSubtitle() }
         } label: {
-            Label(onTV ? "Test on TV" : "Test on screen", systemImage: onTV ? "tv" : "macwindow")
+            if model.openingTVAppForTest {
+                Label("Opening the app on the TV…", systemImage: "tv")
+            } else {
+                Label(onTV ? "Test on TV" : "Test on screen", systemImage: onTV ? "tv" : "macwindow")
+            }
         }
         .buttonStyle(CSButtonStyle(kind: .secondary, height: "primaryActionHeight"))
         .fixedSize()
-        .disabled(onTV && !model.hasTV && !model.settings.output.showsOnComputer)
+        .disabled((onTV && !model.hasTV && !model.settings.output.showsOnComputer) || model.openingTVAppForTest)
         .help(Text(onTV ? "Sends a sample subtitle to the TV." : "Shows a sample subtitle on this computer's screen."))
     }
 }
 
 private struct TVStatusTile: View {
     @EnvironmentObject private var model: AppModel
+
+    /// TV eşleşmişken (TV uygulaması bağlı olsa da) yalnız TV adımı açılır: başka TV seçilir, "Yeniden kur…" gerekmez.
+    @ViewBuilder private var changeTV: some View {
+        if model.canChangeTV {
+            Button("Change TV") { model.step = .tv }.buttonStyle(.link)
+        }
+    }
 
     var body: some View {
         if model.hasTV {
@@ -197,11 +275,20 @@ private struct TVStatusTile: View {
                         model.step = .tv
                         Task { await model.reinstallTVApp() }
                     }.buttonStyle(.secondary)
+                    changeTV
+                }
+            } else if model.canReconnectTV {
+                // TV uygulaması bağlı değil (LG): TV adımı açılır; başka TV seçilir ya da kurulum adımları yeniden izlenir.
+                StatusTile(symbol: "tv", title: "TV", value: String(localized: "Waiting for the TV app"),
+                           tone: AppModel.tvTone(clients: model.tvClients, running: model.isRunning)) {
+                    Button("Connect a TV") { model.step = .tv }.buttonStyle(.secondary)
                 }
             } else {
                 StatusTile(symbol: "tv", title: "TV",
                            value: model.tvClients > 0 ? String(localized: "Connected") : String(localized: "Waiting for the TV app"),
-                           tone: AppModel.tvTone(clients: model.tvClients, running: model.isRunning))
+                           tone: AppModel.tvTone(clients: model.tvClients, running: model.isRunning)) {
+                    changeTV
+                }
             }
         } else {
             StatusTile(symbol: "tv", title: "TV", value: String(localized: "Not set up")) {
@@ -258,7 +345,23 @@ private struct MainWarnings: View {
             }
         }
 
-        if let free = model.readingFailedFreeGB {
+        if model.readingStuck {
+            Card {
+                Label("macOS can't read the text on the screen.", systemImage: "exclamationmark.triangle")
+                    .font(.csBody.weight(.semibold))
+                    .foregroundStyle(Color.csWarning)
+                HintText(text: "Text reading got stuck. It usually recovers within a minute or two: macOS prepares its text model after the first launch or an update. Don't quit while waiting. If it doesn't recover, restart CouchSubs.")
+                Button("Restart CouchSubs") { model.relaunch() }.buttonStyle(.secondary)
+            }
+        } else if model.readingRescued {
+            Card {
+                Label("macOS text reading isn't responding. Subtitles continue with the backup reader.", systemImage: "exclamationmark.triangle")
+                    .font(.csBody.weight(.semibold))
+                    .foregroundStyle(Color.csWarning)
+                HintText(text: "This usually clears up within a minute or two: macOS prepares its text model after the first launch or an update. Reading may be a little less accurate until then. If it doesn't clear up, restart CouchSubs.")
+                Button("Restart CouchSubs") { model.relaunch() }.buttonStyle(.secondary)
+            }
+        } else if let free = model.readingFailedFreeGB {
             Card {
                 Label("macOS can't read the text on the screen.", systemImage: "exclamationmark.triangle")
                     .font(.csBody.weight(.semibold))
@@ -286,7 +389,8 @@ private struct PackInUseTile: View {
         if active {
             HStack(spacing: Theme.space("m")) {
                 TileIcon(symbol: "shippingbox", tint: .csPro)
-                Text(verbatim: String(format: String(localized: "Game packs are on · %lld games translated in advance"), model.installedPacks.count))
+                Text(verbatim: String(format: String(localized: "Game packs are on · %lld games translated in advance"),
+                                            GameCatalog.packShelf(model.installedPacks).count))
                     .font(.csBody)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
@@ -310,12 +414,28 @@ private struct LiveSubtitlesTile: View {
                 Spacer()
                 if model.isRunning { Pill(text: String(localized: "Translating…"), live: true) }
             }
+            // Çeviri PS5'ten (ikinci hesap) okunurken, ilk altyazıya kadar ve bağlantı koptuğunda: kolu açınca ana hesap
+            // seçilmeli (GitHub #231, MainAccountTip).
+            if model.isRunning && MainAccountTip.isVisible(ps5: !model.isXbox && model.settings.frameSource == .ps5, demo: model.demoMode,
+                                                           hasSubtitle: !model.lastTranslation.isEmpty,
+                                                           streaming: model.sessionState == .streaming) {
+                HintText(text: "To play without the connection dropping: 1. On the PS5, start the game with your MAIN account first. 2. Then start translating. 3. Don't switch users during the game; when you turn on the controller, choose your MAIN account. Don't play with the second account CouchSubs signs in with, or the controller will turn off by itself or won't work in the game.")
+            }
+            // Otomatik ekran yazısı beta.63'te açık geliyordu; bir kez kapatıldı, kullanıcıya söylenir.
+            if model.showsAutoScreenTextNotice {
+                HintText(text: "Automatic on-screen text translation is experimental; you can turn it on in Settings.")
+            }
+            // Kullanım verisi ilk açılışta bir kez söylenir; ilk çeviride ya da ayar değişince kaybolur.
+            if model.showsUsageNotice { HintText(text: "CouchSubs measures how the app is used without linking it to you; no subtitle text, picture or account data is sent. You can turn this off in Settings › Game packs › Usage data.") }
+            // Görüntü bir dakikadır geliyor ama hiç altyazı satırı okunmadı (GitHub #503, #566, #572; SubtitleOffTip).
+            if model.showsSubtitleOffTip {
+                HintText(text: "Turn on the game's own subtitles: CouchSubs reads the English subtitles on screen, not the audio.")
+                if model.settings.watchSubtitleBackground {
+                    HintText(text: "“Watch subtitle background” is on: only text on GTA 6’s dark subtitle panel is read. Set the game’s subtitle background to Solid or turn this setting off.")
+                }
+            }
             if model.lastTranslation.isEmpty {
                 HintText(text: "Subtitles will appear here while you play.")
-                // Çeviri PS5'ten (ikinci hesap) okunurken: kolu açınca ana hesap seçilmeli (GitHub #231).
-                if model.isRunning && model.settings.frameSource == .ps5 && !model.demoMode {
-                    HintText(text: "When you turn on the controller to play, choose your MAIN account on the PS5. Don't play with the second account CouchSubs signs in with, or the controller won't work in the game.")
-                }
             } else {
                 // Yeni satır kısa bir geçişle belirir (azaltılmış harekette geçiş yok); eskisiyle üst üste biner, karo zıplamaz.
                 ZStack(alignment: .topLeading) {
@@ -410,5 +530,26 @@ private struct HistoryRow: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .textSelection(.enabled)
+    }
+}
+
+/// Bilgi karosunun "Ekranı çevir" satırı: Ayarlar › Kısayollar'da seçili her tuş bir Keycap, aralarında "ya da"; hiç
+/// kısayol yoksa "kısayol yok" (Windows: MainView.ShowScreenKeys).
+private struct ScreenKeys: View {
+    let settings: UserSettings
+
+    var body: some View {
+        let keys = HotkeyTable.keys(settings.hotkeys, .screen)
+        if keys.isEmpty {
+            Text("no shortcut").font(.csCaption).foregroundStyle(Color.csSecondary)
+        } else {
+            HStack(spacing: Theme.space("xs")) {
+                ForEach(Array(keys.enumerated()), id: \.offset) { index, key in
+                    if index > 0 { Text("or").font(.csCaption).foregroundStyle(Color.csSecondary) }
+                    Keycap(key.label)
+                }
+            }
+            .help(HotkeyText.title(settings, .screen, String(localized: "Translate the screen (%@)")))
+        }
     }
 }

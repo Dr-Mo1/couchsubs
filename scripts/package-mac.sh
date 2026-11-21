@@ -40,6 +40,13 @@ APP_VERSION="${APP_VERSION:-$(git describe --tags --abbrev=0 --match 'v*' 2>/dev
 APP_VERSION="${APP_VERSION:-0.1.0}"
 BUILD_NUMBER="${BUILD_NUMBER:-$(git rev-list --count HEAD)}"
 VERSION_ARGS=(MARKETING_VERSION="$APP_VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER")
+# Kullanım verisi (GA4 Measurement Protocol): CI'da GA_MEASUREMENT_ID ve GA_API_SECRET sırlarından, yerelde aynı adlı
+# ortam değişkenlerinden. İkisi de yoksa uygulamada ölçüm tamamen kapalı (UsageStats).
+if [[ -n "$GA_MEASUREMENT_ID" && -n "$GA_API_SECRET" ]]; then
+  VERSION_ARGS+=(GA_MEASUREMENT_ID="$GA_MEASUREMENT_ID" GA_API_SECRET="$GA_API_SECRET")
+else
+  echo "Uyarı: GA_MEASUREMENT_ID/GA_API_SECRET verilmedi; bu pakette kullanım verisi kapalı."
+fi
 
 SIGN_ARGS=(CODE_SIGN_IDENTITY="-")
 if [[ -n "$DEVELOPER_ID" ]]; then
@@ -97,11 +104,19 @@ if [[ -n "$DEVELOPER_ID" ]]; then
     [[ "$ITEM" == *Downloader.xpc ]] && EXTRA=(--preserve-metadata=entitlements)
     codesign --force --options runtime --timestamp "${EXTRA[@]}" -s "$DEVELOPER_ID" "$ITEM"
   done
+  # Xbox ev yayınının (Beta) WebRTC kitaplığı da bizim kimliğimizle imzalanır (onay için gömülü her kitaplık imzalı olmalı).
+  WEBRTC="$APP/Contents/Frameworks/WebRTC.framework"
+  if [[ -d "$WEBRTC" ]]; then codesign --force --options runtime --timestamp -s "$DEVELOPER_ID" "$WEBRTC"; fi
   codesign --force --options runtime --timestamp --entitlements mac/CouchSubs/CouchSubs.entitlements -s "$DEVELOPER_ID" "$APP"
   codesign --verify --deep --strict "$APP" || { echo "İmza doğrulanamadı."; exit 1; }
 fi
 [[ -x "$APP/Contents/MacOS/couchsubs-tv-helper" ]] || { echo "TV kurulum yardımcısı pakette yok."; exit 1; }
 [[ -x "$APP/Contents/MacOS/pocket-tts" ]] || { echo "Dublaj ses motoru (pocket-tts) pakette yok."; exit 1; }
+# LG ve Samsung paketleri uygulamada yoksa TV kurulumu sessizce gizlenir (AppModel.bundledTVPackage); eksik paket çıkmasın.
+IPKS=("$APP"/Contents/Resources/tv-app/*.ipk(N))
+(( ${#IPKS} > 0 )) || { echo "LG TV paketi (ipk) uygulamada yok."; exit 1; }
+WGTS=("$APP"/Contents/Resources/tv-app/*.wgt(N))
+(( ${#WGTS} > 0 )) || { echo "Samsung TV paketi (wgt) uygulamada yok."; exit 1; }
 # package-tv.sh dist/tv-app'i baştan kurar; APK yalnız ANDROID_APK verilince geri eklenir. Yerel deneme derlemesi için
 # ALLOW_NO_APK=1 ile atlanır.
 APKS=("$APP"/Contents/Resources/tv-app/*.apk(N))

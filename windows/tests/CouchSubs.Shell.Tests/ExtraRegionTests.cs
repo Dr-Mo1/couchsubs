@@ -23,8 +23,8 @@ public class ExtraRegionTests
     public void ExtraRegionsAreOffByDefault()
     {
         var settings = new UserSettings();
-        Assert.Null(settings.ExtraRegion(1));
-        Assert.Null(settings.ExtraRegion(2));
+        Assert.Empty(settings.ExtraAreas);
+        Assert.Null(settings.ExtraAreaAt(1));
     }
 
     [Fact]
@@ -32,7 +32,7 @@ public class ExtraRegionTests
     {
         var settings = new UserSettings();
         Assert.Empty(settings.WatchedAreas());
-        for (var slot = 1; slot <= UserSettings.ExtraRegionCount; slot++) Assert.False(settings.ExtraLive(slot));
+        Assert.Empty(settings.WithArea(new CropRegion()).WatchedAreas());
     }
 
     [Fact]
@@ -40,12 +40,88 @@ public class ExtraRegionTests
     {
         var quest = ExtraAreaPreset.Quest.Region();
         var settings = new UserSettings()
-            .WithExtraRegion(1, quest).WithExtraLive(1, true)
-            .WithExtraRegion(2, new CropRegion())
-            .WithExtraLive(3, true);
+            .WithArea(quest, live: true)
+            .WithArea(new CropRegion());
         var watched = Assert.Single(settings.WatchedAreas());
         Assert.Equal("area1", watched.Id);
         Assert.Equal(quest, watched.Region);
+    }
+
+    /// <summary>
+    /// Altyazı alanı Tam ekranken sürekli okunan bölge yoktur (ekranın tamamı zaten okunuyor); ayarlar değişmez, başka
+    /// alana dönünce bölgeler eskisi gibi okunur.
+    /// </summary>
+    [Fact]
+    public void FullScreenAreaPausesWatchedRegionsWithoutChangingThem()
+    {
+        var quest = ExtraAreaPreset.Quest.Region();
+        var settings = new UserSettings().WithArea(quest, live: true);
+        var full = settings with { AreaPreset = AreaPreset.Full, Region = new CropRegion(0, 1, 0, 1) };
+        Assert.True(full.ExtraAreasPausedByFullScreen);
+        Assert.Empty(full.WatchedAreas());
+        Assert.True(full.ExtraAreas[0].Enabled);
+        Assert.Equal(quest, full.ExtraAreas[0].Region);
+        var back = full with { AreaPreset = AreaPreset.Bottom, Region = new CropRegion() };
+        Assert.False(back.ExtraAreasPausedByFullScreen);
+        Assert.Equal("area1", Assert.Single(back.WatchedAreas()).Id);
+    }
+
+    /// <summary>Eski ayar dosyasında hazır seçim yoktur; tam kare bölge de Tam ekran sayılır.</summary>
+    [Fact]
+    public void FullFrameRegionWithoutPresetCountsAsFullScreen()
+    {
+        var settings = new UserSettings { Region = new CropRegion(0, 1, 0, 1) }.WithArea(ExtraAreaPreset.Quest.Region(), live: true);
+        Assert.Empty(settings.WatchedAreas());
+    }
+
+    /// <summary>Çeviri sürerken Tam ekran seçilince ek alan kutusu kalkar; başka alana dönünce yeniden okunup gelir.</summary>
+    [Fact]
+    public async Task SwitchingToFullScreenRemovesLiveRegionAndSwitchingBackBringsItBack()
+    {
+        var (controller, services) = Ready();
+        // Sahte okuyucu altyazıya ve alana aynı yazıyı verir; altyazı yinelemesi engeli burada sınanmıyor.
+        controller.SubtitleEcho = null;
+        services.ReaderLines = new Reading([new TextLine("Find the blacksmith", new TextBox(0.1, 0.2, 0.9, 0.3))]);
+        controller.Settings = controller.Settings with { Output = SubtitleOutput.Computer };
+        controller.Settings = controller.Settings.WithArea(ExtraAreaPreset.Quest.Region(), live: true);
+        var received = new List<SubtitleEvent>();
+        controller.OverlayEvent += e => { lock (received) received.Add(e); };
+        await controller.StartAsync();
+
+        async Task<SubtitleEvent?> WaitForRegion()
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (DateTime.UtcNow < deadline)
+            {
+                services.Streams[0].Emit(Frame.Blank(64, 64));
+                await Task.Delay(100);
+                lock (received)
+                    if (received.FirstOrDefault(e => e.Kind == SubtitleEventKind.Region && e.Text != "") is { } found) return found;
+            }
+            return null;
+        }
+
+        Assert.NotNull(await WaitForRegion());
+        lock (received) received.Clear();
+        controller.Settings = controller.Settings with { AreaPreset = AreaPreset.Full, Region = new CropRegion(0, 1, 0, 1) };
+        for (var i = 0; i < 5; i++)
+        {
+            services.Streams[0].Emit(Frame.Blank(64, 64));
+            await Task.Delay(50);
+        }
+        lock (received)
+        {
+            Assert.Contains(received, e => e.Kind == SubtitleEventKind.RegionClear);
+            Assert.DoesNotContain(received, e => e.Kind == SubtitleEventKind.Region && e.Text != "");
+            received.Clear();
+        }
+        Assert.True(controller.Settings.ExtraAreas[0].Enabled);
+
+        controller.Settings = controller.Settings with { AreaPreset = AreaPreset.Bottom, Region = new CropRegion() };
+        var back = await WaitForRegion();
+        Assert.NotNull(back);
+        Assert.Equal("area1", back.Id);
+        controller.Stop();
     }
 
     /// <summary>Sürekli okunan bölge tuşa basmadan okunur ve çevirisi "region" olayıyla pencereye (ve TV'ye) gider.</summary>
@@ -53,9 +129,11 @@ public class ExtraRegionTests
     public async Task LiveRegionIsReadWithoutAKeyPress()
     {
         var (controller, services) = Ready();
+        // Sahte okuyucu altyazıya ve alana aynı yazıyı verir; altyazı yinelemesi engeli burada sınanmıyor.
+        controller.SubtitleEcho = null;
         services.ReaderLines = new Reading([new TextLine("Find the blacksmith", new TextBox(0.1, 0.2, 0.9, 0.3))]);
         controller.Settings = controller.Settings with { Output = SubtitleOutput.Computer };
-        controller.Settings = controller.Settings.WithExtraRegion(1, ExtraAreaPreset.Quest.Region()).WithExtraLive(1, true);
+        controller.Settings = controller.Settings.WithArea(ExtraAreaPreset.Quest.Region(), live: true);
         var received = new List<SubtitleEvent>();
         controller.OverlayEvent += e => { lock (received) received.Add(e); };
         await controller.StartAsync();
@@ -76,14 +154,83 @@ public class ExtraRegionTests
         lock (received) Assert.Contains(received, e => e.Kind == SubtitleEventKind.RegionClear);
     }
 
+
     [Fact]
-    public void ExtraRegionIsSetAndClearedBySlot()
+    public async Task SwitchingGamesRefreshesAnUnchangedLivePromptFromTheNewPack()
+    {
+        const string prompt = "Find the blacksmith";
+        byte[] Pack(string translation) => System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
+            new Dictionary<string, string> { [PackKey.Key(prompt)!] = translation });
+        var (controller, services) = Ready();
+        // Sahte okuyucu altyazıya ve alana aynı yazıyı verir; altyazı yinelemesi engeli burada sınanmıyor.
+        controller.SubtitleEcho = null;
+        services.GamePacks = new GamePackLibrary(() => [("Hades.json", Pack("Demirciyi bul.")), ("Celeste.json", Pack("Nalbandı bul."))], null);
+        services.ReaderLines = new Reading([new TextLine(prompt, new TextBox(0.1, 0.2, 0.9, 0.3))]);
+        controller.Settings = (controller.Settings with { Output = SubtitleOutput.Computer, GamePacks = true })
+            .WithArea(ExtraAreaPreset.Quest.Region(), live: true);
+        var received = new System.Collections.Concurrent.ConcurrentQueue<SubtitleEvent>();
+        controller.OverlayEvent += received.Enqueue;
+        var frame = Frame.Blank(64, 64);
+        async Task<bool> Shows(string translation)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(4);
+            while (DateTime.UtcNow < deadline)
+            {
+                services.Streams[0].Emit(frame);
+                if (received.Any(e => e.Kind == SubtitleEventKind.Region && e.Id == "area1" && e.Text == translation)) return true;
+                await Task.Delay(50);
+            }
+            return false;
+        }
+
+        try
+        {
+            await controller.StartAsync();
+            controller.ChooseGame("Hades");
+            Assert.True(await Shows("Demirciyi bul."));
+            received.Clear();
+            controller.ChooseGame("Celeste");
+            Assert.True(await Shows("Nalbandı bul."));
+            Assert.Contains(received, e => e.Kind == SubtitleEventKind.RegionClear);
+            Assert.DoesNotContain(received, e => e.Kind == SubtitleEventKind.Region && e.Text == "Demirciyi bul.");
+        }
+        finally { controller.Stop(); }
+    }
+
+    [Fact]
+    public void ExtraAreasAreAddedChangedAndRemovedById()
     {
         var region = new CropRegion(0.1, 0.3, 0.6, 0.95);
-        var settings = new UserSettings().WithExtraRegion(2, region);
-        Assert.Null(settings.ExtraRegion(1));
-        Assert.Equal(region, settings.ExtraRegion(2));
-        Assert.Null(settings.WithExtraRegion(2, null).ExtraRegion(2));
+        var settings = new UserSettings().WithArea(new CropRegion()).WithArea(region);
+        Assert.Equal(region, settings.ExtraAreaAt(2)?.Region);
+        var moved = new CropRegion(0.2, 0.4, 0.6, 0.95);
+        settings = settings.WithExtraArea("area2", area => area with { Region = moved, Name = "Görev" });
+        Assert.Equal(moved, settings.ExtraAreaAt(2)?.Region);
+        Assert.Equal("Görev", settings.ExtraAreaAt(2)?.DisplayName(2));
+        // Silinen alanın arkasındaki öne gelir; kısayolu da artık onu okur.
+        settings = settings.WithoutExtraArea("area1");
+        Assert.Equal("area2", settings.ExtraAreaAt(1)?.Id);
+        Assert.Null(settings.ExtraAreaAt(2));
+    }
+
+    /// <summary>En çok üç ek alan; dördüncüsü eklenmez.</summary>
+    [Fact]
+    public void AtMostThreeExtraAreas()
+    {
+        var settings = new UserSettings().WithArea(new CropRegion()).WithArea(new CropRegion()).WithArea(new CropRegion());
+        Assert.False(settings.CanAddExtraArea);
+        Assert.Equal(3, settings.WithAddedExtraArea(ExtraArea.Create("Dördüncü", new CropRegion())).ExtraAreas.Count);
+        Assert.Equal(3, (settings with { ExtraAreas = [.. settings.ExtraAreas, ExtraArea.Create("x", new CropRegion())] }).ExtraAreas.Count);
+    }
+
+    /// <summary>Yeni ek alan sürekli okunur ve sonucu TV'de gösterir (Mac, iPhone, Android ile aynı varsayılan).</summary>
+    [Fact]
+    public void NewExtraAreaIsReadContinuouslyAndShowsOnTheTv()
+    {
+        var area = ExtraArea.Create("Görev", ExtraAreaPreset.Quest.Region());
+        Assert.True(area.Enabled);
+        Assert.Equal(ResultTarget.Tv, area.Target);
+        Assert.NotEqual(area.Id, ExtraArea.Create("Görev", ExtraAreaPreset.Quest.Region()).Id);
     }
 
     [Fact]
@@ -97,7 +244,7 @@ public class ExtraRegionTests
     public async Task NothingHappensWhileTranslationIsStopped()
     {
         var (controller, _) = Ready();
-        controller.Settings = controller.Settings.WithExtraRegion(1, new CropRegion());
+        controller.Settings = controller.Settings.WithArea(new CropRegion());
         Assert.Equal(ExtraRegionOutcome.NotRunning, await controller.TranslateExtraRegionAsync(1));
     }
 
@@ -105,7 +252,7 @@ public class ExtraRegionTests
     public async Task EmptyRegionReportsNoText()
     {
         var (controller, services) = Ready();
-        controller.Settings = controller.Settings.WithExtraRegion(1, new CropRegion());
+        controller.Settings = controller.Settings.WithArea(new CropRegion());
         await controller.StartAsync();
         services.Streams[0].Emit(Frame.Blank(64, 64));
         Assert.Equal(ExtraRegionOutcome.NoText, await controller.TranslateExtraRegionAsync(1));
@@ -149,26 +296,25 @@ public class ExtraRegionTests
     [Fact]
     public void ExtraAreaResultsShowOnTheTvByDefault()
     {
-        var settings = new UserSettings();
-        for (var slot = 1; slot <= UserSettings.ExtraRegionCount; slot++) Assert.Equal(ResultTarget.Tv, settings.ExtraTarget(slot));
+        var settings = new UserSettings().WithArea(new CropRegion());
+        Assert.Equal(ResultTarget.Tv, settings.ExtraAreas[0].Target);
     }
 
     [Fact]
     public void ThirdAreaAndItsTargetAreStoredSeparately()
     {
         var region = new CropRegion(0.3, 0.6, 0.3, 0.7);
-        var settings = new UserSettings().WithExtraRegion(3, region).WithExtraTarget(3, ResultTarget.Both);
-        Assert.Equal(region, settings.ExtraRegion(3));
-        Assert.Equal(ResultTarget.Both, settings.ExtraTarget(3));
-        Assert.Null(settings.ExtraRegion(1));
-        Assert.Equal(ResultTarget.Tv, settings.ExtraTarget(1));
+        var settings = new UserSettings().WithArea(new CropRegion()).WithArea(new CropRegion()).WithArea(region, target: ResultTarget.Both);
+        Assert.Equal(region, settings.ExtraAreaAt(3)?.Region);
+        Assert.Equal(ResultTarget.Both, settings.ExtraAreaAt(3)?.Target);
+        Assert.Equal(ResultTarget.Tv, settings.ExtraAreaAt(1)?.Target);
     }
 
     [Fact]
     public async Task PcTargetRaisesThePcResultOnly()
     {
         var (controller, services) = Ready();
-        controller.Settings = controller.Settings.WithExtraRegion(3, new CropRegion()).WithExtraTarget(3, ResultTarget.Pc);
+        controller.Settings = controller.Settings.WithArea(new CropRegion()).WithArea(new CropRegion()).WithArea(new CropRegion(), target: ResultTarget.Pc);
         await controller.StartAsync();
         services.Streams[0].Emit(Frame.Blank(64, 64));
         string? shown = null;
@@ -182,7 +328,7 @@ public class ExtraRegionTests
     public async Task TvTargetDoesNotRaiseThePcResult()
     {
         var (controller, services) = Ready();
-        controller.Settings = controller.Settings.WithExtraRegion(1, new CropRegion());
+        controller.Settings = controller.Settings.WithArea(new CropRegion());
         await controller.StartAsync();
         services.Streams[0].Emit(Frame.Blank(64, 64));
         var raised = false;
@@ -227,12 +373,33 @@ public class ScreenTranslationControllerTests
     public async Task SecondPressRemovesTheTranslations()
     {
         var (controller, services) = Ready();
+        // Sahte okuyucu altyazıya ve alana aynı yazıyı verir; altyazı yinelemesi engeli burada sınanmıyor.
+        controller.SubtitleEcho = null;
         services.ReaderLines = new Reading([new TextLine("Open the door.", new TextBox(0.4, 0.8, 0.6, 0.84))]);
         await controller.StartAsync();
         services.Streams[0].Emit(Frame.Blank(64, 64));
         Assert.Equal(ScreenOutcome.Shown, await controller.TranslateScreenAsync());
         Assert.Equal(ScreenOutcome.Cleared, await controller.TranslateScreenAsync());
         Assert.Equal(ScreenOutcome.Shown, await controller.TranslateScreenAsync());
+        controller.Stop();
+    }
+
+    /// <summary>
+    /// Bildirilen hata (GTA 6): telefonda başka bir sohbete geçip tuşa basınca çeviriler kalkıyor, yeni sohbet hiç
+    /// çevrilmiyordu. Ekran değiştiyse ikinci basış yeni ekranı çevirir; değişmediyse çevirileri kaldırır.
+    /// </summary>
+    [Fact]
+    public async Task SecondPressOnAChangedScreenTranslatesTheNewOne()
+    {
+        var (controller, services) = Ready();
+        controller.SubtitleEcho = null;
+        services.ReaderLines = new Reading([new TextLine("Where are you man", new TextBox(0.74, 0.40, 0.94, 0.44))]);
+        await controller.StartAsync();
+        services.Streams[0].Emit(Frame.Blank(64, 64));
+        Assert.Equal(ScreenOutcome.Shown, await controller.TranslateScreenAsync());
+        services.ReaderLines = new Reading([new TextLine("Did you get the money", new TextBox(0.74, 0.40, 0.94, 0.44))]);
+        Assert.Equal(ScreenOutcome.Shown, await controller.TranslateScreenAsync());
+        Assert.Equal(ScreenOutcome.Cleared, await controller.TranslateScreenAsync());
         controller.Stop();
     }
 
@@ -244,18 +411,21 @@ public class ScreenTranslationControllerTests
     public async Task ComputerOnlyShowsTheTranslationsInTheSubtitleWindow()
     {
         var (controller, services) = Ready();
+        // Sahte okuyucu altyazıya ve alana aynı yazıyı verir; altyazı yinelemesi engeli burada sınanmıyor.
+        controller.SubtitleEcho = null;
         controller.Settings = controller.Settings with { Output = SubtitleOutput.Computer };
         services.ReaderLines = new Reading([new TextLine("Open the door.", new TextBox(0.4, 0.8, 0.6, 0.84))]);
         var received = new List<SubtitleEvent>();
-        controller.OverlayEvent += received.Add;
+        controller.OverlayEvent += e => { lock (received) received.Add(e); };
         await controller.StartAsync();
         services.Streams[0].Emit(Frame.Blank(64, 64));
         Assert.Equal(ScreenOutcome.Shown, await controller.TranslateScreenAsync());
-        var screen = Assert.Single(received, e => e.Kind == SubtitleEventKind.Screen);
+        SubtitleEvent screen;
+        lock (received) screen = Assert.Single(received, e => e.Kind == SubtitleEventKind.Screen);
         Assert.NotEqual("", screen.Text);
         Assert.NotEqual("Open the door.", screen.Text);
         Assert.Equal(ScreenOutcome.Cleared, await controller.TranslateScreenAsync());
-        Assert.Contains(received, e => e.Kind == SubtitleEventKind.ScreenClear);
+        lock (received) Assert.Contains(received, e => e.Kind == SubtitleEventKind.ScreenClear);
         controller.Stop();
     }
 
@@ -266,10 +436,10 @@ public class ScreenTranslationControllerTests
         var (controller, _) = Ready();
         controller.Settings = controller.Settings with { Output = SubtitleOutput.Computer };
         var received = new List<SubtitleEvent>();
-        controller.OverlayEvent += received.Add;
+        controller.OverlayEvent += e => { lock (received) received.Add(e); };
         await controller.StartAsync();
         Assert.Equal(ScreenOutcome.NotRunning, await controller.TranslateScreenAsync());
-        Assert.Contains(received, e => e.Kind == SubtitleEventKind.Subtitle && e.Text.Contains("PS5", StringComparison.Ordinal));
+        lock (received) Assert.Contains(received, e => e.Kind == SubtitleEventKind.Subtitle && e.Text.Contains("PS5", StringComparison.Ordinal));
         controller.Stop();
     }
 }

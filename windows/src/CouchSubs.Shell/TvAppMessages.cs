@@ -8,9 +8,10 @@ namespace CouchSubs.Shell;
 /// <summary>TV uygulaması kurulamayınca gösterilen metin: ne yapılacağı, ayrıntı ve (Samsung'da) gönderilecek günlük.</summary>
 public static class TvAppMessages
 {
-    /// <summary>Samsung'u tam yeniden başlatma: güç tuşu yaklaşık 2 saniye basılı tutulur.</summary>
+    /// <summary>Samsung'u tam yeniden başlatma: güç tuşu TV Samsung logosuyla yeniden açılana kadar basılı tutulur; TV kapanınca
+    /// bırakılırsa yalnız bekleme moduna geçer ve sdb açılmaz (#524, #484).</summary>
     public const string RestartTip =
-        "To restart a Samsung TV fully, hold the power button on the remote for about 2 seconds until it turns off; a short press only puts it on standby.";
+        "To restart a Samsung TV fully, hold the power button on the remote until the TV turns off and comes back on with the Samsung logo (about 5 seconds), or unplug it for 30 seconds. Letting go when it turns off only puts it on standby.";
 
     /// <summary>TV uygulaması açıkken Samsung kendi kendine başka kaynağa geçiyorsa (HDMI-CEC).</summary>
     public const string SourceSwitchTip =
@@ -18,12 +19,17 @@ public static class TvAppMessages
 
     /// <summary>TV'deki Host PC IP bu bilgisayarınki değil: iki adres ve ne yapılacağı (#343).</summary>
     public const string HostPcMismatchMessage =
-        "The TV's Host PC IP is %1$@, but this computer's address is %2$@. In the TV's Developer Mode window, set Host PC IP to %2$@ and restart the TV fully (hold the power button for about 2 seconds).";
+        "The TV's Host PC IP is %1$@, but this computer's address is %2$@. In the TV's Developer Mode window, set Host PC IP to %2$@ and restart the TV fully (hold the power button until the Samsung logo appears, about 5 seconds).";
 
     /// <summary>Samsung bağlantı hatalarında Host PC IP'ye yazılacak adres.</summary>
     public const string ComputerAddressLine = "This computer's address (Host PC IP): %@";
+    /// <summary>Bu bilgisayarın Host PC IP için gösterilenden başka ev ağı adresleri varsa (Wi-Fi ve Ethernet ikisi de bağlı).</summary>
+    public const string OtherAddressesLine = "If the TV does not accept this address, try one of this computer's other addresses: %@";
 
-    /// <param name="samsungLog">Samsung kurulum günlüğünün yolu; Samsung hatalarında metnin sonunda yazar.</param>
+    /// <summary>Hata iletisinin sonunda günlük dosyasını söyleyen satır.</summary>
+    public const string SendLogLine = "If this keeps happening, send us this file: %@";
+
+    /// <param name="samsungLog">Kurulum günlüğünün yolu; üç markanın hatalarında da metnin sonunda yazar (önceden yalnız Samsung).</param>
     /// <param name="computerAddress">TV'nin göreceği bu bilgisayar adresi; Samsung "TV kabul etmedi" hatasında yazılır.</param>
     public static string Problem(TvAppState state, TvBrand brand, Localizer text, string samsungLog, string? computerAddress = null)
     {
@@ -36,7 +42,7 @@ public static class TvAppMessages
             result += "\n\n" + text.Format(ComputerAddressLine, computerAddress);
         if (state.Reason is { } reason)
             result += $"\n\n{text[samsung ? "Details:" : "TV says:"]} {reason}";
-        if (!samsung) return result;
+        if (!samsung) return result + "\n\n" + text.Format(SendLogLine, samsungLog);
         if (error is DevModeError.InstallFailed or DevModeError.CertificateRejected)
             result += "\n\n" + text["If the TV shows “Server under maintenance”, it cannot reach Samsung's servers: check the TV's internet connection and its date and time, restart the TV and try again."];
         // Samsung kısa basışta yalnız bekleme moduna geçer; "yeniden başlatın" diyen hatalarda nasıl yapılacağı yazılır.
@@ -45,7 +51,7 @@ public static class TvAppMessages
         // TV kurulum sırasında HDMI-CEC yüzünden başka kaynağa geçerse bağlantı kopar.
         if (error is DevModeError.ConnectionLost)
             result += "\n\n" + text[SourceSwitchTip];
-        return result + "\n\n" + text.Format("If this keeps happening, send us this file: %@", samsungLog);
+        return result + "\n\n" + text.Format(SendLogLine, samsungLog);
     }
 
     /// <summary>
@@ -79,7 +85,7 @@ public static class TvAppMessages
         DevModeError.HostPcMismatch => HostPcMismatchMessage,
         DevModeError.Unreachable => "The TV did not respond. Make sure it is on and on the same network.",
         DevModeError.ToolMissing => "Windows' OpenSSH Client is missing. Add it in Settings › System › Optional features and try again.",
-        DevModeError.TooOld => "This Samsung TV is too old for the CouchSubs TV app (2017 models and later are supported).",
+        DevModeError.TooOld => "This Samsung TV is too old for the CouchSubs TV app (2016 models and later are supported).",
         DevModeError.SignInFailed => "Samsung sign-in did not complete. Try again and finish signing in on the page that opens.",
         DevModeError.CertificateFailed => "Samsung did not issue the signing certificate. Try again in a few minutes.",
         DevModeError.NotApproved => "Debugging was not allowed on the TV. Try again and choose Allow on the TV.",

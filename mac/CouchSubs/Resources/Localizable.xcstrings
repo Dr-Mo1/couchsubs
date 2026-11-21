@@ -1,12 +1,401 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Use this key with ⌃⇧, ⌥⌘, ⌃⌥ or ⌃⌘, so typing in other apps isn't affected.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Use this key with ⌃⇧, ⌥⌘, ⌃⌥ or ⌃⌘, so typing in other apps isn't affected."}},"tr":{"stringUnit":{"state":"translated","value":"Bu tuşu ⌃⇧, ⌥⌘, ⌃⌥ ya da ⌃⌘ ile kullanın; böylece diğer uygulamalarda yazı yazmak etkilenmez."}}}},
+    "macOS doesn't accept shortcuts with only ⌥ or ⌥⇧, and they would type special characters. Add ⌃ or ⌘.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"macOS doesn't accept shortcuts with only ⌥ or ⌥⇧, and they would type special characters. Add ⌃ or ⌘."}},"tr":{"stringUnit":{"state":"translated","value":"macOS yalnız ⌥ ya da ⌥⇧ ile kurulan kısayolları kabul etmez; bunlar özel karakter de yazar. ⌃ ya da ⌘ ekleyin."}}}},
+    "macOS already uses this shortcut.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"macOS already uses this shortcut."}},"tr":{"stringUnit":{"state":"translated","value":"Bu kısayolu macOS kullanıyor."}}}},
+    "macOS uses %@ for another task (System Settings › Keyboard › Keyboard Shortcuts). It may not work until you turn that off.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"macOS uses %@ for another task (System Settings › Keyboard › Keyboard Shortcuts). It may not work until you turn that off."}},"tr":{"stringUnit":{"state":"translated","value":"%@ kısayolunu macOS başka bir iş için kullanıyor (Sistem Ayarları › Klavye › Klavye Kısayolları). Oradan kapatılmazsa çalışmayabilir."}}}},
+    "The shortcuts work only while translating, so the keys stay free in other apps. You can change them under Keyboard shortcuts.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The shortcuts work only while translating, so the keys stay free in other apps. You can change them under Keyboard shortcuts."}},"tr":{"stringUnit":{"state":"translated","value":"Kısayollar yalnız çeviri açıkken çalışır; böylece tuşlar diğer uygulamalarda serbest kalır. Kısayolları Ayarlar › Kısayollar bölümünden değiştirebilirsiniz."}}}},
+    "On this Mac": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"On this Mac"}},"tr":{"stringUnit":{"state":"translated","value":"Bu Mac'te"}}}},
+    "Choose game cover…": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Choose game cover…"}},"tr":{"stringUnit":{"state":"translated","value":"Oyun kapağı seç…"}}}},
+    "Remove game cover": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Remove game cover"}},"tr":{"stringUnit":{"state":"translated","value":"Oyun kapağını kaldır"}}}},
+    "The game cover could not be saved.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The game cover could not be saved."}},"tr":{"stringUnit":{"state":"translated","value":"Oyun kapağı kaydedilemedi."}}}},
+    "Images": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Images"}},"tr":{"stringUnit":{"state":"translated","value":"Görseller"}}}},
+    "This Mac's own Turkish voice: speaks at once, nothing to download. Sounds more mechanical.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This Mac's own Turkish voice: speaks at once, nothing to download. Sounds more mechanical."}},"tr":{"stringUnit":{"state":"translated","value":"Mac'in kendi Türkçe sesi: anında konuşur, indirme gerekmez. Daha mekanik duyulur."}}}},
+    "No Turkish voice is installed on this Mac. Add one in System Settings › Accessibility › Spoken Content › System Voice › Manage Voices.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"No Turkish voice is installed on this Mac. Add one in System Settings › Accessibility › Spoken Content › System Voice › Manage Voices."}},"tr":{"stringUnit":{"state":"translated","value":"Bu Mac'te Türkçe ses yüklü değil. Sistem Ayarları › Erişilebilirlik › Seslendirilen İçerik › Sistem Sesi › Sesleri Yönet'ten ekleyin."}}}},
+    "New game packs": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"New game packs"}},"tr":{"stringUnit":{"state":"translated","value":"Yeni oyun paketleri"}}}},
+    "New or updated: %@": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"New or updated: %@"}},"tr":{"stringUnit":{"state":"translated","value":"Yeni ya da güncellenen: %@"}}}},
+    "The model runs on a computer on the same Wi-Fi, not on this phone. Type that computer's network address. Ollama accepts other devices only when it is started with OLLAMA_HOST=0.0.0.0; in LM Studio, turn on Serve on Local Network.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The model runs on a computer on the same Wi-Fi, not on this phone. Type that computer's network address. Ollama accepts other devices only when it is started with OLLAMA_HOST=0.0.0.0; in LM Studio, turn on Serve on Local Network."}},"tr":{"stringUnit":{"state":"translated","value":"Model bu telefonda değil, aynı Wi-Fi'daki bir bilgisayarda çalışır. O bilgisayarın ağ adresini yazın. Ollama başka cihazları yalnız OLLAMA_HOST=0.0.0.0 ile başlatılınca kabul eder; LM Studio'da Serve on Local Network'ü açın."}}}},
+    "This phone's own Turkish voice: speaks at once, nothing to download. Sounds more mechanical.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This phone's own Turkish voice: speaks at once, nothing to download. Sounds more mechanical."}},"tr":{"stringUnit":{"state":"translated","value":"Telefonun kendi Türkçe sesi: hemen konuşur, indirme gerekmez. Daha mekanik duyulur."}}}},
+    "No Turkish voice is installed on this phone. Add one in Settings › Accessibility › Spoken Content › Voices › Turkish.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"No Turkish voice is installed on this phone. Add one in Settings › Accessibility › Spoken Content › Voices › Turkish."}},"tr":{"stringUnit":{"state":"translated","value":"Bu telefonda Türkçe ses yüklü değil. Ayarlar › Erişilebilirlik › Seslendirilen İçerik › Sesler › Türkçe'den ekleyin."}}}},
+    "Game profiles": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Game profiles"}},"tr":{"stringUnit":{"state":"translated","value":"Oyun profilleri"}}}},
+    "Each game keeps its own subtitle area and extra areas. A game that isn't in the list can be added by typing its name; one profile never overwrites another.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Each game keeps its own subtitle area and extra areas. A game that isn't in the list can be added by typing its name; one profile never overwrites another."}},"tr":{"stringUnit":{"state":"translated","value":"Her oyunun altyazı alanı ve ek alanları ayrı saklanır. Listede olmayan oyunu adını yazarak ekleyebilirsiniz; bir profil başka bir profilin üzerine yazılmaz."}}}},
+    "New game profile": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"New game profile"}},"tr":{"stringUnit":{"state":"translated","value":"Yeni oyun profili"}}}},
+    "In use": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"In use"}},"tr":{"stringUnit":{"state":"translated","value":"Kullanılıyor"}}}},
+    "Rename": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Rename"}},"tr":{"stringUnit":{"state":"translated","value":"Yeniden adlandır"}}}},
+    "Duplicate": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Duplicate"}},"tr":{"stringUnit":{"state":"translated","value":"Çoğalt"}}}},
+    "More": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"More"}},"tr":{"stringUnit":{"state":"translated","value":"Diğer"}}}},
+    "Game name": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Game name"}},"tr":{"stringUnit":{"state":"translated","value":"Oyunun adı"}}}},
+    "Save current areas": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Save current areas"}},"tr":{"stringUnit":{"state":"translated","value":"Şu anki alanları kaydet"}}}},
+    "There is already a profile for %@.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"There is already a profile for %@."}},"tr":{"stringUnit":{"state":"translated","value":"%@ için zaten bir profil var."}}}},
+    "Type the game's name.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Type the game's name."}},"tr":{"stringUnit":{"state":"translated","value":"Oyunun adını yazın."}}}},
+    "Use the saved areas for %@": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Use the saved areas for %@"}},"tr":{"stringUnit":{"state":"translated","value":"%@ için kayıtlı alanları kullan"}}}},
+    "Reconnect": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Reconnect"}},"tr":{"stringUnit":{"state":"translated","value":"Yeniden bağlan"}}}},
+    "If CouchSubs didn't open on the TV by itself, open it on the TV: on Android TV it's under Apps.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"If CouchSubs didn't open on the TV by itself, open it on the TV: on Android TV it's under Apps."}},"tr":{"stringUnit":{"state":"translated","value":"CouchSubs TV'de kendiliğinden açılmadıysa TV'den açın: Android TV'de Uygulamalar bölümündedir."}}}},
+    "If CouchSubs didn't open on the TV by itself, open it on the TV: it's in the TV's app list.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"If CouchSubs didn't open on the TV by itself, open it on the TV: it's in the TV's app list."}},"tr":{"stringUnit":{"state":"translated","value":"CouchSubs TV'de kendiliğinden açılmadıysa TV'den açın: TV'nin uygulamalar listesindedir."}}}},
+    "Couldn't open it automatically: the TV didn't answer. Is the TV on and on the same Wi-Fi as this device?": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Couldn't open it automatically: the TV didn't answer. Is the TV on and on the same Wi-Fi as this device?"}},"tr":{"stringUnit":{"state":"translated","value":"Otomatik açılamadı: TV yanıt vermedi. TV açık mı, bu cihazla aynı Wi-Fi'da mı?"}}}},
+    "Couldn't open it automatically: this device has no permission from the TV yet. Connect the TV again and allow it on the TV.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Couldn't open it automatically: this device has no permission from the TV yet. Connect the TV again and allow it on the TV."}},"tr":{"stringUnit":{"state":"translated","value":"Otomatik açılamadı: bu cihaz TV'den henüz izin almadı. TV'ye yeniden bağlanın ve TV'de izin verin."}}}},
+    "Couldn't open it automatically: the TV can't be reached for debugging. Is the TV on, with network debugging on in Developer options?": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Couldn't open it automatically: the TV can't be reached for debugging. Is the TV on, with network debugging on in Developer options?"}},"tr":{"stringUnit":{"state":"translated","value":"Otomatik açılamadı: TV'ye hata ayıklama bağlantısıyla ulaşılamıyor. TV açık mı, Geliştirici seçeneklerinde ağ üzerinden hata ayıklama açık mı?"}}}},
+    "Couldn't open it automatically: the TV hasn't allowed debugging from this device. Reinstall the TV app and allow it on the TV.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Couldn't open it automatically: the TV hasn't allowed debugging from this device. Reinstall the TV app and allow it on the TV."}},"tr":{"stringUnit":{"state":"translated","value":"Otomatik açılamadı: TV bu cihazın hata ayıklama iznini onaylamadı. TV uygulamasını yeniden kurun ve TV'de izin verin."}}}},
+    "Couldn't open it automatically: the TV got the open command but didn't open CouchSubs. Open it on the TV with the remote.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Couldn't open it automatically: the TV got the open command but didn't open CouchSubs. Open it on the TV with the remote."}},"tr":{"stringUnit":{"state":"translated","value":"Otomatik açılamadı: TV açma komutunu aldı ama CouchSubs'ı açmadı. Kumandayla TV'den açın."}}}},
+    "Try opening automatically": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Try opening automatically"}},"tr":{"stringUnit":{"state":"translated","value":"Otomatik açmayı dene"}}}},
+    "Every time you start translating, CouchSubs tries to open the TV app by itself. If it doesn't open, open CouchSubs on the TV.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Every time you start translating, CouchSubs tries to open the TV app by itself. If it doesn't open, open CouchSubs on the TV."}},"tr":{"stringUnit":{"state":"translated","value":"Her oyunda çeviriyi başlattığınızda CouchSubs TV uygulamasını kendisi açmaya çalışır; açılmazsa TV'den CouchSubs'ı açın."}}}},
+    "Keep translating in the background (Picture in Picture)": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Keep translating in the background (Picture in Picture)"}},"tr":{"stringUnit":{"state":"translated","value":"Arka planda sürdür (Resim içinde resim)"}}}},
+    "When you leave CouchSubs while translating, the game picture and the live subtitle stay in a small window; reading and sending to the TV continue.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"When you leave CouchSubs while translating, the game picture and the live subtitle stay in a small window; reading and sending to the TV continue."}},"tr":{"stringUnit":{"state":"translated","value":"Çeviri sürerken CouchSubs’tan çıkınca oyun görüntüsü ve canlı altyazı küçük bir pencerede kalır; okuma ve TV’ye gönderim sürer."}}}},
+    "Keep CouchSubs open on the screen while you play, or turn on “Keep translating in the background” in Profile. iOS stops the connection when the app goes to the background; the screen stays on while translating.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Keep CouchSubs open on the screen while you play, or turn on “Keep translating in the background” in Profile. iOS stops the connection when the app goes to the background; the screen stays on while translating."}},"tr":{"stringUnit":{"state":"translated","value":"Oynarken CouchSubs ekranda açık kalsın ya da Profil’de “Arka planda sürdür”ü açın. iOS, arka plana geçen uygulamanın bağlantısını keser; çeviri sürerken ekran kararmaz."}}}},
+    "If you leave CouchSubs, this picture and the live subtitle continue in a small window and translation keeps going. If you close the small window, iOS pauses CouchSubs.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"If you leave CouchSubs, this picture and the live subtitle continue in a small window and translation keeps going. If you close the small window, iOS pauses CouchSubs."}},"tr":{"stringUnit":{"state":"translated","value":"CouchSubs’tan çıkarsanız bu görüntü ve canlı altyazı küçük bir pencerede sürer, çeviri devam eder. Küçük pencereyi kapatırsanız iOS CouchSubs’u duraklatır."}}}},
+    "Open small window": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Open small window"}},"tr":{"stringUnit":{"state":"translated","value":"Küçük pencereyi aç"}}}},
+    "The small Picture in Picture window closed, so iPhone paused CouchSubs. Open CouchSubs to continue; it reconnects by itself.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The small Picture in Picture window closed, so iPhone paused CouchSubs. Open CouchSubs to continue; it reconnects by itself."}},"tr":{"stringUnit":{"state":"translated","value":"Küçük pencere (Resim içinde resim) kapandığı için iPhone CouchSubs’u duraklattı. Devam etmek için CouchSubs’u açın; bağlantı kendiliğinden yenilenir."}}}},
+    "iPhone pauses CouchSubs in the background. Open CouchSubs to continue; it reconnects by itself. To keep translating in a small window, turn on “Keep translating in the background” in Profile.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"iPhone pauses CouchSubs in the background. Open CouchSubs to continue; it reconnects by itself. To keep translating in a small window, turn on “Keep translating in the background” in Profile."}},"tr":{"stringUnit":{"state":"translated","value":"iPhone, arka plandaki CouchSubs’u duraklatır. Devam etmek için CouchSubs’u açın; bağlantı kendiliğinden yenilenir. Küçük pencerede çevirmeye devam etmek için Profil’de “Arka planda sürdür”ü açın."}}}},
+    "Which on-screen text to translate": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Which on-screen text to translate"}},"tr":{"stringUnit":{"state":"translated","value":"Hangi ekran yazıları çevrilsin"}}}},
+    "Phone (GTA 6 phone)": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Phone (GTA 6 phone)"}},"tr":{"stringUnit":{"state":"translated","value":"Telefon (GTA 6 telefonu)"}}}},
+    "Mission and objective text": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Mission and objective text"}},"tr":{"stringUnit":{"state":"translated","value":"Görev ve hedef yazısı"}}}},
+    "Help boxes and actions (button prompts)": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Help boxes and actions (button prompts)"}},"tr":{"stringUnit":{"state":"translated","value":"Yardım kutuları ve eylemler (tuş ipuçları)"}}}},
+    "Menus (pause, map, settings)": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Menus (pause, map, settings)"}},"tr":{"stringUnit":{"state":"translated","value":"Menüler (duraklatma, harita, ayarlar)"}}}},
+    "Other on-screen text": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Other on-screen text"}},"tr":{"stringUnit":{"state":"translated","value":"Diğer ekran yazıları"}}}},
+    "Translate the screen always translates everything.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Translate the screen always translates everything."}},"tr":{"stringUnit":{"state":"translated","value":"Ekranı çevir her zaman her şeyi çevirir."}}}},
+    "The TV's Key Server is on, but its developer connection is closed. After Dev Mode Status is turned on the TV has to restart: press RESTART in the Developer Mode app (or unplug the TV and plug it back in), then open the app again, turn on Key Server and try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The TV's Key Server is on, but its developer connection is closed. After Dev Mode Status is turned on the TV has to restart: press RESTART in the Developer Mode app (or unplug the TV and plug it back in), then open the app again, turn on Key Server and try again."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TV'de Key Server açık ama geliştirici bağlantısı kapalı. Dev Mode Status açıldıktan sonra TV yeniden başlamalı: Developer Mode uygulamasında RESTART'a basın (ya da TV'yi fişten çekip takın), sonra uygulamayı yeniden açıp Key Server'ı açın ve tekrar deneyin."
+          }
+        }
+      }
+    },
+    "The TV is on at this address, but developer mode is off. Open the Developer Mode app on the TV: Dev Mode Status must be on (it turns off by itself when its time runs out; turn it on again and the TV restarts). Then turn on Key Server and try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The TV is on at this address, but developer mode is off. Open the Developer Mode app on the TV: Dev Mode Status must be on (it turns off by itself when its time runs out; turn it on again and the TV restarts). Then turn on Key Server and try again."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TV bu adreste açık ama geliştirici modu kapalı. TV'de Developer Mode uygulamasını açın: Dev Mode Status açık olmalı (süresi dolunca kendiliğinden kapanır; yeniden açın, TV yeniden başlar). Sonra Key Server'ı açıp tekrar deneyin."
+          }
+        }
+      }
+    },
+    "No TV responds at this address. The TV may be off, on another Wi-Fi, or its address may have changed. Turn the TV on, check its IP address in the TV's Settings › Network, and pick the right TV from the list above.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No TV responds at this address. The TV may be off, on another Wi-Fi, or its address may have changed. Turn the TV on, check its IP address in the TV's Settings › Network, and pick the right TV from the list above."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bu adreste TV yanıt vermiyor. TV kapalı, başka bir Wi-Fi'da ya da adresi değişmiş olabilir. TV'yi açın, TV'de Ayarlar › Ağ'dan IP adresine bakın ve yukarıdaki listeden doğru TV'yi seçin."
+          }
+        }
+      }
+    },
+    "Turn on the game's own subtitles: CouchSubs reads the English subtitles on screen, not the audio.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn on the game's own subtitles: CouchSubs reads the English subtitles on screen, not the audio."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oyunun kendi altyazısını açın: CouchSubs sesi değil, ekrandaki İngilizce altyazıyı okur."
+          }
+        }
+      }
+    },
+    "Use ready areas for known games": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use ready areas for known games"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bilinen oyunlarda hazır alanları kullan"
+          }
+        }
+      }
+    },
+    "When a game with ready areas (such as GTA 6) is being played, its help box and messages are read and translated automatically. Your own extra areas take precedence.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When a game with ready areas (such as GTA 6) is being played, its help box and messages are read and translated automatically. Your own extra areas take precedence."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hazır alanı olan bir oyun (ör. GTA 6) oynanırken yardım kutusu ve mesajlar kendiliğinden okunup çevrilir. Kendi ek alanlarınız varsa onlar kullanılır."
+          }
+        }
+      }
+    },
+    "“Watch subtitle background” is on: only text on GTA 6’s dark subtitle panel is read. Set the game’s subtitle background to Solid or turn this setting off.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“Watch subtitle background” is on: only text on GTA 6’s dark subtitle panel is read. Set the game’s subtitle background to Solid or turn this setting off."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“Altyazı zeminini izle” açık: yalnız GTA 6’nın koyu altyazı zeminindeki yazı okunur. Oyunda altyazı zeminini Solid (opak) yapın ya da bu ayarı kapatın."
+          }
+        }
+      }
+    },
+    "The TV app has not connected. Open CouchSubs on the TV and keep the phone and the TV on the same Wi-Fi (not a guest network). If the TV shows a 6-digit code, approve it in the window that opens on this phone. If it still waits, check that CouchSubs is allowed in Settings › Privacy & Security › Local Network on this iPhone, then stop and start translating again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The TV app has not connected. Open CouchSubs on the TV and keep the phone and the TV on the same Wi-Fi (not a guest network). If the TV shows a 6-digit code, approve it in the window that opens on this phone. If it still waits, check that CouchSubs is allowed in Settings › Privacy & Security › Local Network on this iPhone, then stop and start translating again."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TV uygulaması bağlanmadı. TV'de CouchSubs'ı açın; telefon ve TV aynı Wi-Fi'da olsun (misafir ağı olmasın). TV'de 6 haneli kod çıkarsa bu telefonda açılan pencerede onaylayın. Yine bekliyorsa bu iPhone'da Ayarlar › Gizlilik ve Güvenlik › Yerel Ağ'da CouchSubs'a izin verildiğini kontrol edin, sonra çeviriyi durdurup yeniden başlatın."
+          }
+        }
+      }
+    },
+    "Sign out of PSN and reset the account": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign out of PSN and reset the account"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PSN'den çıkış yap ve hesabı sıfırla"
+          }
+        }
+      }
+    },
+    "Sign out of PSN?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign out of PSN?"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PSN'den çıkış yapılsın mı?"
+          }
+        }
+      }
+    },
+    "Sign out": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign out"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Çıkış yap"
+          }
+        }
+      }
+    },
+    "The second PSN account and the PS5 pairing are removed from this phone. To translate again, sign in with Sony and pair the PS5 again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The second PSN account and the PS5 pairing are removed from this phone. To translate again, sign in with Sony and pair the PS5 again."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "İkinci PSN hesabı ve PS5 eşleşmesi bu telefondan silinir. Yeniden çeviri yapmak için Sony ile giriş yapıp PS5'i yeniden eşleyin."
+          }
+        }
+      }
+    },
+    "Sony's sign-in page could not be opened (%@). Check the phone's internet connection and try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sony's sign-in page could not be opened (%@). Check the phone's internet connection and try again."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sony'nin giriş sayfası açılamadı (%@). Telefonun internet bağlantısını kontrol edip yeniden deneyin."
+          }
+        }
+      }
+    },
+    "Reload": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reload"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yeniden yükle"
+          }
+        }
+      }
+    },
+    "The language pack could not be downloaded (%@). Try again, or download it in Settings › Apps › Translate.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The language pack could not be downloaded (%@). Try again, or download it in Settings › Apps › Translate."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dil paketi indirilemedi (%@). Yeniden deneyin ya da Ayarlar › Uygulamalar › Çeviri'den indirin."
+          }
+        }
+      }
+    },
+    "Samsung TVs and smart monitors (2016 and later; 2016–2018 models are experimental).": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Samsung TVs and smart monitors (2016 and later; 2016–2018 models are experimental)."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Samsung TV'ler ve akıllı monitörler (2016 ve sonrası; 2016–2018 modelleri deneysel)."
+          }
+        }
+      }
+    },
+    "This Samsung TV is too old for the CouchSubs TV app (2016 models and later are supported).": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This Samsung TV is too old for the CouchSubs TV app (2016 models and later are supported)."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bu Samsung TV, CouchSubs TV uygulaması için çok eski (2016 ve sonraki modeller destekleniyor)."
+          }
+        }
+      }
+    },
+    "CouchSubs opens its waiting screen on the TV. Even if it mentions a computer, that is not an error: the TV is waiting for the phone. Now tap Start translating on the home screen; the TV finds this phone by itself.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CouchSubs opens its waiting screen on the TV. Even if it mentions a computer, that is not an error: the TV is waiting for the phone. Now tap Start translating on the home screen; the TV finds this phone by itself."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TV'de CouchSubs'ın bekleme ekranı açılır. Bilgisayardan söz etse bile bu bir hata değil: TV telefonu bekliyor. Şimdi ana ekranda Çeviriyi başlat'a dokunun; TV bu telefonu kendisi bulur."
+          }
+        }
+      }
+    },
+    "I use a paid Gemini API key": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I use a paid Gemini API key"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ücretli Gemini API anahtarı kullanıyorum"
+          }
+        }
+      }
+    },
+    "Paid API keys may incur charges. Google still enforces quotas.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paid API keys may incur charges. Google still enforces quotas."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ücretli API anahtarı ücretlendirilebilir. Google'ın kotaları yine geçerlidir."
+          }
+        }
+      }
+    },
+    "More than one Android TV with debugging on was found on the network. Which one is yours?": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"More than one Android TV with debugging on was found on the network. Which one is yours?"}},"tr":{"stringUnit":{"state":"translated","value":"Ağda hata ayıklaması açık birden çok Android TV bulundu. Sizinki hangisi?"}}}},
+    "You can see the TV's address on the TV in Settings › Network & Internet.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"You can see the TV's address on the TV in Settings › Network & Internet."}},"tr":{"stringUnit":{"state":"translated","value":"TV'nin adresi TV'de Ayarlar › Ağ ve İnternet'te yazar."}}}},
+    "Install on the TV at %@": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Install on the TV at %@"}},"tr":{"stringUnit":{"state":"translated","value":"%@ adresindeki TV'ye kur"}}}},
+    "Position the subtitles": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Position the subtitles"}},"tr":{"stringUnit":{"state":"translated","value":"Altyazıyı konumlandır"}}}},
+    "On the computer screen, move and resize the subtitle with the mouse: press Position the subtitles.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"On the computer screen, move and resize the subtitle with the mouse: press Position the subtitles."}},"tr":{"stringUnit":{"state":"translated","value":"Bilgisayar ekranındaki altyazıyı fareyle taşıyıp boyutlandırın: Altyazıyı konumlandır'a basın."}}}},
+    "Double-click or press Enter to save, Esc to cancel.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Double-click or press Enter to save, Esc to cancel."}},"tr":{"stringUnit":{"state":"translated","value":"Kaydetmek için çift tıklayın ya da Enter'a basın, vazgeçmek için Esc'e basın."}}}},
+    "Drag the subtitle up or down; pinch to change the text size.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Drag the subtitle up or down; pinch to change the text size."}},"tr":{"stringUnit":{"state":"translated","value":"Altyazıyı parmağınızla yukarı ya da aşağı taşıyın; yazı boyunu iki parmakla değiştirin."}}}},
+    "If the TV does not accept this address, try one of this computer's other addresses: %@": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"If the TV does not accept this address, try one of this computer's other addresses: %@"}},"tr":{"stringUnit":{"state":"translated","value":"TV bu adresi kabul etmezse bu bilgisayarın diğer adreslerinden birini deneyin: %@"}}}},
     "Reinstall the TV app": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Reinstall the TV app"}},"tr":{"stringUnit":{"state":"translated","value":"TV uygulamasını yeniden kur"}}}},
-    "The TV's Host PC IP is %1$@, but this computer's address is %2$@. In the TV's Developer Mode window, set Host PC IP to %2$@ and restart the TV fully (hold the power button for about 2 seconds).": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The TV's Host PC IP is %1$@, but this computer's address is %2$@. In the TV's Developer Mode window, set Host PC IP to %2$@ and restart the TV fully (hold the power button for about 2 seconds)."}},"tr":{"stringUnit":{"state":"translated","value":"TV'deki Host PC IP %1$@, bu bilgisayarın adresi %2$@. TV'de Geliştirici modu penceresinde Host PC IP'yi %2$@ yapıp TV'yi tam yeniden başlatın (güç tuşunu 2 sn basılı tutun)."}}}},
+    "For LG, Samsung and Android TV / Google TV: CouchSubs asks the TV at this address which kind it is.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"For LG, Samsung and Android TV / Google TV: CouchSubs asks the TV at this address which kind it is."}},"tr":{"stringUnit":{"state":"translated","value":"LG, Samsung ve Android TV / Google TV için: CouchSubs bu adresteki TV'ye türünü sorar."}}}},
+    "No TV at %@ answered as an LG, Samsung or Android TV, so it was added as an LG TV. If it is an Android TV / Google TV, press Select under Android TV / Google TV below.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"No TV at %@ answered as an LG, Samsung or Android TV, so it was added as an LG TV. If it is an Android TV / Google TV, press Select under Android TV / Google TV below."}},"tr":{"stringUnit":{"state":"translated","value":"%@ adresinde LG, Samsung ya da Android TV olarak yanıt veren bir TV yok; bu yüzden LG TV olarak eklendi. Android TV / Google TV ise aşağıda Android TV / Google TV'nin yanındaki Seç'e basın."}}}},
+    "Change TV": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Change TV"}},"tr":{"stringUnit":{"state":"translated","value":"TV'yi değiştir"}}}},
+    "Show the install log": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Show the install log"}},"tr":{"stringUnit":{"state":"translated","value":"Kurulum günlüğünü göster"}}}},
+    "Copy the log": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Copy the log"}},"tr":{"stringUnit":{"state":"translated","value":"Günlüğü kopyala"}}}},
+    "The TV's Host PC IP is %1$@, but this computer's address is %2$@. In the TV's Developer Mode window, set Host PC IP to %2$@ and restart the TV fully (hold the power button until the Samsung logo appears, about 5 seconds).": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The TV's Host PC IP is %1$@, but this computer's address is %2$@. In the TV's Developer Mode window, set Host PC IP to %2$@ and restart the TV fully (hold the power button until the Samsung logo appears, about 5 seconds)."}},"tr":{"stringUnit":{"state":"translated","value":"TV'deki Host PC IP %1$@, bu bilgisayarın adresi %2$@. TV'de Geliştirici modu penceresinde Host PC IP'yi %2$@ yapıp TV'yi tam yeniden başlatın (güç tuşunu Samsung logosu görünene kadar, yaklaşık 5 saniye basılı tutun)."}}}},
     "TV's IP address (on the TV under Settings › Network)": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"TV's IP address (on the TV under Settings › Network)"}},"tr":{"stringUnit":{"state":"translated","value":"TV'nin IP adresi (TV'de Ayarlar › Ağ'da yazar)"}}}},
     "e.g. 192.168.1.100": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"e.g. 192.168.1.100"}},"tr":{"stringUnit":{"state":"translated","value":"örn. 192.168.1.100"}}}},
     "Not this phone's address. This phone's address: %@": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Not this phone's address. This phone's address: %@"}},"tr":{"stringUnit":{"state":"translated","value":"Bu telefonun adresi değil. Bu telefonun adresi: %@"}}}},
     "This address is this phone's; type the TV's address.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This address is this phone's; type the TV's address."}},"tr":{"stringUnit":{"state":"translated","value":"Bu adres bu telefonun; TV'nin adresini yazın."}}}},
+    "Show on another device": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Show on another device"}},"tr":{"stringUnit":{"state":"translated","value":"Başka bir cihazda göster"}}}},
+    "Scan the code with the camera of a phone or tablet on the same Wi-Fi. While translating, the subtitles appear large in its browser; no app or internet needed.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Scan the code with the camera of a phone or tablet on the same Wi-Fi. While translating, the subtitles appear large in its browser; no app or internet needed."}},"tr":{"stringUnit":{"state":"translated","value":"Aynı Wi-Fi'deki telefon ya da tabletin kamerasıyla kodu okutun. Çeviri sürerken altyazılar o cihazın tarayıcısında büyük görünür; uygulama ya da internet gerekmez."}}}},
+    "Connect to Wi-Fi to show subtitles on another device.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Connect to Wi-Fi to show subtitles on another device."}},"tr":{"stringUnit":{"state":"translated","value":"Başka bir cihazda göstermek için Wi-Fi'ye bağlanın."}}}},
     "This computer's address (Host PC IP): %@": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This computer's address (Host PC IP): %@"}},"tr":{"stringUnit":{"state":"translated","value":"Bu bilgisayarın adresi (Host PC IP): %@"}}}},
     "Try demo mode (no console needed)": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Try demo mode (no console needed)"}},"tr":{"stringUnit":{"state":"translated","value":"Deneme modu (konsol olmadan dene)"}}}},
     "Demo mode": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Demo mode"}},"tr":{"stringUnit":{"state":"translated","value":"Deneme modu"}}}},
@@ -21,6 +410,7 @@
     "Advanced recognition reads white subtitles on bright scenes (sky, snow, daylight) much better. It runs on your graphics card, or on the CPU when there is none, and uses more of it than the Windows recognition. The model is downloaded once (31 MB).": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Advanced recognition reads white subtitles on bright scenes (sky, snow, daylight) much better. It runs on your graphics card, or on the CPU when there is none, and uses more of it than the Windows recognition. The model is downloaded once (31 MB)."}},"tr":{"stringUnit":{"state":"translated","value":"Gelişmiş yazı tanıma, açık sahnelerdeki (gökyüzü, kar, gündüz) beyaz altyazıyı çok daha iyi okur. Ekran kartında, yoksa işlemcide çalışır ve Windows'un yazı tanımasından daha fazla kaynak kullanır. Model bir kez indirilir (31 MB)."}}}},
     "Downloading the model… %lld%%": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Downloading the model… %lld%%"}},"tr":{"stringUnit":{"state":"translated","value":"Model indiriliyor… %%%lld"}}}},
     "Extra instruction": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Extra instruction"}},"tr":{"stringUnit":{"state":"translated","value":"Ek talimat"}}}},
+    "Extra areas aren't read while the subtitle area is Full screen, because the whole screen is already read. They're read again when you pick another area.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Extra areas aren't read while the subtitle area is Full screen, because the whole screen is already read. They're read again when you pick another area."}},"tr":{"stringUnit":{"state":"translated","value":"Altyazı alanı Tam ekranken ek alanlar okunmaz, çünkü ekranın tamamı zaten okunuyor. Başka bir alan seçince yeniden okunur."}}}},
     "Example: Translate swear words without softening them.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Example: Translate swear words without softening them."}},"tr":{"stringUnit":{"state":"translated","value":"Örn: Küfürleri yumuşatmadan çevir."}}}},
     "Added to the end of the AI translator's instructions (up to 1000 characters). Leave it empty if you don't need it.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Added to the end of the AI translator's instructions (up to 1000 characters). Leave it empty if you don't need it."}},"tr":{"stringUnit":{"state":"translated","value":"Yapay zekâ çevirmeninin talimatının sonuna eklenir (en çok 1000 karakter). Gerekmiyorsa boş bırakın."}}}},
     "Use": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Use"}},"tr":{"stringUnit":{"state":"translated","value":"Kullan"}}}},
@@ -28,6 +418,7 @@
     "Saved areas for %@ are available. Use them?": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Saved areas for %@ are available. Use them?"}},"tr":{"stringUnit":{"state":"translated","value":"%@ için kayıtlı alanlar var. Kullanılsın mı?"}}}},
     "Using the saved areas for %@.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Using the saved areas for %@."}},"tr":{"stringUnit":{"state":"translated","value":"%@ için kayıtlı alanlar kullanılıyor."}}}},
     "Areas for this game": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Areas for this game"}},"tr":{"stringUnit":{"state":"translated","value":"Bu oyunun alanları"}}}},
+    "Automatically translate the GTA 6 phone (experimental)": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Automatically translate the GTA 6 phone (experimental)"}},"tr":{"stringUnit":{"state":"translated","value":"GTA 6'daki telefonu otomatik çevir (deneysel)"}}}},
     "Delete profile": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Delete profile"}},"tr":{"stringUnit":{"state":"translated","value":"Profili sil"}}}},
     "These areas are saved for %@.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"These areas are saved for %@."}},"tr":{"stringUnit":{"state":"translated","value":"Bu alanlar %@ için kayıtlı."}}}},
     "These are your general areas.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"These are your general areas."}},"tr":{"stringUnit":{"state":"translated","value":"Bunlar genel alanlarınız."}}}},
@@ -70,7 +461,7 @@
     "Ctrl+Alt is AltGr on many keyboards and would block characters like # and {. Use Ctrl+Shift instead.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Ctrl+Alt is AltGr on many keyboards and would block characters like # and {. Use Ctrl+Shift instead."}},"tr":{"stringUnit":{"state":"translated","value":"Ctrl+Alt birçok klavyede AltGr'dir; # ve { gibi karakterleri engeller. Bunun yerine Ctrl+Shift kullanın."}}}},
     "Windows already uses this shortcut.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Windows already uses this shortcut."}},"tr":{"stringUnit":{"state":"translated","value":"Bu kısayolu Windows kullanıyor."}}}},
     "This key can't be a shortcut.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This key can't be a shortcut."}},"tr":{"stringUnit":{"state":"translated","value":"Bu tuş kısayol olamaz."}}}},
-    "When you turn on the controller to play, choose your MAIN account on the PS5. Don't play with the second account CouchSubs signs in with, or the controller won't work in the game.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "When you turn on the controller to play, choose your MAIN account on the PS5. Don't play with the second account CouchSubs signs in with, or the controller won't work in the game."}}, "tr": {"stringUnit": {"state": "translated", "value": "Oynarken kolu açınca PS5'te ANA hesabınızı seçin. CouchSubs'ın giriş yaptığı ikinci hesapla oynamayın, yoksa kol oyunda çalışmaz."}}}},
+    "When you turn on the controller to play, choose your MAIN account on the PS5. Don't play with the second account CouchSubs signs in with, or the controller will turn off by itself or won't work in the game.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "When you turn on the controller to play, choose your MAIN account on the PS5. Don't play with the second account CouchSubs signs in with, or the controller will turn off by itself or won't work in the game."}}, "tr": {"stringUnit": {"state": "translated", "value": "Oynarken kolu açınca PS5'te ANA hesabınızı seçin. CouchSubs'ın giriş yaptığı ikinci hesapla oynamayın, yoksa kol kendiliğinden kapanır ya da oyunda çalışmaz."}}}},
     "Drag on the picture to draw the area where the game shows its subtitles. Drag an edge or corner to resize it; it stays centered. Drag the inside to move it.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Drag on the picture to draw the area where the game shows its subtitles. Drag an edge or corner to resize it; it stays centered. Drag the inside to move it."}},"tr":{"stringUnit":{"state":"translated","value":"Oyunun altyazıyı gösterdiği alanı, görüntünün üzerinde fareyi sürükleyerek çizin. Kenarından ya da köşesinden tutup boyutunu değiştirin; alan ortalı kalır. İçinden tutup yerini değiştirebilirsiniz."}}}},
     "Drag the frame to move it, or drag an edge or corner to resize it; the subtitle area stays centered.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Drag the frame to move it, or drag an edge or corner to resize it; the subtitle area stays centered."}},"tr":{"stringUnit":{"state":"translated","value":"Çerçeveyi sürükleyerek taşıyın, kenarından ya da köşesinden sürükleyerek boyutlandırın; altyazı alanı ortalı kalır."}}}},
     "Keep centered": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Keep centered"}},"tr":{"stringUnit":{"state":"translated","value":"Ortada tut"}}}},
@@ -86,6 +477,7 @@
     "Open the browser again": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Open the browser again"}}, "tr": {"stringUnit": {"state": "translated", "value": "Tarayıcıyı yeniden aç"}}}},
     "Sony's sign-in page could not reach its server inside the app, so sign-in moved to your browser.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Sony's sign-in page could not reach its server inside the app, so sign-in moved to your browser."}}, "tr": {"stringUnit": {"state": "translated", "value": "Sony'nin giriş sayfası uygulamanın içinde sunucusuna bağlanamadı; giriş tarayıcınıza taşındı."}}}},
     "Sign in with your second account in the browser that opened. When you finish, the browser stays on a remoteplay.dl.playstation.net page that only says redirect. Click the address bar, copy the whole address and come back here. CouchSubs picks up the copied address by itself; if it does not, paste it below and press Save.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Sign in with your second account in the browser that opened. When you finish, the browser stays on a remoteplay.dl.playstation.net page that only says redirect. Click the address bar, copy the whole address and come back here. CouchSubs picks up the copied address by itself; if it does not, paste it below and press Save."}}, "tr": {"stringUnit": {"state": "translated", "value": "Açılan tarayıcıda ikinci hesabınızla giriş yapın. Giriş bitince tarayıcı yalnızca redirect yazan bir remoteplay.dl.playstation.net sayfasında kalır. Adres çubuğuna tıklayın, adresin tamamını kopyalayıp buraya dönün. CouchSubs kopyalanan adresi kendiliğinden alır; almazsa aşağıya yapıştırıp Kaydet'e basın."}}}},
+    "Sign in with your second account in the browser that opened. When you finish, the browser stays on a remoteplay.dl.playstation.net page that only says redirect. Tap the address bar, copy the whole address and come back here. CouchSubs picks up the copied address by itself; if it does not, paste it below and tap Save.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Sign in with your second account in the browser that opened. When you finish, the browser stays on a remoteplay.dl.playstation.net page that only says redirect. Tap the address bar, copy the whole address and come back here. CouchSubs picks up the copied address by itself; if it does not, paste it below and tap Save."}}, "tr": {"stringUnit": {"state": "translated", "value": "Açılan tarayıcıda ikinci hesabınızla giriş yapın. Giriş bitince tarayıcı yalnızca redirect yazan bir remoteplay.dl.playstation.net sayfasında kalır. Adres çubuğuna dokunun, adresin tamamını kopyalayıp buraya dönün. CouchSubs kopyalanan adresi kendiliğinden alır; almazsa aşağıya yapıştırıp Kaydet'e dokunun."}}}},
     "This address has no sign-in code. It should start with https://remoteplay.dl.playstation.net/remoteplay/redirect?code=": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "This address has no sign-in code. It should start with https://remoteplay.dl.playstation.net/remoteplay/redirect?code="}}, "tr": {"stringUnit": {"state": "translated", "value": "Bu adreste giriş kodu yok. Adres https://remoteplay.dl.playstation.net/remoteplay/redirect?code= ile başlamalı."}}}},
     "Subtitle position on TV": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Subtitle position on TV"}}, "tr": {"stringUnit": {"state": "translated", "value": "TV'de altyazının yeri"}}}},
     "Cover": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Cover"}}, "tr": {"stringUnit": {"state": "translated", "value": "Örtsün"}}}},
@@ -95,6 +487,136 @@
     "Height on screen": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Height on screen"}}, "tr": {"stringUnit": {"state": "translated", "value": "Ekrandaki yükseklik"}}}},
     "A sample subtitle appears on the TV when you let go of the slider. In fixed position you can also move subtitles with the ▲ and ▼ buttons on the TV remote.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "A sample subtitle appears on the TV when you let go of the slider. In fixed position you can also move subtitles with the ▲ and ▼ buttons on the TV remote."}}, "tr": {"stringUnit": {"state": "translated", "value": "Kaydırıcıyı bırakınca TV'de örnek altyazı çıkar. Sabit yerdeyken altyazıyı TV kumandasının ▲ ve ▼ tuşlarıyla da taşıyabilirsiniz."}}}},
     "Cover: the translation hides the English subtitle in the game. Choose Above or Below to see the English subtitle too, with the translation right above or below it.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Cover: the translation hides the English subtitle in the game. Choose Above or Below to see the English subtitle too, with the translation right above or below it."}}, "tr": {"stringUnit": {"state": "translated", "value": "Örtsün: çeviri oyundaki İngilizce altyazının üstünü kapatır. Üstünde ya da Altında seçerseniz İngilizce altyazı da görünür, çeviri onun hemen üstüne ya da altına gelir."}}}},
+    "Pair TV" : {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TV eşleştir"
+          }
+        }
+      }
+    },
+    "A TV wants to pair" : {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TV eşleşmek istiyor"
+          }
+        }
+      }
+    },
+    "Pairing is open for 2 minutes. Open CouchSubs on the TV; if the TV says pairing did not finish, press OK on its remote. When the TV shows a code, approve it in the window that opens on this phone." : {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eşleştirme 2 dakika açık. TV'de CouchSubs'ı açın; TV'de “Eşleştirme tamamlanmadı” yazıyorsa kumandada Tamam'a basın. TV'de kod çıkınca bu telefonda açılan pencerede onaylayın."
+          }
+        }
+      }
+    },
+    "Pair this TV?" : {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bu TV eşleşsin mi?"
+          }
+        }
+      }
+    },
+    "TV code: %@. You don't type this code anywhere: if your TV shows the same code, approve it here." : {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TV kodu: %@. Bu kod bir yere yazılmaz: TV ekranınızdaki kod aynıysa burada onaylayın."
+          }
+        }
+      }
+    },
+    "The test subtitle did not reach the TV because the TV app is not connected. Open CouchSubs on the TV. If the TV shows a 6-digit code, don't type it anywhere: approve it in the “Pair this TV?” window that opens on this computer, then test again." : {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deneme yazısı TV'ye gitmedi, çünkü TV uygulaması bağlı değil. TV'de CouchSubs'ı açın. TV'de 6 haneli bir kod çıkarsa onu bir yere yazmayın: bu bilgisayarda açılan “Bu TV eşleşsin mi?” penceresinde onaylayın, sonra yeniden deneyin."
+          }
+        }
+      }
+    },
+    "The test subtitle did not reach the TV because the TV app is not connected. Open CouchSubs on the TV. If the TV shows a 6-digit code, don't type it anywhere: approve it in the “Pair this TV?” window that opens on this phone, then test again." : {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deneme yazısı TV'ye gitmedi, çünkü TV uygulaması bağlı değil. TV'de CouchSubs'ı açın. TV'de 6 haneli bir kod çıkarsa onu bir yere yazmayın: bu telefonda açılan “Bu TV eşleşsin mi?” penceresinde onaylayın, sonra yeniden deneyin."
+          }
+        }
+      }
+    },
+    "Approve" : {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Onayla"
+          }
+        }
+      }
+    },
+    "Reject" : {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reddet"
+          }
+        }
+      }
+    },
+    "The pairing request expired. Try again on the TV." : {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eşleştirme isteğinin süresi doldu. TV’den yeniden deneyin."
+          }
+        }
+      }
+    },
+    "Renew access key" : {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erişim anahtarını yenile"
+          }
+        }
+      }
+    },
+    "The TV app is old. Update it." : {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TV uygulaması eski. Güncelleyin."
+          }
+        }
+      }
+    },
+    "Copy or share subtitle address" : {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Altyazı adresini kopyala veya paylaş"
+          }
+        }
+      }
+    },
     "CouchSubs translates on this computer, without the internet. The English–Turkish model (about 475 MB) is downloaded once and kept on this computer.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "CouchSubs translates on this computer, without the internet. The English–Turkish model (about 475 MB) is downloaded once and kept on this computer."}}, "tr": {"stringUnit": {"state": "translated", "value": "CouchSubs çeviriyi bu bilgisayarda, internetsiz yapar. İngilizce–Türkçe model (yaklaşık 475 MB) bir kez indirilir ve bu bilgisayarda kalır."}}}},
     "CPU (default)": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "CPU (default)"}}, "tr": {"stringUnit": {"state": "translated", "value": "CPU (varsayılan)"}}}},
     "GPU (Beta) · NVIDIA CUDA": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "GPU (Beta) · NVIDIA CUDA"}}, "tr": {"stringUnit": {"state": "translated", "value": "GPU (Beta) · NVIDIA CUDA"}}}},
@@ -102,11 +624,15 @@
     "CPU translation threads": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "CPU translation threads"}}, "tr": {"stringUnit": {"state": "translated", "value": "CPU çeviri iş parçacıkları"}}}},
     "This uses most of your CPU threads and may slow down the game.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "This uses most of your CPU threads and may slow down the game."}}, "tr": {"stringUnit": {"state": "translated", "value": "Bu seçim CPU iş parçacıklarının çoğunu kullanır ve oyunu yavaşlatabilir."}}}},
     "Check unchanged subtitle areas more often": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Check unchanged subtitle areas more often"}}, "tr": {"stringUnit": {"state": "translated", "value": "Değişmeyen altyazı alanını daha sık oku"}}}},
+    "Watch subtitle background (GTA 6 experimental)": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Watch subtitle background (GTA 6 experimental)"}},"tr":{"stringUnit":{"state":"translated","value":"Altyazı zeminini izle (GTA 6, deneysel)"}}}},
+    "In GTA 6, set the subtitle background to Solid. Only text on the dark blue subtitle panel will be translated.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"In GTA 6, set the subtitle background to Solid. Only text on the dark blue subtitle panel will be translated."}},"tr":{"stringUnit":{"state":"translated","value":"GTA 6’nın altyazı ayarlarında arka planı Solid (opak) olarak seçin. Yalnızca koyu lacivert altyazı zeminindeki yazılar çevrilir."}}}},
     "When the subtitle area looks unchanged, read it again after 2 frames instead of 20. Uses more CPU.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "When the subtitle area looks unchanged, read it again after 2 frames instead of 20. Uses more CPU."}}, "tr": {"stringUnit": {"state": "translated", "value": "Altyazı alanı değişmemiş görünüyorsa 20 yerine 2 kare sonra yeniden oku. Daha fazla CPU kullanır."}}}},
     "Restore the old Xbox frame rate": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Restore the old Xbox frame rate"}}, "tr": {"stringUnit": {"state": "translated", "value": "Xbox kare hızlandırmasını eskiye döndür"}}}},
     "On: read an Xbox frame every 200 ms to use less CPU. Off (default): every 66 ms for faster subtitles.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "On: read an Xbox frame every 200 ms to use less CPU. Off (default): every 66 ms for faster subtitles."}}, "tr": {"stringUnit": {"state": "translated", "value": "Açık: Xbox karesini 200 ms'de bir okuyarak CPU kullanımını azaltır. Kapalı (varsayılan): daha hızlı altyazı için 66 ms'de bir okur."}}}},
     "Play Xbox sound on this computer": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Play Xbox sound on this computer"}}, "tr": {"stringUnit": {"state": "translated", "value": "Xbox sesini bu bilgisayarda çal"}}}},
-    "Xbox Remote Play can silence the TV while a stream is active. When on, game sound plays on this computer.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Xbox Remote Play can silence the TV while a stream is active. When on, game sound plays on this computer."}}, "tr": {"stringUnit": {"state": "translated", "value": "Xbox Uzaktan Oynatma sırasında TV'nin sesi kapanabilir. Açıkken oyun sesi bu bilgisayarda çalınır."}}}},
+    "While Xbox Remote Play is running, the Xbox mutes the TV and sends game sound only to this computer (an Xbox limitation). If you turn this off, the game has no sound. To hear it from the TV or speakers, set the sound output of this computer to them.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "While Xbox Remote Play is running, the Xbox mutes the TV and sends game sound only to this computer (an Xbox limitation). If you turn this off, the game has no sound. To hear it from the TV or speakers, set the sound output of this computer to them."}}, "tr": {"stringUnit": {"state": "translated", "value": "Xbox Uzaktan Oynatma sürerken Xbox TV'nin sesini kapatır ve oyun sesini yalnız bu bilgisayara gönderir (Xbox kısıtı). Kapatırsanız oyunun sesi hiç gelmez. Sesi TV'den ya da hoparlörden duymak için bu bilgisayarın ses çıkışını onlara ayarlayın."}}}},
+    "Play Xbox sound on this device": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Play Xbox sound on this device"}}, "tr": {"stringUnit": {"state": "translated", "value": "Xbox sesini bu cihazda çal"}}}},
+    "While remote play is running, the Xbox mutes the TV and sends game sound only to this device (an Xbox limitation). If you turn this off, the game has no sound. To hear it from the TV or speakers, connect this phone to a Bluetooth speaker or headphones.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "While remote play is running, the Xbox mutes the TV and sends game sound only to this device (an Xbox limitation). If you turn this off, the game has no sound. To hear it from the TV or speakers, connect this phone to a Bluetooth speaker or headphones."}}, "tr": {"stringUnit": {"state": "translated", "value": "Xbox, uzaktan oynatma sürerken TV'nin sesini kapatır ve oyun sesini yalnız bu cihaza gönderir (Xbox kısıtı). Kapatırsanız oyunun sesi hiç gelmez. TV'den ya da hoparlörden duymak için telefonu Bluetooth ile hoparlöre ya da kulaklığa bağlayın."}}}},
     "CPU works on every computer. GPU needs a compatible NVIDIA card; the first time you choose it, CouchSubs downloads about 565 MB of CUDA files from NVIDIA (about 790 MB on disk). If unavailable, CouchSubs uses CPU.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "CPU works on every computer. GPU needs a compatible NVIDIA card; the first time you choose it, CouchSubs downloads about 565 MB of CUDA files from NVIDIA (about 790 MB on disk). If unavailable, CouchSubs uses CPU."}}, "tr": {"stringUnit": {"state": "translated", "value": "CPU her bilgisayarda çalışır. GPU için uyumlu bir NVIDIA kartı gerekir; ilk seçimde NVIDIA'dan yaklaşık 565 MB CUDA dosyası indirilir (diskte yaklaşık 790 MB). Kullanılamazsa CPU'ya geçilir."}}}},
     "GPU could not be used; free translation is running on CPU.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "GPU could not be used; free translation is running on CPU."}}, "tr": {"stringUnit": {"state": "translated", "value": "GPU kullanılamadı; ücretsiz çeviri CPU'da çalışıyor."}}}},
     "Your console": {
@@ -589,6 +1115,54 @@
         }
       }
     },
+    "No picture from the Xbox. Reconnecting…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No picture from the Xbox. Reconnecting…"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Xbox'tan görüntü gelmiyor. Yeniden bağlanılıyor…"
+          }
+        }
+      }
+    },
+    "No picture came from the Xbox. Trying once more…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No picture came from the Xbox. Trying once more…"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Xbox'tan görüntü gelmedi. Bir kez daha deneniyor…"
+          }
+        }
+      }
+    },
+    "No picture came from the Xbox, so translation stopped. On the Xbox, check that remote play is on in Settings › Devices & connections › Remote features, connect the Xbox with a network cable if you can (or restart it), then start translation again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No picture came from the Xbox, so translation stopped. On the Xbox, check that remote play is on in Settings › Devices & connections › Remote features, connect the Xbox with a network cable if you can (or restart it), then start translation again."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Xbox'tan görüntü gelmedi, çeviri durdu. Xbox'ta Ayarlar › Cihazlar ve bağlantılar › Uzak özellikler'de uzaktan oynatmanın açık olduğunu denetleyin, olabiliyorsa Xbox'u ağa kabloyla bağlayın (ya da yeniden başlatın), sonra çeviriyi yeniden başlatın."
+          }
+        }
+      }
+    },
     "The Xbox service sent an unexpected reply. Retrying…": {
       "localizations": {
         "en": {
@@ -813,18 +1387,18 @@
         }
       }
     },
-    "4. Restart the TV: hold the power button on the remote for about 2 seconds until the TV turns off, then turn it on again. This screen continues by itself.": {
+    "4. Restart the TV: hold the power button on the remote and keep holding until the TV turns off and comes back on with the Samsung logo (about 5 seconds); letting go when it turns off only puts it on standby. If no logo appears, unplug the TV for 30 seconds. This screen continues by itself.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "4. Restart the TV: hold the power button on the remote for about 2 seconds until the TV turns off, then turn it on again. This screen continues by itself."
+            "value": "4. Restart the TV: hold the power button on the remote and keep holding until the TV turns off and comes back on with the Samsung logo (about 5 seconds); letting go when it turns off only puts it on standby. If no logo appears, unplug the TV for 30 seconds. This screen continues by itself."
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "4. TV'yi yeniden başlatın: kumandanın güç tuşunu TV kapanana kadar yaklaşık 2 saniye basılı tutun, sonra yeniden açın. Bu ekran kendiliğinden devam eder."
+            "value": "4. TV'yi yeniden başlatın: kumandanın güç tuşunu TV kapanıp Samsung logosuyla yeniden açılana kadar (yaklaşık 5 saniye) bırakmadan basılı tutun; TV kapanınca bırakırsanız yalnız bekleme moduna geçer. Logo görünmezse TV'nin fişini 30 saniye çekin. Bu ekran kendiliğinden devam eder."
           }
         }
       }
@@ -1133,18 +1707,18 @@
         }
       }
     },
-    "To restart a Samsung TV fully, hold the power button on the remote for about 2 seconds until it turns off; a short press only puts it on standby.": {
+    "To restart a Samsung TV fully, hold the power button on the remote until the TV turns off and comes back on with the Samsung logo (about 5 seconds), or unplug it for 30 seconds. Letting go when it turns off only puts it on standby.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "To restart a Samsung TV fully, hold the power button on the remote for about 2 seconds until it turns off; a short press only puts it on standby."
+            "value": "To restart a Samsung TV fully, hold the power button on the remote until the TV turns off and comes back on with the Samsung logo (about 5 seconds), or unplug it for 30 seconds. Letting go when it turns off only puts it on standby."
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Samsung TV'yi tam yeniden başlatmak için kumandanın güç tuşunu TV kapanana kadar yaklaşık 2 saniye basılı tutun; kısa basınca TV yalnız bekleme moduna geçer."
+            "value": "Samsung TV'yi tam yeniden başlatmak için kumandanın güç tuşunu TV kapanıp Samsung logosuyla yeniden açılana kadar (yaklaşık 5 saniye) basılı tutun ya da TV'nin fişini 30 saniye çekin. TV kapanınca bırakırsanız yalnız bekleme moduna geçer."
           }
         }
       }
@@ -1977,6 +2551,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "TV'de hata ayıklamaya izin verilmedi. Yeniden deneyin ve TV'de İzin ver'i seçin."
+          }
+        }
+      }
+    },
+    "Developer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Developer"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Geliştirici"
+          }
+        }
+      }
+    },
+    "Developer: Enmera": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Developer: Enmera"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Geliştirici: Enmera"
           }
         }
       }
@@ -3741,6 +4347,22 @@
         }
       }
     },
+    "To hide the \"Remote Play connected\" message on the screen: on the PS5, go to Settings › System › Remote Play and turn on Hide Remote Play Connection Status Pop-Up. Do it for both your main account and the second account.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "To hide the \"Remote Play connected\" message on the screen: on the PS5, go to Settings › System › Remote Play and turn on Hide Remote Play Connection Status Pop-Up. Do it for both your main account and the second account."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ekrandaki \"Uzaktan Oynama bağlandı\" yazısını gizlemek için: PS5'te Ayarlar › Sistem › Uzaktan Oynama'ya gidip Uzaktan Oynama Bağlantı Durumu Açılır Penceresini Gizle'yi açın. Bunu hem ana hesabınızda hem ikinci hesapta yapın."
+          }
+        }
+      }
+    },
     "Still as the new user, go to Settings › System › Remote Play and turn on Enable Remote Play.": {
       "localizations": {
         "en": {
@@ -3752,7 +4374,7 @@
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Hâlâ yeni kullanıcıdayken Ayarlar › Sistem › Uzaktan Oynatma'ya gidip Uzaktan Oynatmayı Etkinleştir'i açın."
+            "value": "Hâlâ yeni kullanıcıdayken Ayarlar › Sistem › Uzaktan Oynama'ya gidip Uzaktan Oynama'yı Etkinleştir'i açın."
           }
         }
       }
@@ -4041,6 +4663,54 @@
           "stringUnit": {
             "state": "translated",
             "value": "PS5 görüntüsü alınamıyor; PS Remote Play kapalı mı, PS5 uykuda mı? Kontrol edip yeniden başlatın."
+          }
+        }
+      }
+    },
+    "The PS5 ended Remote Play. This usually happens when the user is switched on the PS5 during the game. Reconnecting…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The PS5 ended Remote Play. This usually happens when the user is switched on the PS5 during the game. Reconnecting…"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PS5 Uzaktan Oynatma'yı kapattı. Bu çoğunlukla oyun sırasında PS5'te kullanıcı değiştirilince olur. Yeniden bağlanılıyor…"
+          }
+        }
+      }
+    },
+    "To play without the connection dropping: 1. On the PS5, start the game with your MAIN account first. 2. Then start translating. 3. Don't switch users during the game; when you turn on the controller, choose your MAIN account. Don't play with the second account CouchSubs signs in with, or the controller will turn off by itself or won't work in the game.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "To play without the connection dropping: 1. On the PS5, start the game with your MAIN account first. 2. Then start translating. 3. Don't switch users during the game; when you turn on the controller, choose your MAIN account. Don't play with the second account CouchSubs signs in with, or the controller will turn off by itself or won't work in the game."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bağlantı kopmadan oynamak için: 1. PS5'te önce ANA hesabınızla oyuna girin. 2. Sonra çeviriyi başlatın. 3. Oyun sırasında kullanıcı değiştirmeyin; kolu açınca ANA hesabınızı seçin. CouchSubs'ın giriş yaptığı ikinci hesapla oynamayın, yoksa kol kendiliğinden kapanır ya da oyunda çalışmaz."
+          }
+        }
+      }
+    },
+    "Remote Play on the PS5 has crashed. Turn the PS5 off completely (not rest mode) and back on, then connect again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remote Play on the PS5 has crashed. Turn the PS5 off completely (not rest mode) and back on, then connect again."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PS5'teki Uzaktan Oynatma çöktü. PS5'i tamamen kapatıp (bekleme modu değil) açın, sonra yeniden bağlanın."
           }
         }
       }
@@ -4685,6 +5355,75 @@
         }
       }
     },
+    "Installed version: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installed version: %@"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kurulu sürüm: %@"
+          }
+        }
+      }
+    },
+    "Loading release notes…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading release notes…"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sürüm notları yükleniyor…"
+          }
+        }
+      }
+    },
+    "Release notes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Release notes"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Neler değişti?"
+          }
+        }
+      }
+    },
+    "Release notes are unavailable.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Release notes are unavailable."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sürüm notlarına ulaşılamadı."
+          }
+        }
+      }
+    },
+    "CouchSubs closed unexpectedly last time.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "CouchSubs closed unexpectedly last time."}}, "tr": {"stringUnit": {"state": "translated", "value": "CouchSubs geçen sefer beklenmedik biçimde kapandı."}}}},
+    "A crash record was saved on this computer. It stays here and is never sent anywhere on its own; you can add it when you report the problem.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "A crash record was saved on this computer. It stays here and is never sent anywhere on its own; you can add it when you report the problem."}}, "tr": {"stringUnit": {"state": "translated", "value": "Bu bilgisayara bir çökme kaydı yazıldı. Kayıt yalnız burada durur, kendiliğinden hiçbir yere gönderilmez; sorunu bildirirken ekleyebilirsiniz."}}}},
+    "macOS saved a crash report on this Mac. CouchSubs does not send it anywhere; you can add it when you report the problem.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "macOS saved a crash report on this Mac. CouchSubs does not send it anywhere; you can add it when you report the problem."}}, "tr": {"stringUnit": {"state": "translated", "value": "macOS bu Mac'e bir çökme raporu yazdı. CouchSubs bunu hiçbir yere göndermez; sorunu bildirirken ekleyebilirsiniz."}}}},
+    "Show crash record": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Show crash record"}}, "tr": {"stringUnit": {"state": "translated", "value": "Çökme kaydını göster"}}}},
+    "Copy summary": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Copy summary"}}, "tr": {"stringUnit": {"state": "translated", "value": "Özeti kopyala"}}}},
     "Update now": {
       "localizations": {
         "en": {
@@ -5353,6 +6092,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Çevirileri kaldır"
+          }
+        }
+      }
+    },
+    "Rotate screen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rotate screen"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ekranı döndür"
           }
         }
       }
@@ -6253,6 +7008,11 @@
         }
       }
     },
+    "Text reading got stuck. It usually recovers within a minute or two: macOS prepares its text model after the first launch or an update. Don't quit while waiting. If it doesn't recover, restart CouchSubs.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Text reading got stuck. It usually recovers within a minute or two: macOS prepares its text model after the first launch or an update. Don't quit while waiting. If it doesn't recover, restart CouchSubs."}},"tr":{"stringUnit":{"state":"translated","value":"Yazı okuma takıldı. Çoğunlukla bir iki dakikada kendiliğinden düzelir: macOS, ilk açılışta ya da güncellemeden sonra okuma modelini hazırlar. Beklerken uygulamayı kapatmayın. Düzelmezse CouchSubs'ı yeniden başlatın."}}}},
+    "macOS text reading isn't responding. Subtitles continue with the backup reader.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"macOS text reading isn't responding. Subtitles continue with the backup reader."}},"tr":{"stringUnit":{"state":"translated","value":"macOS'in yazı okuması yanıt vermiyor. Altyazılar yedek okuyucuyla sürüyor."}}}},
+    "This usually clears up within a minute or two: macOS prepares its text model after the first launch or an update. Reading may be a little less accurate until then. If it doesn't clear up, restart CouchSubs.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This usually clears up within a minute or two: macOS prepares its text model after the first launch or an update. Reading may be a little less accurate until then. If it doesn't clear up, restart CouchSubs."}},"tr":{"stringUnit":{"state":"translated","value":"Çoğunlukla bir iki dakikada kendiliğinden geçer: macOS, ilk açılışta ya da güncellemeden sonra okuma modelini hazırlar. O zamana kadar okuma biraz daha az isabetli olabilir. Geçmezse CouchSubs'ı yeniden başlatın."}}}},
+    "Restart CouchSubs": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Restart CouchSubs"}},"tr":{"stringUnit":{"state":"translated","value":"CouchSubs'ı yeniden başlat"}}}},
+    "Text reading got stuck. It usually recovers within a minute or two: the system prepares its text model after the first launch or an update. Keep CouchSubs open. If it doesn't recover, close CouchSubs and open it again.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Text reading got stuck. It usually recovers within a minute or two: the system prepares its text model after the first launch or an update. Keep CouchSubs open. If it doesn't recover, close CouchSubs and open it again."}},"tr":{"stringUnit":{"state":"translated","value":"Yazı okuma takıldı. Çoğunlukla bir iki dakikada kendiliğinden düzelir: sistem, ilk açılışta ya da güncellemeden sonra okuma modelini hazırlar. CouchSubs'ı açık tutun. Düzelmezse CouchSubs'ı kapatıp yeniden açın."}}}},
     "Restart the Mac and start the translation again.": {
       "localizations": {
         "en": {
@@ -6681,6 +7441,54 @@
           "stringUnit": {
             "state": "translated",
             "value": "Çalışıyor."
+          }
+        }
+      }
+    },
+    "The API key could not be saved to the Mac keychain.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The API key could not be saved to the Mac keychain."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API anahtarı Mac'in Anahtar Zinciri'ne kaydedilemedi."
+          }
+        }
+      }
+    },
+    "The API key could not be saved to this iPhone's keychain.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The API key could not be saved to this iPhone's keychain."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API anahtarı iPhone'un Anahtar Zinciri'ne kaydedilemedi."
+          }
+        }
+      }
+    },
+    "The API key could not be saved to this computer's secure storage.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The API key could not be saved to this computer's secure storage."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API anahtarı bu bilgisayarın güvenli deposuna kaydedilemedi."
           }
         }
       }
@@ -7965,18 +8773,34 @@
         }
       }
     },
-    "Can't reach the PS5. Reconnecting…": {
+    "Lost the connection to the PS5. Reconnecting… If this keeps happening, connect the PS5 to the router with a cable.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Can't reach the PS5. Reconnecting…"
+            "value": "Lost the connection to the PS5. Reconnecting… If this keeps happening, connect the PS5 to the router with a cable."
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "PS5'e ulaşılamıyor. Yeniden bağlanılıyor…"
+            "value": "PS5 ile bağlantı koptu, yeniden bağlanılıyor… Sık oluyorsa PS5'i modeme kabloyla bağlayın."
+          }
+        }
+      }
+    },
+    "Remote Play is turned off on the PS5 (code %@). On the PS5, go to Settings › System › Remote Play and turn on Enable Remote Play.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remote Play is turned off on the PS5 (code %@). On the PS5, go to Settings › System › Remote Play and turn on Enable Remote Play."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PS5'te Uzaktan Oynama kapalı (kod %@). PS5'te Ayarlar › Sistem › Uzaktan Oynama'ya gidip Uzaktan Oynama'yı Etkinleştir'i açın."
           }
         }
       }
@@ -7998,7 +8822,7 @@
       }
     },
     "Picture mode (Android TV)": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Picture mode (Android TV)"}}, "tr": {"stringUnit": {"state": "translated", "value": "Görüntü modu (Android TV)"}}}},
-    "If the PS5 picture stays black inside the CouchSubs TV app, choose Overlay: the TV shows the PS5 on its own HDMI input and the subtitles appear on top. If no picture arrives, the TV app first lists its HDMI inputs and switches to Overlay where it can. The TV app from Google Play has no Overlay mode: there this choice is not applied and the TV says so on screen.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "If the PS5 picture stays black inside the CouchSubs TV app, choose Overlay: the TV shows the PS5 on its own HDMI input and the subtitles appear on top. If no picture arrives, the TV app first lists its HDMI inputs and switches to Overlay where it can. The TV app from Google Play has no Overlay mode: there this choice is not applied and the TV says so on screen."}}, "tr": {"stringUnit": {"state": "translated", "value": "PS5 görüntüsü CouchSubs TV uygulamasının içinde siyah kalıyorsa Katman'ı seçin: TV, PS5'i kendi HDMI girişinde gösterir, altyazı görüntünün üstünde çıkar. Görüntü gelmezse TV uygulaması önce HDMI girişlerini gösterir, Katman varsa ona geçer. Google Play'den kurulan TV uygulamasında Katman yok: orada bu seçim uygulanmaz, TV bunu ekranda söyler."}}}},
+    "If the PS5 picture stays black inside the CouchSubs TV app, choose Overlay: the TV shows the PS5 on its own HDMI input and the subtitles appear on top. If no picture arrives, the TV app first lists its HDMI inputs and switches to Overlay where it can. Overlay also helps if the TV changes its picture mode or drops Game mode or HDR while the TV app is open: inside the app the TV handles the PS5 picture as an app, not as its HDMI input. The TV app from Google Play has no Overlay mode: there this choice is not applied and the TV says so on screen.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "If the PS5 picture stays black inside the CouchSubs TV app, choose Overlay: the TV shows the PS5 on its own HDMI input and the subtitles appear on top. If no picture arrives, the TV app first lists its HDMI inputs and switches to Overlay where it can. Overlay also helps if the TV changes its picture mode or drops Game mode or HDR while the TV app is open: inside the app the TV handles the PS5 picture as an app, not as its HDMI input. The TV app from Google Play has no Overlay mode: there this choice is not applied and the TV says so on screen."}}, "tr": {"stringUnit": {"state": "translated", "value": "PS5 görüntüsü CouchSubs TV uygulamasının içinde siyah kalıyorsa Katman'ı seçin: TV, PS5'i kendi HDMI girişinde gösterir, altyazı görüntünün üstünde çıkar. Görüntü gelmezse TV uygulaması önce HDMI girişlerini gösterir, Katman varsa ona geçer. TV uygulaması açıkken TV'nin görüntü modu değişiyor, oyun modu ya da HDR kayboluyorsa da Katman'ı seçin: uygulamanın içinde TV, PS5 görüntüsünü HDMI girişi olarak değil uygulama olarak işler. Google Play'den kurulan TV uygulamasında Katman yok: orada bu seçim uygulanmaz, TV bunu ekranda söyler."}}}},
     "The PS5 rejected the connection (code %@). Another Remote Play app (PS Remote Play) may be open, or the PS5 may be in another session. Close PS Remote Play, restart the PS5, then try again.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "The PS5 rejected the connection (code %@). Another Remote Play app (PS Remote Play) may be open, or the PS5 may be in another session. Close PS Remote Play, restart the PS5, then try again."}}, "tr": {"stringUnit": {"state": "translated", "value": "PS5 bağlantıyı reddetti (kod %@). Başka bir Uzaktan Oynatma (PS Remote Play) açık olabilir ya da PS5 başka bir oturumda olabilir. PS Remote Play'i kapatın, PS5'i yeniden başlatıp tekrar deneyin."}}}},
     "The PS5 didn't start the session. Another Remote Play app (PS Remote Play) may be open, or the PS5 may be in another session. Close PS Remote Play, restart the PS5, then try again.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "The PS5 didn't start the session. Another Remote Play app (PS Remote Play) may be open, or the PS5 may be in another session. Close PS Remote Play, restart the PS5, then try again."}}, "tr": {"stringUnit": {"state": "translated", "value": "PS5 oturumu başlatmadı. Başka bir Uzaktan Oynatma (PS Remote Play) açık olabilir ya da PS5 başka bir oturumda olabilir. PS Remote Play'i kapatın, PS5'i yeniden başlatıp tekrar deneyin."}}}},
     "Overlay": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Overlay"}}, "tr": {"stringUnit": {"state": "translated", "value": "Katman"}}}},
@@ -8050,18 +8874,18 @@
         }
       }
     },
-    "If the PS5 picture stays black inside the CouchSubs TV app, choose Overlay: the TV shows the PS5 on its own HDMI input and the subtitles appear on top. If the picture never arrives, the TV app switches to Overlay by itself.": {
+    "If the PS5 picture stays black inside the CouchSubs TV app, choose Overlay: the TV shows the PS5 on its own HDMI input and the subtitles appear on top. If the picture never arrives, the TV app switches to Overlay by itself. Overlay also helps if the TV changes its picture mode or drops Game mode or HDR while the TV app is open: inside the app the TV handles the PS5 picture as an app, not as its HDMI input.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "If the PS5 picture stays black inside the CouchSubs TV app, choose Overlay: the TV shows the PS5 on its own HDMI input and the subtitles appear on top. If the picture never arrives, the TV app switches to Overlay by itself."
+            "value": "If the PS5 picture stays black inside the CouchSubs TV app, choose Overlay: the TV shows the PS5 on its own HDMI input and the subtitles appear on top. If the picture never arrives, the TV app switches to Overlay by itself. Overlay also helps if the TV changes its picture mode or drops Game mode or HDR while the TV app is open: inside the app the TV handles the PS5 picture as an app, not as its HDMI input."
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "PS5 görüntüsü CouchSubs TV uygulamasının içinde siyah kalıyorsa Katman'ı seçin: TV, PS5'i kendi HDMI girişinde gösterir, altyazı görüntünün üstünde çıkar. Görüntü hiç gelmezse TV uygulaması kendiliğinden Katman'a geçer."
+            "value": "PS5 görüntüsü CouchSubs TV uygulamasının içinde siyah kalıyorsa Katman'ı seçin: TV, PS5'i kendi HDMI girişinde gösterir, altyazı görüntünün üstünde çıkar. Görüntü hiç gelmezse TV uygulaması kendiliğinden Katman'a geçer. TV uygulaması açıkken TV'nin görüntü modu değişiyor, oyun modu ya da HDR kayboluyorsa da Katman'ı seçin: uygulamanın içinde TV, PS5 görüntüsünü HDMI girişi olarak değil uygulama olarak işler."
           }
         }
       }
@@ -8398,22 +9222,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "TV uygulamasını ilk kez kurmak için bir kez bilgisayardaki CouchSubs'ı kullanın. Sonrasında bu telefon yeterli."
-          }
-        }
-      }
-    },
-    "Keep CouchSubs open on the screen while you play. iOS stops the connection when the app goes to the background; the screen stays on while translating.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Keep CouchSubs open on the screen while you play. iOS stops the connection when the app goes to the background; the screen stays on while translating."
-          }
-        },
-        "tr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Oynarken CouchSubs ekranda açık kalsın. iOS, arka plana geçen uygulamanın bağlantısını keser; çeviri sürerken ekran kararmaz."
           }
         }
       }
@@ -9906,18 +10714,18 @@
         }
       }
     },
-    "No TV found on the network.": {
+    "No TV found on the network. If the CouchSubs app is not on the TV, install it from this phone below. Using a monitor or a non-smart TV? Choose On this phone.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No TV found on the network."
+            "value": "No TV found on the network. If the CouchSubs app is not on the TV, install it from this phone below. Using a monitor or a non-smart TV? Choose On this phone."
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ağda TV bulunamadı."
+            "value": "Ağda TV bulunamadı. TV'de CouchSubs uygulaması yoksa aşağıdan bu telefonla kurun. Monitör ya da akıllı olmayan TV kullanıyorsanız ‘Bu telefonda’yı seçin."
           }
         }
       }
@@ -11746,6 +12554,7 @@
         }
       }
     },
+    "Subtitles paused": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Subtitles paused"}}, "tr": {"stringUnit": {"state": "translated", "value": "Altyazı duraklatıldı"}}}},
     "PS5 connection lost": {
       "localizations": {
         "en": {
@@ -11854,22 +12663,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "CouchSubs TV uygulamasını Samsung TV'nize bilgisayar olmadan, bu telefondan kurar. Telefon ve TV aynı Wi-Fi'da olmalı."
-          }
-        }
-      }
-    },
-    "Samsung TVs and smart monitors (2017 and later).": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Samsung TVs and smart monitors (2017 and later)."
-          }
-        },
-        "tr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Samsung TV'ler ve akıllı monitörler (2017 ve sonrası)."
           }
         }
       }
@@ -11986,6 +12779,10 @@
         }
       }
     },
+    "The TV's settings are right (Developer mode on, Host PC IP %@), but the TV has not fully restarted since then, so it does not accept the phone yet. Hold the power button on the remote until the TV turns off and comes back on with the Samsung logo (about 5 seconds), or unplug the TV for 30 seconds, then try again.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The TV's settings are right (Developer mode on, Host PC IP %@), but the TV has not fully restarted since then, so it does not accept the phone yet. Hold the power button on the remote until the TV turns off and comes back on with the Samsung logo (about 5 seconds), or unplug the TV for 30 seconds, then try again."}},"tr":{"stringUnit":{"state":"translated","value":"TV'deki ayar doğru (Geliştirici modu açık, Host PC IP %@), ama TV o zamandan beri tam yeniden başlamadığı için telefonu henüz kabul etmiyor. Kumandanın güç tuşunu TV kapanıp Samsung logosuyla yeniden açılana kadar (yaklaşık 5 saniye) basılı tutun ya da TV'nin fişini 30 saniye çekin, sonra tekrar deneyin."}}}},
+    "The TV's Host PC IP is %1$@, but this phone's address is %2$@. In the TV's Developer mode window, set Host PC IP to %2$@, then restart the TV fully (hold the power button until the Samsung logo appears, about 5 seconds).": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The TV's Host PC IP is %1$@, but this phone's address is %2$@. In the TV's Developer mode window, set Host PC IP to %2$@, then restart the TV fully (hold the power button until the Samsung logo appears, about 5 seconds)."}},"tr":{"stringUnit":{"state":"translated","value":"TV'deki Host PC IP %1$@, bu telefonun adresi %2$@. TV'deki geliştirici modu penceresinde Host PC IP'yi %2$@ yapın, sonra TV'yi tam yeniden başlatın (güç tuşunu Samsung logosu görünene kadar, yaklaşık 5 saniye basılı tutun)."}}}},
+    "Developer mode is off on the TV. Turn it on with the steps above, type this phone's address (%@) as Host PC IP, then restart the TV fully (hold the power button until the Samsung logo appears, about 5 seconds).": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Developer mode is off on the TV. Turn it on with the steps above, type this phone's address (%@) as Host PC IP, then restart the TV fully (hold the power button until the Samsung logo appears, about 5 seconds)."}},"tr":{"stringUnit":{"state":"translated","value":"TV'de geliştirici modu kapalı. Yukarıdaki adımlarla açın, Host PC IP olarak bu telefonun adresini (%@) yazın, sonra TV'yi tam yeniden başlatın (güç tuşunu Samsung logosu görünene kadar, yaklaşık 5 saniye basılı tutun)."}}}},
+    "The TV (%1$@) and this phone (%2$@) are on different networks, so the TV refuses the phone. Connect both to the same Wi-Fi (not a guest network or a second router), type the phone's new address as Host PC IP on the TV, then restart the TV fully (hold the power button until the Samsung logo appears, about 5 seconds).": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The TV (%1$@) and this phone (%2$@) are on different networks, so the TV refuses the phone. Connect both to the same Wi-Fi (not a guest network or a second router), type the phone's new address as Host PC IP on the TV, then restart the TV fully (hold the power button until the Samsung logo appears, about 5 seconds)."}},"tr":{"stringUnit":{"state":"translated","value":"TV (%1$@) ile bu telefon (%2$@) farklı ağlarda, bu yüzden TV telefonu kabul etmiyor. İkisini aynı Wi-Fi'ya bağlayın (misafir ağı ya da ikinci modem değil), TV'de Host PC IP'ye telefonun yeni adresini yazın, sonra TV'yi tam yeniden başlatın (güç tuşunu Samsung logosu görünene kadar, yaklaşık 5 saniye basılı tutun)."}}}},
     "Host PC IP belongs to another device: %@": {
       "localizations": {
         "en": {
@@ -12050,18 +12847,18 @@
         }
       }
     },
-    "4. Restart the TV: hold the power button on the remote for about 2 seconds until the TV turns off, then turn it on again. A short press only puts it on standby.": {
+    "4. Restart the TV: hold the power button on the remote and keep holding until the TV turns off and comes back on with the Samsung logo (about 5 seconds); letting go when it turns off only puts it on standby. If no logo appears, unplug the TV for 30 seconds.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "4. Restart the TV: hold the power button on the remote for about 2 seconds until the TV turns off, then turn it on again. A short press only puts it on standby."
+            "value": "4. Restart the TV: hold the power button on the remote and keep holding until the TV turns off and comes back on with the Samsung logo (about 5 seconds); letting go when it turns off only puts it on standby. If no logo appears, unplug the TV for 30 seconds."
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "4. TV'yi yeniden başlatın: kumandanın güç tuşunu TV kapanana kadar yaklaşık 2 saniye basılı tutun, sonra yeniden açın. Kısa basınca TV yalnız bekleme moduna geçer."
+            "value": "4. TV'yi yeniden başlatın: kumandanın güç tuşunu TV kapanıp Samsung logosuyla yeniden açılana kadar (yaklaşık 5 saniye) bırakmadan basılı tutun; TV kapanınca bırakırsanız yalnız bekleme moduna geçer. Logo görünmezse TV'nin fişini 30 saniye çekin."
           }
         }
       }
@@ -12338,18 +13135,18 @@
         }
       }
     },
-    "The TV did not accept this phone. In the TV's Developer mode window, check that Host PC IP is this phone's address (%@), then restart the TV (hold the power button for about 2 seconds).": {
+    "The TV did not accept this phone. In the TV's Developer mode window, check that Host PC IP is this phone's address (%@), then restart the TV fully: hold the power button until the Samsung logo appears (about 5 seconds), or unplug the TV for 30 seconds.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The TV did not accept this phone. In the TV's Developer mode window, check that Host PC IP is this phone's address (%@), then restart the TV (hold the power button for about 2 seconds)."
+            "value": "The TV did not accept this phone. In the TV's Developer mode window, check that Host PC IP is this phone's address (%@), then restart the TV fully: hold the power button until the Samsung logo appears (about 5 seconds), or unplug the TV for 30 seconds."
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "TV bu telefonu kabul etmedi. TV'deki geliştirici modu penceresinde Host PC IP'nin bu telefonun adresi (%@) olduğunu kontrol edin ve TV'yi yeniden başlatın (güç tuşunu yaklaşık 2 saniye basılı tutun)."
+            "value": "TV bu telefonu kabul etmedi. TV'deki geliştirici modu penceresinde Host PC IP'nin bu telefonun adresi (%@) olduğunu kontrol edin ve TV'yi tam yeniden başlatın: güç tuşunu Samsung logosu görünene kadar (yaklaşık 5 saniye) basılı tutun ya da TV'nin fişini 30 saniye çekin."
           }
         }
       }
@@ -12802,6 +13599,8 @@
         }
       }
     },
+    "Try with wireless debugging": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Try with wireless debugging"}},"tr":{"stringUnit":{"state":"translated","value":"Kablosuz hata ayıklamayla dene"}}}},
+    "The TV did not answer on the USB/network debugging port (5555). Newer Android TV and Google TV models keep this port closed. On the TV, turn on Developer options › Wireless debugging, then tap the button below.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"The TV did not answer on the USB/network debugging port (5555). Newer Android TV and Google TV models keep this port closed. On the TV, turn on Developer options › Wireless debugging, then tap the button below."}},"tr":{"stringUnit":{"state":"translated","value":"TV, USB/ağ hata ayıklama portuna (5555) yanıt vermedi. Yeni Android TV ve Google TV'lerde bu port kapalıdır. TV'de Geliştirici seçenekleri › Kablosuz hata ayıklama'yı açın, sonra aşağıdaki düğmeye dokunun."}}}},
     "TCP 5555 is unreachable; wireless debugging uses a separate port": {
       "localizations": {
         "en": {
@@ -13486,6 +14285,166 @@
           "stringUnit": {
             "state": "translated",
             "value": "Karakterin adı çevirinin başında kalır (ARTHUR: …). Adın kendisi hiçbir zaman çevrilmez."
+          }
+        }
+      }
+    },
+    "Set on-screen text apart from subtitles": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set on-screen text apart from subtitles"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ekran yazılarını altyazıdan ayır"
+          }
+        }
+      }
+    },
+    "On-screen text keeps its own colours and place, and never looks like the subtitle box.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On-screen text keeps its own colours and place, and never looks like the subtitle box."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ekran yazıları kendi rengini ve yerini korur, altyazı kutusuna benzemez."
+          }
+        }
+      }
+    },
+    "Use ready areas for known games": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use ready areas for known games"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bilinen oyunlarda hazır alanları kullan"
+          }
+        }
+      }
+    },
+    "When a game with ready areas (such as GTA 6) is being played, its help box and messages are read and translated automatically. Your own extra areas take precedence.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When a game with ready areas (such as GTA 6) is being played, its help box and messages are read and translated automatically. Your own extra areas take precedence."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hazır alanı olan bir oyun (ör. GTA 6) oynanırken yardım kutusu ve mesajlar kendiliğinden okunup çevrilir. Kendi ek alanlarınız varsa onlar kullanılır."
+          }
+        }
+      }
+    },
+    "Automatically translate on-screen text": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically translate on-screen text"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ekran yazılarını otomatik çevir"
+          }
+        }
+      }
+    },
+    "Automatically translate on-screen text (experimental)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically translate on-screen text (experimental)"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ekran yazılarını otomatik çevir (deneysel)"
+          }
+        }
+      }
+    },
+    "Automatic on-screen text translation is experimental; you can turn it on in Settings.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic on-screen text translation is experimental; you can turn it on in Settings."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ekran yazılarını otomatik çevirme deneysel; Ayarlar'dan açabilirsiniz."
+          }
+        }
+      }
+    },
+    "Text boxes that appear on screen (objectives, help, messages) are found and translated in place. Counters, the map and short labels are skipped.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Text boxes that appear on screen (objectives, help, messages) are found and translated in place. Counters, the map and short labels are skipped."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ekranda beliren yazı kutuları (görev, yardım, mesaj) bulunur ve kendi yerinde çevrilir. Sayaçlar, harita ve kısa etiketler atlanır."
+          }
+        }
+      }
+    },
+    "Color by speaker": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Color by speaker"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Konuşana göre renk"
+          }
+        }
+      }
+    },
+    "Each speaker's name and line keep their own color.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Each speaker's name and line keep their own color."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Her konuşanın adı ve satırı kendi renginde görünür."
           }
         }
       }
@@ -14478,7 +15437,54 @@
     "Refresh windows": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Refresh windows"}},"tr":{"stringUnit":{"state":"translated","value":"Pencereleri yenile"}}}},
     "No suitable windows found. Open OBS or the game first, then refresh.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"No suitable windows found. Open OBS or the game first, then refresh."}},"tr":{"stringUnit":{"state":"translated","value":"Uygun pencere bulunamadı. Önce OBS'yi veya oyunu açın, sonra listeyi yenileyin."}}}},
     "Have OBS or a game window on this PC?": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Have OBS or a game window on this PC?"}},"tr":{"stringUnit":{"state":"translated","value":"Bu bilgisayarda OBS veya oyun penceresi mi kullanıyorsunuz?"}}}},
-    "CouchSubs can read only the OBS projector or game window you select in Settings › Picture source. No second PSN account or additional capture app is needed.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"CouchSubs can read only the OBS projector or game window you select in Settings › Picture source. No second PSN account or additional capture app is needed."}},"tr":{"stringUnit":{"state":"translated","value":"CouchSubs, Ayarlar › Görüntü kaynağı bölümünde seçtiğiniz OBS projektörünü veya oyun penceresini okuyabilir. İkinci PSN hesabı ya da ek yakalama uygulaması gerekmez."}}}}
+    "CouchSubs can read only the OBS projector or game window you select in Settings › Picture source. No second PSN account or additional capture app is needed.": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"CouchSubs can read only the OBS projector or game window you select in Settings › Picture source. No second PSN account or additional capture app is needed."}},"tr":{"stringUnit":{"state":"translated","value":"CouchSubs, Ayarlar › Görüntü kaynağı bölümünde seçtiğiniz OBS projektörünü veya oyun penceresini okuyabilir. İkinci PSN hesabı ya da ek yakalama uygulaması gerekmez."}}}},
+    "Sponsored": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Sponsored"}}, "tr": {"stringUnit": {"state": "translated", "value": "Sponsorlu"}}}},
+    "Open link": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Open link"}}, "tr": {"stringUnit": {"state": "translated", "value": "Bağlantıyı aç"}}}},
+    "TV not in the list? Enter its IP address (on the TV under Settings › Network).": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "TV not in the list? Enter its IP address (on the TV under Settings › Network)."}}, "tr": {"stringUnit": {"state": "translated", "value": "TV listede yok mu? IP adresini yazın (TV'de Ayarlar › Ağ altında)."}}}},
+    "The PS5 did not accept the connection yet. It may still be starting up, or its network address may have changed. Reconnecting and searching for the PS5… If this keeps happening, make sure the PS5 is on and on the same network.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "The PS5 did not accept the connection yet. It may still be starting up, or its network address may have changed. Reconnecting and searching for the PS5… If this keeps happening, make sure the PS5 is on and on the same network."}}, "tr": {"stringUnit": {"state": "translated", "value": "PS5 bağlantıyı henüz kabul etmedi. PS5 yeni açılıyor olabilir ya da ağdaki adresi değişmiş olabilir. Yeniden bağlanılıyor ve PS5 ağda aranıyor… Sürerse PS5'in açık ve aynı ağda olduğundan emin olun."}}}},
+    "Add": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Add"}}, "tr": {"stringUnit": {"state": "translated", "value": "Ekle"}}}},
+    "The PS5 is on the network but is not waiting for a code. On the PS5 open Settings › System › Remote Play › Pair Device and enter the new code it shows. If the PS5 is in rest mode, turn it on first.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "The PS5 is on the network but is not waiting for a code. On the PS5 open Settings › System › Remote Play › Pair Device and enter the new code it shows. If the PS5 is in rest mode, turn it on first."}}, "tr": {"stringUnit": {"state": "translated", "value": "PS5 ağda ama kod beklemiyor. PS5'te Ayarlar › Sistem › Uzaktan Oynatma › Cihazı Eşleştir'i açın ve ekranda çıkan yeni kodu girin. PS5 dinlenme modundaysa önce açın."}}}},
+    "The PS5 answered, but the pairing connection to it could not be opened. Turn off any VPN or firewall app that blocks the home network, then open Pair Device again on the PS5 and enter the new code.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "The PS5 answered, but the pairing connection to it could not be opened. Turn off any VPN or firewall app that blocks the home network, then open Pair Device again on the PS5 and enter the new code."}}, "tr": {"stringUnit": {"state": "translated", "value": "PS5 yanıt verdi ama eşleştirme bağlantısı açılamadı. Ev ağını engelleyen VPN ya da güvenlik duvarı uygulaması varsa kapatın, sonra PS5'te Cihazı Eşleştir'i yeniden açıp yeni kodu girin."}}}},
+    "This computer has no free network ports left, so it cannot connect to the PS5. Restart the computer, then open Pair Device again on the PS5 and enter the new code.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "This computer has no free network ports left, so it cannot connect to the PS5. Restart the computer, then open Pair Device again on the PS5 and enter the new code."}}, "tr": {"stringUnit": {"state": "translated", "value": "Bu bilgisayarda boş ağ bağlantı noktası (port) kalmadı, bu yüzden PS5'e bağlanamıyor. Bilgisayarı yeniden başlatın, sonra PS5'te Cihazı Eşleştir'i yeniden açıp yeni kodu girin."}}}},
+    "This phone has no free network ports left, so it cannot connect to the PS5. Restart the phone, then open Pair Device again on the PS5 and enter the new code.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "This phone has no free network ports left, so it cannot connect to the PS5. Restart the phone, then open Pair Device again on the PS5 and enter the new code."}}, "tr": {"stringUnit": {"state": "translated", "value": "Bu telefonda boş ağ bağlantı noktası (port) kalmadı, bu yüzden PS5'e bağlanamıyor. Telefonu yeniden başlatın, sonra PS5'te Cihazı Eşleştir'i yeniden açıp yeni kodu girin."}}}},
+    "Your Xbox is streaming to another device (the Xbox app, a phone or a PC). Close that session, then start translation again.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Your Xbox is streaming to another device (the Xbox app, a phone or a PC). Close that session, then start translation again."}}, "tr": {"stringUnit": {"state": "translated", "value": "Xbox şu an başka bir cihaza yayın yapıyor (Xbox uygulaması, telefon ya da bilgisayar). O oturumu kapatıp çeviriyi yeniden başlatın."}}}},
+    "Can't reach your Xbox. Make sure it's on and remote play is enabled in Settings › Devices & connections › Remote features, then start translation again.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Can't reach your Xbox. Make sure it's on and remote play is enabled in Settings › Devices & connections › Remote features, then start translation again."}}, "tr": {"stringUnit": {"state": "translated", "value": "Xbox'a ulaşılamadı. Xbox'ın açık olduğundan ve Ayarlar › Cihazlar ve bağlantılar › Uzak özellikler'de uzaktan oynatmanın açık olduğundan emin olup çeviriyi yeniden başlatın."}}}},
+    "The Xbox stream stopped (%@). Start translation again; if it keeps stopping, restart the Xbox.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "The Xbox stream stopped (%@). Start translation again; if it keeps stopping, restart the Xbox."}}, "tr": {"stringUnit": {"state": "translated", "value": "Xbox yayını durdu (%@). Çeviriyi yeniden başlatın; sürekli duruyorsa Xbox'ı yeniden başlatın."}}}},
+    "The Xbox stopped answering keep-alive requests.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "The Xbox stopped answering keep-alive requests."}}, "tr": {"stringUnit": {"state": "translated", "value": "Xbox canlı tutma isteklerine yanıt vermedi."}}}},
+    "OK": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "OK"}}, "tr": {"stringUnit": {"state": "translated", "value": "Tamam"}}}},
+    "Updating…": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Updating…"}}, "tr": {"stringUnit": {"state": "translated", "value": "Güncelleniyor…"}}}},
+    "Packs are up to date": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Packs are up to date"}}, "tr": {"stringUnit": {"state": "translated", "value": "Paketler güncel"}}}},
+    "The packs are already up to date.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "The packs are already up to date."}}, "tr": {"stringUnit": {"state": "translated", "value": "Paketler zaten güncel."}}}},
+    "Packs updated": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Packs updated"}}, "tr": {"stringUnit": {"state": "translated", "value": "Paketler güncellendi"}}}},
+    "The packs could not be updated": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "The packs could not be updated"}}, "tr": {"stringUnit": {"state": "translated", "value": "Paketler güncellenemedi"}}}},
+    "The packs on this phone are still used.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "The packs on this phone are still used."}}, "tr": {"stringUnit": {"state": "translated", "value": "Bu telefondaki paketler kullanılmaya devam ediyor."}}}},
+    "1 pack updated: %@.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "1 pack updated: %@."}}, "tr": {"stringUnit": {"state": "translated", "value": "1 paket güncellendi: %@."}}}},
+    "%lld packs updated: %@.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "%lld packs updated: %@."}}, "tr": {"stringUnit": {"state": "translated", "value": "%lld paket güncellendi: %@."}}}},
+    "1 pack added: %@.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "1 pack added: %@."}}, "tr": {"stringUnit": {"state": "translated", "value": "1 paket eklendi: %@."}}}},
+    "%lld packs added: %@.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "%lld packs added: %@."}}, "tr": {"stringUnit": {"state": "translated", "value": "%lld paket eklendi: %@."}}}},
+    "%1$@ (%2$@ lines)": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "%1$@ (%2$@ lines)"}}, "tr": {"stringUnit": {"state": "translated", "value": "%1$@ (%2$@ satır)"}}}},
+    "%1$@ (+%2$@ lines)": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "%1$@ (+%2$@ lines)"}}, "tr": {"stringUnit": {"state": "translated", "value": "%1$@ (+%2$@ satır)"}}}},
+    "%1$@ (%2$@ fewer lines)": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "%1$@ (%2$@ fewer lines)"}}, "tr": {"stringUnit": {"state": "translated", "value": "%1$@ (%2$@ satır azaldı)"}}}},
+    "%@ (translations revised)": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "%@ (translations revised)"}}, "tr": {"stringUnit": {"state": "translated", "value": "%@ (çeviriler düzeltildi)"}}}},
+    "%@ new lines in total.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "%@ new lines in total."}}, "tr": {"stringUnit": {"state": "translated", "value": "Toplam %@ yeni satır."}}}},
+    "No internet connection, or the pack server could not be reached.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "No internet connection, or the pack server could not be reached."}}, "tr": {"stringUnit": {"state": "translated", "value": "İnternet bağlantısı yok ya da paket sunucusuna ulaşılamadı."}}}},
+    "Too many attempts. Wait a few minutes and try again.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Too many attempts. Wait a few minutes and try again."}}, "tr": {"stringUnit": {"state": "translated", "value": "Çok sık denendi. Birkaç dakika bekleyip yeniden deneyin."}}}},
+    "The pack server did not respond (HTTP %lld).": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "The pack server did not respond (HTTP %lld)."}}, "tr": {"stringUnit": {"state": "translated", "value": "Paket sunucusu yanıt vermedi (HTTP %lld)."}}}},
+    "A downloaded pack could not be verified; it may have arrived incomplete.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "A downloaded pack could not be verified; it may have arrived incomplete."}}, "tr": {"stringUnit": {"state": "translated", "value": "İndirilen bir paket doğrulanamadı; eksik inmiş olabilir."}}}},
+    "The response from the pack server could not be read.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "The response from the pack server could not be read."}}, "tr": {"stringUnit": {"state": "translated", "value": "Paket sunucusundan gelen yanıt okunamadı."}}}},
+    "The packs on this computer are still used.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "The packs on this computer are still used."}}, "tr": {"stringUnit": {"state": "translated", "value": "Bu bilgisayardaki paketler kullanılmaya devam ediyor."}}}},
+    "This month's DeepL limit is used up. Until it renews, the free translation on this phone translates.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "This month's DeepL limit is used up. Until it renews, the free translation on this phone translates."}}, "tr": {"stringUnit": {"state": "translated", "value": "Bu ayın DeepL sınırı doldu. Sınır yenilenene kadar bu telefondaki ücretsiz çeviri çevirir."}}}},
+    "On the TV and on this phone": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "On the TV and on this phone"}}, "tr": {"stringUnit": {"state": "translated", "value": "TV'de ve bu telefonda"}}}},
+    "%@ and this phone": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "%@ and this phone"}}, "tr": {"stringUnit": {"state": "translated", "value": "%@ ve bu telefon"}}}},
+    "Share": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Share"}}, "tr": {"stringUnit": {"state": "translated", "value": "Paylaş"}}}},
+    "Have OBS or a game window on this Mac?": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Have OBS or a game window on this Mac?"}}, "tr": {"stringUnit": {"state": "translated", "value": "Bu Mac'te OBS veya oyun penceresi mi kullanıyorsunuz?"}}}},
+    "Open System Settings": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Open System Settings"}}, "tr": {"stringUnit": {"state": "translated", "value": "Sistem Ayarları'nı aç"}}}},
+    "CouchSubs measures how the app is used without linking it to you; no subtitle text, picture or account data is sent. You can turn this off in Settings › Game packs › Usage data.": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "CouchSubs measures how the app is used without linking it to you; no subtitle text, picture or account data is sent. You can turn this off in Settings › Game packs › Usage data."}}, "tr": {"stringUnit": {"state": "translated", "value": "CouchSubs, uygulamanın nasıl kullanıldığını kimliğinize bağlamadan ölçer; altyazı metni, görüntü ya da hesap bilgisi gönderilmez. Ayarlar › Oyun paketleri › Kullanım verisi'nden kapatabilirsiniz."}}}},
+    "OBS only (stream)": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "OBS only (stream)"}}, "tr": {"stringUnit": {"state": "translated", "value": "Yalnız OBS (yayın)"}}}},
+    "Subtitles go only to the OBS overlay. The TV is not searched for or opened, and no subtitle window opens on this computer. In OBS add a Browser source with this address (width 1920, height 1080).": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Subtitles go only to the OBS overlay. The TV is not searched for or opened, and no subtitle window opens on this computer. In OBS add a Browser source with this address (width 1920, height 1080)."}}, "tr": {"stringUnit": {"state": "translated", "value": "Altyazı yalnız OBS katmanına gider. TV aranmaz ve açılmaz, bu bilgisayarda altyazı penceresi açılmaz. OBS'te bu adresle bir Tarayıcı kaynağı ekleyin (genişlik 1920, yükseklik 1080)."}}}},
+    "If OBS runs on another computer, use this address:": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "If OBS runs on another computer, use this address:"}}, "tr": {"stringUnit": {"state": "translated", "value": "OBS başka bir bilgisayarda çalışıyorsa bu adresi kullanın:"}}}},
+    "To OBS on a computer on the same Wi-Fi": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "To OBS on a computer on the same Wi-Fi"}}, "tr": {"stringUnit": {"state": "translated", "value": "Aynı Wi-Fi'daki bilgisayarda OBS'e"}}}},
+    "Subtitles go only to OBS. The TV is not searched for and this phone shows no subtitle screen. In OBS on a computer on the same Wi-Fi, add a Browser source with this address (width 1920, height 1080).": {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Subtitles go only to OBS. The TV is not searched for and this phone shows no subtitle screen. In OBS on a computer on the same Wi-Fi, add a Browser source with this address (width 1920, height 1080)."}}, "tr": {"stringUnit": {"state": "translated", "value": "Altyazı yalnız OBS'e gider. TV aranmaz ve bu telefonda altyazı ekranı açılmaz. Aynı Wi-Fi'daki bilgisayarda OBS'te bu adresle bir Tarayıcı kaynağı ekleyin (genişlik 1920, yükseklik 1080)."}}}}
   },
   "version": "1.0"
 }

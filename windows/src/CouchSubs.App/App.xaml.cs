@@ -30,7 +30,7 @@ public partial class App : Application
         }
         catch (Exception error)
         {
-            StartupGuard.Fail(this, StartupGuard.ErrorMessage(error), error, renderFolder);
+            StartupGuard.Fail(this, StartupGuard.LaunchMessage(error), error, renderFolder);
         }
     }
 
@@ -44,6 +44,8 @@ public partial class App : Application
             return;
         }
         RemotePlayDiagnostics.Start();
+        // Önceki çalışma yerel bir hatayla kapandıysa ana ekran bir kez bildirir.
+        CrashWatch.Start();
         var controller = new AppController(new LiveServices(), new DpapiAppStore(), new FileSettingsStore(), new WindowsSleepGuard(),
             Localizer.Current, action => Dispatcher.BeginInvoke(action))
         {

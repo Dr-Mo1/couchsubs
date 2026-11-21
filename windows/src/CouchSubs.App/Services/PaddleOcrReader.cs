@@ -20,6 +20,9 @@ public sealed class PaddleOcrReader : ITextReader
     private static readonly object CacheGate = new();
     private static (string Directory, Engine Engine)? cache;
 
+    /// <summary>Paylaşılan oturumun kilidi en çok bu kadar beklenir.</summary>
+    private const int LockTimeoutMs = 10_000;
+
     private readonly Engine engine;
     /// <summary>Oyun dili Latin alfabeliyse Çince/Japonca/Korece karakterler atılır (<see cref="PaddleOcr.LatinOnly"/>).</summary>
     private readonly bool latin;
@@ -78,11 +81,21 @@ public sealed class PaddleOcrReader : ITextReader
 
     public Reading ReadLines(Frame image, bool deep)
     {
-        if (image.Width < 8 || image.Height < 8) return Reading.Empty;
+        if (image.Width < 8 || image.Height < 8 || !WindowsOcrReader.Usable(image)) return Reading.Empty;
         Reading reading;
-        lock (engine) reading = engine.Read(image);
+        // Oturum paylaşılır; içinde takılan bir okuma kilidi bırakmazsa yeni kurulan hat da sonsuza dek beklerdi (#679).
+        // Kilit süresinde alınamazsa hata verilir: sarmalayıcı (FallbackTextReader) kareyi Windows'un yazı tanımasıyla okur,
+        // üç kez üst üste olursa ona kalıcı geçer.
+        if (!System.Threading.Monitor.TryEnter(engine, LockTimeoutMs))
+            throw new TimeoutException($"gelişmiş yazı tanıma {LockTimeoutMs} ms'dir meşgul (önceki okuma bitmedi)");
+        try { reading = engine.Read(image); }
+        finally { System.Threading.Monitor.Exit(engine); }
         if (!latin) return reading;
-        return new Reading(reading.Lines.Select(line => line with { Text = PaddleOcr.LatinOnly(line.Text) }).Where(line => line.Text.Length > 0));
+        return new Reading(reading.Lines.Select(line => line with
+        {
+            Text = PaddleOcr.LatinOnly(line.Text),
+            Words = line.Words?.Select(word => word with { Text = PaddleOcr.WithoutCjk(word.Text) }).Where(word => word.Text.Length > 0).ToList(),
+        }).Where(line => line.Text.Length > 0));
     }
 
     private sealed class Engine(InferenceSession detection, InferenceSession recognition, string[] characters, string device) : IDisposable
@@ -163,6 +176,8 @@ public sealed class PaddleOcrReader : ITextReader
             var crops = boxes.Select(box => PaddleOcr.CropBox(image, box)).ToList();
             var order = Enumerable.Range(0, crops.Count).OrderBy(i => (double)crops[i].Width / Math.Max(1, crops[i].Height)).ToList();
             var texts = new (string Text, double Confidence)[crops.Count];
+            // Sözcüklerin satır kesitindeki yerleri (piksel); kumanda simgesini bulmaya yarar (ButtonIcons).
+            var words = new IReadOnlyList<(string Text, double Left, double Right)>[crops.Count];
             for (var start = 0; start < order.Count; start += PaddleOcr.RecognitionBatch)
             {
                 var batch = order.Skip(start).Take(PaddleOcr.RecognitionBatch).ToList();
@@ -173,7 +188,15 @@ public sealed class PaddleOcrReader : ITextReader
                 int steps = output.Dimensions[1], classes = output.Dimensions[2];
                 if (classes != characters.Length) throw new InvalidDataException($"model has {classes} classes, dictionary {characters.Length}");
                 for (var n = 0; n < batch.Count; n++)
-                    texts[batch[n]] = PaddleOcr.Decode(output.Buffer.Span.Slice(n * steps * classes, steps * classes), steps, characters);
+                {
+                    var (text, confidence, places) = PaddleOcr.DecodeWithPlaces(output.Buffer.Span.Slice(n * steps * classes, steps * classes), steps, characters);
+                    texts[batch[n]] = (text, confidence);
+                    // Bir zaman adımı girdide width/steps piksel; satır PrepareRecognition'daki genişliğe ölçeklenmişti.
+                    var crop = crops[batch[n]];
+                    var resized = Math.Max(1, Math.Min(width, (int)Math.Ceiling(PaddleOcr.RecognitionHeight * ((double)crop.Width / Math.Max(1, crop.Height)))));
+                    var scale = (double)width / steps * crop.Width / resized;
+                    words[batch[n]] = [.. PaddleOcr.Words(places).Select(word => (word.Text, word.Left * scale, word.Right * scale))];
+                }
             }
 
             double width0 = image.Width, height0 = image.Height;
@@ -183,7 +206,12 @@ public sealed class PaddleOcrReader : ITextReader
                 var (text, confidence) = texts[i];
                 if (confidence < PaddleOcr.MinConfidence || string.IsNullOrWhiteSpace(text)) continue;
                 var box = boxes[i];
-                lines.Add(new TextLine(text.Trim(), new TextBox(box.Left / width0, box.Top / height0, box.Right / width0, box.Bottom / height0), confidence));
+                var left = (double)(int)box.Left; // CropBox'un kestiği yer
+                var lineWords = words[i]?.Select(word => new TextWord(word.Text, new TextBox(
+                    Math.Clamp((left + word.Left) / width0, 0, 1), box.Top / height0,
+                    Math.Clamp((left + word.Right) / width0, 0, 1), box.Bottom / height0))).ToList();
+                lines.Add(new TextLine(text.Trim(), new TextBox(box.Left / width0, box.Top / height0, box.Right / width0, box.Bottom / height0), confidence,
+                                       Words: lineWords is { Count: > 0 } ? lineWords : null));
             }
             return new Reading(lines);
         }

@@ -16,6 +16,18 @@ enum Route: Hashable {
     case tvInstall, tvUpdate
 }
 
+extension Array where Element == Route {
+    /// Yığının tepesindeki ekran `route` ise onu kapatır; kapattıysa `true` döner. `removeLast()` yerine kullanılır:
+    /// kapanma animasyonu sürerken düğmeye ikinci kez dokunulunca (ya da geri kaydırmayla aynı anda) yığın çoktan
+    /// boşalmış olur; `removeLast()` boş yığında uygulamayı kapatır, tepede başka ekran varsa onu da kapatırdı.
+    @discardableResult
+    mutating func pop(_ route: Route) -> Bool {
+        guard last == route else { return false }
+        removeLast()
+        return true
+    }
+}
+
 /// Turun vurguladığı öğeler.
 enum TourTarget: Int, CaseIterable {
     case start, target, packs, profile
@@ -54,22 +66,42 @@ struct HomeHeader: View {
 // MARK: - 8 Ana ekran
 
 /// Apple çevirisinin dil paketi henüz indirilmedi: "İndir" sistemin indirme penceresini açar.
+/// `.translationTask` yalnız yapılandırma değişince çalışır: eskiden ikinci basış aynı yapılandırmayı verdiği için hiçbir
+/// şey olmuyor, hata da `try?` ile yutuluyordu (TestFlight). Her basışta yapılandırma geçersiz kılınıp görev yeniden
+/// başlatılır, hata karonun altında söylenir.
 @available(iOS 26, *)
 private struct LanguagePackTile: View {
     @EnvironmentObject private var model: PhoneModel
     @State private var download: TranslationSession.Configuration?
+    @State private var working = false
+    @State private var error: String?
 
     var body: some View {
         Tile {
             Text("The English–Turkish language pack is not downloaded yet.").font(Mobile.TypeScale.headline)
             Button("Download") {
-                download = TranslationSession.Configuration(source: Locale.Language(identifier: model.settings.sourceLanguage),
-                                                            target: Locale.Language(identifier: model.settings.targetLanguage))
+                error = nil
+                working = true
+                let source = Locale.Language(identifier: model.settings.sourceLanguage)
+                let target = Locale.Language(identifier: model.settings.targetLanguage)
+                if download?.source == source, download?.target == target {
+                    download?.invalidate()
+                } else {
+                    download = TranslationSession.Configuration(source: source, target: target)
+                }
             }
             .buttonStyle(.mobileSecondary)
+            .disabled(working)
+            if let error { MobileNote(text: error) }
         }
         .translationTask(download) { session in
-            try? await session.prepareTranslation()
+            do {
+                try await session.prepareTranslation()
+            } catch {
+                self.error = String(format: String(localized: "The language pack could not be downloaded (%@). Try again, or download it in Settings › Apps › Translate."),
+                                    error.localizedDescription)
+            }
+            working = false
             await model.refreshTranslatorStatus()
         }
     }
@@ -130,9 +162,13 @@ struct HomeScreen: View {
             if model.translatorStatus == .needsDownload, #available(iOS 26, *) {
                 LanguagePackTile()
             }
+            if model.readingStuck {
+                MobileNote(text: String(localized: "Text reading got stuck. It usually recovers within a minute or two: the system prepares its text model after the first launch or an update. Keep CouchSubs open. If it doesn't recover, close CouchSubs and open it again."))
+            }
             if model.translatorStatus == .unsupported, !Translator.isAvailable {
                 MobileNote(text: String(localized: "Apple's free translation needs iOS 26 or later. Game packs, DeepL and AI translation work on this device."))
             }
+            DeveloperSignature()
         } bottom: {
             Button {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -178,6 +214,8 @@ struct HomeScreen: View {
 
     private var targetName: String {
         if model.settings.output == .computer { return String(localized: "This phone") }
+        if model.settings.output == .obs { return String(localized: "OBS only (stream)") }
+        if model.settings.output == .both, model.hasTV { return String(format: String(localized: "%@ and this phone"), model.tv?.name ?? "TV") }
         return model.hasTV ? model.tv?.name ?? "TV" : String(localized: "Not set up")
     }
 
@@ -215,11 +253,34 @@ struct RunningScreen: View {
             } else {
                 if model.sessionState != .streaming {
                     MobileNote(text: model.ps5StatusText, tone: Mobile.Palette.secondary)
+                    // Oturum yeniden denemeyi bıraktıysa hemen, süren denemelerde 45 sn sonra: uygulamayı kapatıp açmadan
+                    // bağlantı baştan kurulur (ReconnectOffer; Android ile aynı).
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        if model.offersReconnect(now: context.date) {
+                            Button { model.reconnect() } label: { Label("Reconnect", systemImage: "arrow.clockwise") }
+                                .buttonStyle(MobileButtonStyle(kind: .secondary, compact: true))
+                        }
+                    }
                 }
-                // İlk altyazı gelene kadar: kolu açınca PS5'te ana hesap seçilmeli (GitHub #231).
-                if model.recentLines.isEmpty && !model.isXbox {
-                    MobileNote(text: String(localized: "When you turn on the controller to play, choose your MAIN account on the PS5. Don't play with the second account CouchSubs signs in with, or the controller won't work in the game."),
+                // İlk altyazı gelene kadar ve bağlantı koptuğunda: kolu açınca PS5'te ana hesap seçilmeli (GitHub #231).
+                if MainAccountTip.isVisible(ps5: !model.isXbox, demo: model.demoMode, hasSubtitle: !model.recentLines.isEmpty,
+                                            streaming: model.sessionState == .streaming) {
+                    MobileNote(text: String(localized: "To play without the connection dropping: 1. On the PS5, start the game with your MAIN account first. 2. Then start translating. 3. Don't switch users during the game; when you turn on the controller, choose your MAIN account. Don't play with the second account CouchSubs signs in with, or the controller will turn off by itself or won't work in the game."),
                                tone: Mobile.Palette.secondary)
+                }
+                // Görüntü bir dakikadır geliyor ama hiç altyazı satırı okunmadı (GitHub #503, #566, #572; SubtitleOffTip).
+                // Otomatik ekran yazısı beta.63'te açık geliyordu; bir kez kapatıldı, kullanıcıya söylenir.
+                if model.showsAutoScreenTextNotice {
+                    MobileNote(text: String(localized: "Automatic on-screen text translation is experimental; you can turn it on in Settings."),
+                               tone: Mobile.Palette.secondary)
+                }
+                if model.showsSubtitleOffTip {
+                    MobileNote(text: String(localized: "Turn on the game's own subtitles: CouchSubs reads the English subtitles on screen, not the audio."),
+                               tone: Mobile.Palette.secondary)
+                    if model.settings.watchSubtitleBackground {
+                        MobileNote(text: String(localized: "“Watch subtitle background” is on: only text on GTA 6’s dark subtitle panel is read. Set the game’s subtitle background to Solid or turn this setting off."),
+                                   tone: Mobile.Palette.secondary)
+                    }
                 }
                 GameSection(choice: model.gameChoice, areas: model.gameAreas)
             }
@@ -281,12 +342,38 @@ struct RunningScreen: View {
                 }
                 Tile {
                     Text(model.settings.output.showsOnTV ? "TV" : "Screen").font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
-                    Text(verbatim: model.settings.output.showsOnTV ? model.tvStatusText : String(localized: "This phone"))
+                    Text(verbatim: model.settings.output.showsOnTV ? model.tvStatusText
+                         : model.settings.output == .obs ? String(localized: "OBS only (stream)") : String(localized: "This phone"))
                         .font(Mobile.TypeScale.title).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
             }
-            Text("Keep CouchSubs open on the screen while you play. iOS stops the connection when the app goes to the background; the screen stays on while translating.")
-                .font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
+            // TV uygulaması bağlı değil: CouchSubs TV'de nerede bulunur (markaya göre), otomatik açma neden olmadı ve
+            // "Otomatik açmayı dene" (Windows, Mac ve Android ile aynı).
+            if model.settings.output.showsOnTV, !model.demoMode, model.tvClients == 0, let tv = model.tv {
+                Tile {
+                    Text(LocalizedStringKey(TVOpenText.openOnTV(tv.brand))).font(Mobile.TypeScale.body)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let reason = TVOpenText.reason(model.tvOpenProblem) {
+                        MobileNote(text: String(localized: String.LocalizationValue(reason)))
+                    }
+                    Button { model.retryTVOpen() } label: { Label(LocalizedStringKey(TVOpenText.tryButton), systemImage: "arrow.clockwise") }
+                        .buttonStyle(MobileButtonStyle(kind: .secondary, compact: true))
+                }
+            }
+            // TV uygulaması 30 saniyede bağlanmadıysa ne yapılacağı (tanı satırı günlüklere yazılır).
+            if model.settings.output.showsOnTV, model.tvWaitingLong, model.tvClients == 0 {
+                MobileNote(text: String(localized: "The TV app has not connected. Open CouchSubs on the TV and keep the phone and the TV on the same Wi-Fi (not a guest network). If the TV shows a 6-digit code, approve it in the window that opens on this phone. If it still waits, check that CouchSubs is allowed in Settings › Privacy & Security › Local Network on this iPhone, then stop and start translating again."))
+            } else if model.settings.output.showsOnTV, model.testTVNotConnected, model.tvClients == 0 {
+                // "Test on TV" TV'ye gitmedi: TV'deki 6 haneli kod bir yere yazılmaz, bu telefonda onaylanır.
+                MobileNote(text: String(localized: "The test subtitle did not reach the TV because the TV app is not connected. Open CouchSubs on the TV. If the TV shows a 6-digit code, don't type it anywhere: approve it in the “Pair this TV?” window that opens on this phone, then test again."))
+            }
+            // "Arka planda sürdür (Resim içinde resim)": bu önizleme uygulamadan çıkınca küçük pencereye geçer (BackgroundPiP).
+            if model.backgroundPiP && BackgroundPiP.isSupported {
+                BackgroundPiPTile()
+            } else {
+                Text("Keep CouchSubs open on the screen while you play, or turn on “Keep translating in the background” in Profile. iOS stops the connection when the app goes to the background; the screen stays on while translating.")
+                    .font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
+            }
         } bottom: {
             // İkincil eylemler tek satırda küçük düğmeler; "Çeviriyi durdur" altta tam genişlikte.
             if model.settings.output.showsOnComputer || model.settings.output.showsOnTV || model.sessionState == .streaming {
@@ -333,24 +420,79 @@ struct RunningScreen: View {
     }
 }
 
+/// Çalışma ekranındaki canlı önizleme: oyun görüntüsü ve canlı altyazı. Uygulamadan çıkınca aynı görüntü Resim içinde
+/// resim penceresinde sürer; düğme pencereyi hemen açar.
+struct BackgroundPiPTile: View {
+    @ObservedObject private var pip = BackgroundPiP.shared
+
+    var body: some View {
+        Tile {
+            PiPPreview()
+                .aspectRatio(16 / 9, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: Mobile.Radius.control))
+                .accessibilityHidden(true)
+            Text("If you leave CouchSubs, this picture and the live subtitle continue in a small window and translation keeps going. If you close the small window, iOS pauses CouchSubs.")
+                .font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if pip.isPossible && !pip.isActive {
+                Button { pip.startManually() } label: { Label("Open small window", systemImage: "pip.enter") }
+                    .buttonStyle(MobileButtonStyle(kind: .secondary, compact: true))
+            }
+        }
+    }
+}
+
 // MARK: - 10 Yatay altyazı ekranı
 
 struct SubtitleScreen: View {
     @EnvironmentObject private var model: PhoneModel
     @Environment(\.dismiss) private var dismiss
-    @State private var savedBrightness: CGFloat?
+    /// Ekran yatay mı; "Ekranı döndür" düğmesi dikeye ve geri çevirir.
+    @State private var landscape = true
+    /// Bu açılışın döndürme numarası (`Orientation.hold`).
+    @State private var orientationToken = 0
+    /// Parmakla verilen yazı boyu çarpanı ve yer (varsayılan yerden ekran yüksekliğine oranla kaydırma); kalıcıdır, TV'nin
+    /// yazı boyuna dokunmaz (bkz. PhoneSubtitleLayout; Android'de aynı ayarlar).
+    @AppStorage("couchsubs.phoneSubtitleScale") private var phoneScale = 1.0
+    @AppStorage("couchsubs.phoneSubtitleOffset") private var phoneOffset = 0.0
+    @GestureState private var dragged: CGFloat = 0
+    @GestureState private var pinched: CGFloat = 1
+    @State private var screenHeight: CGFloat = 0
+
+    /// Sürükleme ve iki parmak hareketi sürerken anlık değerler; bitince kaydedilir.
+    private var liveScale: Double { PhoneSubtitleLayout.scale(from: phoneScale, magnification: Double(pinched)) }
+    private var liveOffset: Double { PhoneSubtitleLayout.offset(from: phoneOffset, moved: Double(dragged), height: Double(screenHeight)) }
+
+    private var placeGesture: some Gesture {
+        SimultaneousGesture(
+            DragGesture(minimumDistance: 10)
+                .updating($dragged) { value, state, _ in state = value.translation.height }
+                .onEnded { value in
+                    phoneOffset = PhoneSubtitleLayout.offset(from: phoneOffset, moved: Double(value.translation.height), height: Double(screenHeight))
+                },
+            MagnificationGesture()
+                .updating($pinched) { value, state, _ in state = value }
+                .onEnded { value in phoneScale = PhoneSubtitleLayout.scale(from: phoneScale, magnification: Double(value)) })
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
             Color.black.ignoresSafeArea()
+                .background(GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { screenHeight = proxy.size.height }
+                        .onChange(of: proxy.size.height) { screenHeight = $0 }
+                })
             VStack(spacing: Mobile.Space.inline) {
                 ForEach(Array(model.phoneLines.enumerated()), id: \.element.id) { index, line in
                     // Uzun çeviri en çok 3 satıra dengeli bölünür; sığmazsa yazı biraz küçülür (bkz. SubtitleWrap).
                     let wrapped = line.wrapped
-                    Text(verbatim: wrapped.text)
+                    // Önceki satır soldurulmaz, ikincil yazı renginde olur (TASARIM.md › Yazı). Konuşana göre renk
+                    // açıksa güncel satırdaki "Mattia: …" o konuşanın renginde (bkz. SpeakerColors).
+                    let previous = index < model.phoneLines.count - 1
+                    Self.subtitleText(wrapped.text, colored: model.settings.speakerColors && !previous && !line.paragraphs,
+                                      base: previous ? Mobile.Palette.secondary : textColor, book: model.speakerBook)
                         .font(Mobile.TypeScale.subtitle(landscape: true, scale: scale * CGFloat(wrapped.scale)))
-                        // Önceki satır soldurulmaz, ikincil yazı renginde olur (TASARIM.md › Yazı).
-                        .foregroundStyle(index < model.phoneLines.count - 1 ? Mobile.Palette.secondary : textColor)
                         .opacity(line.fading ? 0.4 : 1)
                         .multilineTextAlignment(.center)
                         .minimumScaleFactor(0.5)
@@ -358,9 +500,15 @@ struct SubtitleScreen: View {
             }
             .padding(.horizontal, Mobile.Space.screen)
             .padding(.bottom, Mobile.Space.screen * 2)
+            // Parmakla yukarı ya da aşağı taşınır (ekranın en çok %40'ı); yazı ekrandan çıkmaz.
+            .offset(y: CGFloat(liveOffset) * screenHeight)
             // Ek alanların (görev, telefon, bildirim) çevirisi oyundaki yerinde küçük kutuda (TV'deki gibi).
             GeometryReader { proxy in
-                ForEach(model.phoneRegions) { region in
+                // "Ekranı çevir" ekrandayken onun yazılarının yerindeki ek alan kutusu çizilmez: aynı yazı iki kez üst üste
+                // görünmesin (#827).
+                ForEach(model.phoneRegions.filter { region in
+                    region.box.map { box in !model.screenItems.contains { ScreenTranslation.overlap(box, $0.box) >= ScreenTranslation.coverShare } } ?? true
+                }) { region in
                     let box = region.box ?? TextBox(left: 0.6, top: 0.05, right: 0.95, bottom: 0.2)
                     Text(verbatim: region.text)
                         .font(Mobile.TypeScale.caption)
@@ -373,36 +521,80 @@ struct SubtitleScreen: View {
                 }
             }
             .allowsHitTesting(false)
-            // "Ekranı çevir" sonuçları: her çeviri kendi yazısının yerinde ve aynı boyda (TV'deki gibi).
+            // "Ekranı çevir" sonuçları: her çeviri kendi yazısının yerinde, aynı boyda ve özgün yazının stilinde (zemin ve
+            // yazı rengi, kalınlık, hiza; TV'deki gibi). GTA 6 telefonunun yazıları yanında mesaj kartı olarak gelir.
             GeometryReader { proxy in
                 ForEach(Array(model.screenItems.enumerated()), id: \.offset) { _, item in
                     let box = item.box
-                    let width = max(60, proxy.size.width * (box.right - box.left))
+                    let backdrop = ScreenPhoneCard.isBackdrop(item)
+                    let width = backdrop ? proxy.size.width * (box.right - box.left) : max(60, proxy.size.width * (box.right - box.left))
+                    let height = proxy.size.height * (box.bottom - box.top)
                     let size = max(10, min(28, proxy.size.height * item.lineHeight * 0.8))
-                    Text(verbatim: item.translation)
-                        .font(.system(size: size, weight: .semibold))
-                        .foregroundStyle(Mobile.Palette.text)
-                        .multilineTextAlignment(.leading)
+                    let alignment: TextAlignment = switch item.look?.align {
+                    case .center: .center
+                    case .right: .trailing
+                    default: .leading
+                    }
+                    let frameAlignment: Alignment = switch item.look?.align {
+                    case .center: .center
+                    case .right: .trailing
+                    default: .leading
+                    }
+                    Text(verbatim: backdrop ? "" : item.translation)
+                        .font(.system(size: size, weight: item.look?.bold == true ? .bold : .semibold))
+                        .foregroundStyle(Self.screenColor(item.style?.foreground) ?? Mobile.Palette.text)
+                        .multilineTextAlignment(alignment)
                         .padding(4)
-                        .frame(width: width, alignment: .leading)
-                        .background(Color.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 4))
+                        .frame(width: width, alignment: frameAlignment)
+                        .frame(minHeight: backdrop ? height : 0)
+                        .background((Self.screenColor(item.style?.background) ?? .black).opacity(item.look == nil ? 0.85 : 1),
+                                    in: RoundedRectangle(cornerRadius: 4))
                         .fixedSize(horizontal: false, vertical: true)
                         .position(x: proxy.size.width * box.left + width / 2,
                                   y: proxy.size.height * (box.top + box.bottom) / 2)
                 }
             }
             .allowsHitTesting(false)
-            Text("The screen stays on · brightness is lowered automatically")
-                .font(Mobile.TypeScale.caption)
-                .foregroundStyle(Mobile.Palette.tertiary)
-                .padding(.bottom, Mobile.Space.inline)
+            VStack(spacing: 2) {
+                Text("Drag the subtitle up or down; pinch to change the text size.")
+                Text("The screen stays on · brightness is lowered automatically")
+            }
+            .font(Mobile.TypeScale.caption)
+            .foregroundStyle(Mobile.Palette.tertiary)
+            .multilineTextAlignment(.center)
+            .padding(.bottom, Mobile.Space.inline)
+            .allowsHitTesting(false)
         }
+        .contentShape(Rectangle())
+        .gesture(placeGesture)
         .overlay(alignment: .topLeading) {
-            MobilePill(text: statusText, live: model.sessionState == .streaming)
-                .padding(Mobile.Space.screen)
+            VStack(alignment: .leading, spacing: Mobile.Space.inline) {
+                MobilePill(text: statusText, live: model.sessionState == .streaming)
+                if model.sessionState != .streaming {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        if model.offersReconnect(now: context.date) {
+                            Button { model.reconnect() } label: { Label("Reconnect", systemImage: "arrow.clockwise") }
+                                .buttonStyle(MobileButtonStyle(kind: .secondary, compact: true))
+                        }
+                    }
+                }
+                // "Arka planda sürdür" açıkken küçük önizleme: bu ekrandan çıkınca da görüntü küçük pencerede sürer.
+                if model.backgroundPiP && BackgroundPiP.isSupported {
+                    PiPPreview()
+                        .frame(width: 112, height: 63)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .accessibilityHidden(true)
+                }
+            }
+            .padding(Mobile.Space.screen)
         }
         .overlay(alignment: .topTrailing) {
             HStack(spacing: Mobile.Space.inline) {
+                // Telefon kendiliğinden dönmezse (yön kilidi, iOS isteği geri çevirdi) elle döndürülür (#559).
+                IconButton(symbol: "rotate.right", label: "Rotate screen") {
+                    landscape.toggle()
+                    Orientation.request(Orientation.subtitleMask(landscape: landscape))
+                }
                 if model.sessionState == .streaming {
                     IconButton(symbol: model.screenState == .idle ? "text.viewfinder" : "xmark.circle",
                                label: model.screenState == .idle ? "Translate screen" : "Remove screen translations") {
@@ -416,12 +608,12 @@ struct SubtitleScreen: View {
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
         .onAppear {
+            landscape = true
+            orientationToken = Orientation.hold()
             Orientation.request(.landscape)
-            dim(true)
         }
         .onDisappear {
-            Orientation.request(.portrait)
-            dim(false)
+            Orientation.release(orientationToken)
         }
     }
 
@@ -435,7 +627,13 @@ struct SubtitleScreen: View {
         return model.packsActive ? String(localized: "PS5 connected · ready translation") : String(localized: "PS5 connected")
     }
 
-    private var scale: Double { Double(model.settings.style.fontSize) / Double(SubtitleStyle().fontSize) }
+    private var scale: Double { Double(model.settings.style.fontSize) / Double(SubtitleStyle().fontSize) * liveScale }
+
+    /// "#RRGGBB" → renk; geçersizse nil.
+    private static func screenColor(_ hex: String?) -> Color? {
+        guard let hex, let rgb = SpeakerColors.rgb(hex) else { return nil }
+        return Color(.sRGB, red: rgb.red, green: rgb.green, blue: rgb.blue)
+    }
 
     private var textColor: Color {
         switch model.settings.style.textColor {
@@ -444,24 +642,74 @@ struct SubtitleScreen: View {
         }
     }
 
-    /// Altyazı ekranı açıkken parlaklık kısılır (pil ve göz); kapanınca eski değer döner.
-    private func dim(_ on: Bool) {
-        guard let screen = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.screen }).first else { return }
-        if on {
-            savedBrightness = screen.brightness
-            screen.brightness = min(screen.brightness, 0.4)
-        } else if let savedBrightness {
-            screen.brightness = savedBrightness
+    /// Konuşana göre renkli altyazı: adlı satır (bölünmüş devamıyla) konuşanın renginde, diğerleri `base` renginde.
+    private static func subtitleText(_ text: String, colored: Bool, base: Color, book: SpeakerColorBook? = nil) -> Text {
+        guard colored else { return Text(verbatim: text).foregroundColor(base) }
+        return SpeakerColors.segments(in: text, book: book).reduce(Text(verbatim: "")) { result, segment in
+            let rgb = segment.color.flatMap(SpeakerColors.rgb)
+            let color = rgb.map { Color(.sRGB, red: $0.red, green: $0.green, blue: $0.blue) } ?? base
+            return result + Text(verbatim: segment.text).foregroundColor(color)
         }
     }
+
+    // Parlaklık kısılmaz: altyazı ekranı açıkken parlaklık 0,4'e indiriliyordu, kullanıcı ekranı karanlık buluyordu (#559).
+    // Ekran çeviri sürerken zaten kararmaz (PhoneModel.keepScreenAwake).
 }
 
-/// Altyazı ekranı açılınca telefon yataya döner.
+/// Altyazı ekranı açılınca telefon yataya döner. Uygulamanın izin verdiği yönler (`allowed`, AppDelegate okur) önce
+/// isteğe daraltılır, sonra iOS'tan dönüş istenir: yalnız `requestGeometryUpdate` çağrısı ekran sunulurken bazı
+/// telefonlarda geri çevriliyor, ekran dik kalıyordu (#559).
+@MainActor
 enum Orientation {
-    @MainActor
+    /// Uygulamanın genelde izin verdiği yönler (Info.plist ile aynı: dik ve iki yatay).
+    static let standard: UIInterfaceOrientationMask = .allButUpsideDown
+    /// AppDelegate `supportedInterfaceOrientationsFor` ile bunu döner.
+    static var allowed: UIInterfaceOrientationMask = standard
+
+    /// "Ekranı döndür" düğmesinin istediği yön.
+    nonisolated static func subtitleMask(landscape: Bool) -> UIInterfaceOrientationMask { landscape ? .landscape : .portrait }
+
+    /// Altyazı ekranının her açılışı yeni bir numara alır. Kapatıp hemen yeniden açınca eski ekranın `onDisappear`'ı yeni
+    /// ekranın `onAppear`'ından sonra gelebiliyor; eskiden bu geç `release` yeni ekranı dike çeviriyor, ekran yan dönmüyordu
+    /// (TestFlight, X). Eski ekranın bırakması artık yalnız kendi isteğini geri alır.
+    private static var holder = 0
+
+    /// Altyazı ekranı açıldı: döndürmeyi bu ekran yönetir; dönen numara `release(_:)`'e verilir.
+    static func hold() -> Int {
+        holder += 1
+        return holder
+    }
+
     static func request(_ mask: UIInterfaceOrientationMask) {
-        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
-        scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
+        allowed = mask
+        apply(mask)
+        // Ekran sunulma animasyonu sürerken gelen istek yok sayılabiliyor: kısa süre sonra bir kez daha istenir.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            if allowed == mask { apply(mask) }
+        }
+    }
+
+    /// Altyazı ekranı kapandı: uygulama yine her yöne döner, telefon dike geçer. Bu arada yeni altyazı ekranı açıldıysa
+    /// (numara değiştiyse) onun yönüne dokunulmaz.
+    static func release(_ token: Int) {
+        guard token == holder else { return }
+        allowed = standard
+        apply(.portrait)
+    }
+
+    private static func apply(_ mask: UIInterfaceOrientationMask) {
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            for window in scene.windows {
+                var controller = window.rootViewController
+                while let current = controller {
+                    current.setNeedsUpdateOfSupportedInterfaceOrientations()
+                    controller = current.presentedViewController
+                }
+            }
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
+                RemotePlayLog.write("Ekran yönü değişmedi: \(error.localizedDescription)")
+            }
+        }
     }
 }
 

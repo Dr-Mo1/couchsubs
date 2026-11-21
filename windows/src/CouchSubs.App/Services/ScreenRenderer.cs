@@ -118,10 +118,11 @@ public static class ScreenRenderer
         public Task<byte[]> AccountIdFromRedirectAsync(Uri redirect) => Task.FromResult(new byte[8]);
         public Task<RegisteredConsole> RegisterAsync(string host, byte[] accountId, uint pin) => throw new NotSupportedException();
         public Task<IReadOnlyList<LgTv>> DiscoverTvsAsync() => Task.FromResult<IReadOnlyList<LgTv>>([new("[LG] webOS TV", "192.168.1.30")]);
-        public Task<TvPairing> PairTvAsync(LgTv tv, string? key, string server) => throw new NotSupportedException();
+        public Task<TvPairing> PairTvAsync(LgTv tv, string? key, string server, string accessKey) => throw new NotSupportedException();
         public IStreamSession MakeStream(RegisteredConsole console, byte[] accountId, string? loginPasscode) => throw new NotSupportedException();
         public IKeeper MakeKeeper(LgTv tv, string? key, IReadOnlyDictionary<string, string> parameters, Func<bool> appConnected, Action<LgTv> onMoved,
-                                  Action<string> onKey) => throw new NotSupportedException();
+                                  Action<string> onKey, Func<int?>? consolePort = null,
+                       Action<TvOpenProblem?>? onOpenResult = null) => throw new NotSupportedException();
         public string? BundledTvAppVersion => null;
         public Task<bool> IsDevModeOnAsync(string host) => Task.FromResult(false);
         public Task<string> FetchDevKeyAsync(string host, string passphrase) => throw new NotSupportedException();
@@ -130,7 +131,7 @@ public static class ScreenRenderer
         public Task<int?> RenewDevSessionAsync(string host, string devKey) => Task.FromResult<int?>(null);
         public BundledTvApp? BundledApp(TvBrand brand) => null;
         public Task<bool> IsSamsungDevModeOnAsync(string host) => Task.FromResult(false);
-        public Task<(string Version, bool Installed)> InstallSamsungAppAsync(string host, BundledTvApp app, Action<TvInstallEvent> onEvent) => throw new NotSupportedException();
+        public Task<(string Version, bool Installed)> InstallSamsungAppAsync(string host, BundledTvApp app, bool openIfInstalled, Action<TvInstallEvent> onEvent) => throw new NotSupportedException();
         public Task<bool> IsAndroidDebugOnAsync(string host) => Task.FromResult(false);
         public Task<IReadOnlyList<string>> ScanAndroidTvsAsync() => Task.FromResult<IReadOnlyList<string>>([]);
         public Task<string> InstallAndroidAppAsync(string host, BundledTvApp app, bool openIfInstalled, Action<TvInstallEvent> onEvent) => throw new NotSupportedException();

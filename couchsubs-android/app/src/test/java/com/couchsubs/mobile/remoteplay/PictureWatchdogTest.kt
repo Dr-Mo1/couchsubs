@@ -8,18 +8,41 @@ import org.junit.Test
 
 /** Bağlıyken görüntü kesilince oturum yeniden kurulur (Mac/Windows ile aynı kural). */
 class PictureWatchdogTest {
+    /** Kopma günlüğündeki özet nedeni ayırır: görüntü son ana kadar geldi mi, önce dondu mu, hiç gelmedi mi. */
+    @Test
+    fun summaryTellsHowTheSessionEnded() {
+        val watchdog = PictureWatchdog()
+        assertNull(watchdog.summary(0))
+        watchdog.connected(10_000)
+        assertEquals("oturum 8 sn sürdü, hiç görüntü gelmedi", watchdog.summary(18_000))
+        watchdog.picture(11_000)
+        watchdog.picture(12_000)
+        assertEquals("oturum 17 sn sürdü, 2 görüntü geldi, sonuncusu 15.5 sn önce", watchdog.summary(27_500))
+        watchdog.ended()
+        assertNull(watchdog.summary(28_000))
+    }
+
     /**
      * Hata: istenen IDR karesi de bozuk gelince libchiaki yeniden istemiyor, bağlantı açık kalıp hiç kare gelmiyordu;
      * oturum hiç yeniden kurulmuyor, altyazı ancak uygulamayı kapatıp açınca dönüyordu.
      */
     @Test
-    fun connectedWithoutPictureForEightSecondsIsStalled() {
+    fun connectedWithoutPictureForFifteenSecondsIsStalled() {
         val watchdog = PictureWatchdog()
         watchdog.connected(0)
         for (second in 1..120) watchdog.picture(second * 1000L)
         // İki dakika görüntü geldi, sonra kesildi.
-        assertNull(watchdog.stalledMs(127_000))
-        assertEquals(PictureWatchdog.STALL_AFTER_MS, watchdog.stalledMs(128_000))
+        assertNull(watchdog.stalledMs(134_000))
+        assertEquals(PictureWatchdog.STALL_AFTER_MS, watchdog.stalledMs(135_000))
+    }
+
+    /** GitHub #593: libchiaki IDR'yi saniyede bir yeniden isterken 8-14 sn'lik boşluk oturumu kapatmaz. */
+    @Test
+    fun idrRetryWindowIsNotAStall() {
+        val watchdog = PictureWatchdog()
+        watchdog.connected(0)
+        watchdog.picture(1000)
+        assertNull(watchdog.stalledMs(15_000))
     }
 
     /** Olağan FEC duraklaması (IDR bir saniyeden kısa sürede gelir) oturumu yeniden kurdurmaz. */

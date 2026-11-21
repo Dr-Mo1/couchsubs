@@ -14,7 +14,18 @@ import java.util.Locale
  * Mac ve iPhone'daki GameSense.swift ve Windows'taki GameSense.cs ile aynı kurallar.
  */
 class GameSense {
-    enum class Source { CONSOLE, PACK, USER }
+    /**
+     * [REMEMBERED]: kullanıcının önceki bir çeviri oturumunda seçtiği oyun (uygulama açık kaldıkça kalır). Kayıtlı alanlar
+     * bu oyunda sessizce uygulanmaz, sorulur: kullanıcı başka oyuna geçip seçimi değiştirmediyse eski oyunun profili
+     * uygulanıyor, yeni oyunda yapılan alan değişiklikleri de eski oyunun profiline kaydediliyordu.
+     */
+    enum class Source { CONSOLE, PACK, USER, REMEMBERED }
+
+    /** Seçim bir çeviri oturumu sürerken yapıldı; sonraki oturumda [Source.REMEMBERED] sayılır. */
+    private var chosenWhileRunning = false
+    /** Seçim önceki bir oturumdan kaldı. */
+    private var carried = false
+    private var running = false
 
     private val lock = Any()
     private val recent = ArrayDeque<String?>()
@@ -32,7 +43,7 @@ class GameSense {
         get() = synchronized(lock) {
             when {
                 console != null -> Source.CONSOLE
-                chosen != null -> Source.USER
+                chosen != null -> if (carried) Source.REMEMBERED else Source.USER
                 pack != null -> Source.PACK
                 else -> null
             }
@@ -76,17 +87,28 @@ class GameSense {
     /** Kullanıcının seçimi ("Hangi oyunu oynuyorsunuz?" ya da "Değiştir"); null seçimi siler. */
     fun choose(name: String?) = synchronized(lock) {
         chosen = RunningGame.named(name)
+        chosenWhileRunning = running
+        carried = false
         asked = true
     }
 
-    /** Yeni çeviri oturumu: paket penceresi ve soru sıfırlanır; kullanıcının seçimi uygulama açık kaldıkça kalır. */
+    /**
+     * Yeni çeviri oturumu: paket penceresi ve soru sıfırlanır; kullanıcının seçimi uygulama açık kaldıkça kalır. Önceki
+     * oturumda yapılan seçim bu oturumda [Source.REMEMBERED] olur; çeviri dururken yapılan seçim (Ayarlar'da oyun profili
+     * seçildi) bu oturum içindir, [Source.USER] kalır.
+     */
     fun startSession() = synchronized(lock) {
         recent.clear()
         pack = null
         packId = null
         console = null
         asked = false
+        carried = chosen != null && chosenWhileRunning
+        running = true
     }
+
+    /** Çeviri oturumu bitti. */
+    fun endSession() = synchronized(lock) { running = false }
 
     /** Kart gösterilmeli mi: ayar açık, bu oturumda sorulmadı, oyun hiçbir yoldan bilinmiyor ve çeviri iki dakikadır sürüyor. */
     fun shouldAsk(runningForMs: Long, enabled: Boolean): Boolean = synchronized(lock) {
@@ -173,6 +195,10 @@ object GameCatalog {
         "Black Myth: Wukong", "Baldur's Gate 3", "Horizon Forbidden West", "Alan Wake 2",
         "Indiana Jones and the Great Circle", "Dying Light: The Beast", "Ghost of Tsushima", "Star Wars Outlaws",
         "The Witcher 3: Wild Hunt", "Monster Hunter Wilds", "Split Fiction", "Hollow Knight: Silksong",
+        "Marvel's Wolverine", "Assassin's Creed Mirage", "Assassin's Creed Valhalla", "Assassin's Creed Odyssey",
+        "Assassin's Creed Origins", "Call of Duty: Modern Warfare III", "Call of Duty: Modern Warfare II",
+        "Call of Duty: Warzone", "Resident Evil 4", "Resident Evil Village", "Resident Evil 2", "Resident Evil 3",
+        "Resident Evil 7: Biohazard", "Silent Hill 2", "The Last of Us Part I", "God of War",
     )
 
     /**
@@ -189,7 +215,41 @@ object GameCatalog {
         return (first + rest).take(limit)
     }
 
-    /** Paket listesinden oyun adları (ortak havuz paketi bir oyun değildir). */
+    /** Paket listesinden oyun adları (ortak havuz paketi ve asıl paketi olan oyunun "(ek satırlar)" paketi oyun değildir). */
     fun packGames(packs: List<GamePackLibrary.Info>): List<String> =
-        packs.filter { it.id != GameSense.GENERAL_PACK }.map { it.title }
+        packs.filter { it.id != GameSense.GENERAL_PACK && !it.title.endsWith("(ek satırlar)") }.map { it.title }
+
+    /** Havuzdan her gece üretilen ek paketin adındaki ek (server/pool/src/games.js EXTRA_SUFFIX). */
+    const val EXTRA_SUFFIX = " (ek satırlar)"
+
+    /**
+     * Paketler ekranındaki karolar: oyunun asıl paketi ve havuzdan gelen "(ek satırlar)" paketi tek karoda birleşir
+     * (#353: RDR2 ve Spider-Man 2 iki kez görünüyordu). Asıl paketi olmayan ek paket kendi karosunda kalır. Sıra korunur.
+     * Mac/iPhone ve Windows'taki GameCatalog.packShelf ile aynı.
+     */
+    fun <T> packShelf(packs: List<T>, id: (T) -> String, title: (T) -> String, entries: (T) -> Int): List<PackShelfItem> {
+        val items = mutableListOf<PackShelfItem>()
+        val index = HashMap<String, Int>()
+        for (pack in packs.filter { !title(it).endsWith(EXTRA_SUFFIX) }) {
+            index.putIfAbsent(GameName.key(title(pack)), items.size)
+            items += PackShelfItem(id(pack), title(pack), entries(pack), listOf(id(pack)), listOf(title(pack)))
+        }
+        for (pack in packs.filter { title(it).endsWith(EXTRA_SUFFIX) }) {
+            val at = index[GameName.key(title(pack).removeSuffix(EXTRA_SUFFIX))]
+            if (at != null) {
+                val main = items[at]
+                items[at] = main.copy(entries = main.entries + entries(pack), packIds = main.packIds + id(pack), titles = main.titles + title(pack))
+            } else {
+                items += PackShelfItem(id(pack), title(pack), entries(pack), listOf(id(pack)), listOf(title(pack)))
+            }
+        }
+        val order = HashMap<String, Int>()
+        packs.forEachIndexed { i, pack -> order.putIfAbsent(id(pack), i) }
+        return items.sortedBy { order[it.id] ?: 0 }
+    }
+
+    fun packShelf(packs: List<GamePackLibrary.Info>): List<PackShelfItem> = packShelf(packs, { it.id }, { it.title }, { it.entries })
 }
+
+/** Paketler ekranında bir oyun: kimliği ve adı asıl paketin; satır sayısı ve kimlikler ek paketle birlikte. */
+data class PackShelfItem(val id: String, val title: String, val entries: Int, val packIds: List<String>, val titles: List<String>)

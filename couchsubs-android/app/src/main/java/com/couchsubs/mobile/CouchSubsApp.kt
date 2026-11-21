@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
-/** Uygulama açılınca: Firebase ve Meta (varsa) ve paket yenilemesi. Hesap ve reklam yok; uygulama ve paketler ücretsiz. */
+/** Uygulama açılınca: Firebase ve Meta (varsa) ve paket yenilemesi. Hesap ve reklam SDK'sı yok (yalnız kendi ürünlerimizin tanıtımı, bkz. promo); uygulama ve paketler ücretsiz. */
 class CouchSubsApp : Application() {
     override fun onCreate() {
         super.onCreate()
@@ -33,6 +33,8 @@ object Services {
         private set
     lateinit var packStore: PackStore
         private set
+    /** Paket sunucusu: workers.dev, ulaşılamazsa yedek adres (couchsubs-packs.enmeraapps.com); çalışan adres hatırlanır. */
+    private val packServer by lazy { HttpPackServer(listOf(BuildConfig.PACKS_URL, BuildConfig.PACKS_FALLBACK_URL)) }
     /** Ayarlar › Oyun paketleri'nden içe aktarılan topluluk paketleri (yalnız bu telefonda; sunucuya gitmez). */
     lateinit var importedPacksDirectory: File
         private set
@@ -41,6 +43,22 @@ object Services {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     /** Paket listesi değişince (indirme) artar; ekranlar yeniden okur. */
     val packsVersion = MutableStateFlow(0)
+
+    /** Paket güncellemesinin durumu (iPhone'daki AppModel.PackStatus): Oyun paketleri ekranı gösterir. */
+    enum class PackStatus { IDLE, DOWNLOADING, READY, OFFLINE, FAILED }
+
+    /** Son paket güncellemesinin durumu; hata sessizce yutulmaz, ekranda yazar ("Paketleri güncelle" işe yaramıyor sanılıyordu). */
+    val packStatus = MutableStateFlow(PackStatus.IDLE)
+
+    /** Ağ hatası mı (ulaşılamadı) yoksa sunucu/doğrulama hatası mı. */
+    fun packStatus(error: Throwable): PackStatus =
+        if (error is com.couchsubs.mobile.packs.PackDownloadException && error.status == null) PackStatus.OFFLINE else PackStatus.FAILED
+
+    fun packStatus(result: PackStore.Refresh): PackStatus = when {
+        result.failed.isEmpty() -> PackStatus.READY
+        result.offline -> PackStatus.OFFLINE
+        else -> PackStatus.FAILED
+    }
 
     /** Xbox (Beta) Microsoft girişi ve jetonları: kullanıcı jetonu her yenilendiğinde Keystore'a yazılır. */
     val xboxAuth: com.couchsubs.mobile.xbox.XboxAuth by lazy {
@@ -72,7 +90,15 @@ object Services {
         historyWriter.execute { runCatching { history.save(file) } }
     }
 
+    /** Türkçe dublaj (telefonun kendi sesi; iPhone PhoneDubber ile aynı). Ayarlardaki "Dinle" çeviri dışında da çalar. */
+    private val dubberHolder = lazy { com.couchsubs.mobile.service.PhoneDubber(application) }
+    val dubber: com.couchsubs.mobile.service.PhoneDubber by dubberHolder
+    /** Dublaj hiç kullanılmadıysa ses motoru kurulmaz (oturum sonunda durdurmak için kurulmasın). */
+    val dubberIfCreated: com.couchsubs.mobile.service.PhoneDubber? get() = if (dubberHolder.isInitialized()) dubber else null
+    private lateinit var application: Application
+
     fun init(app: Application) {
+        application = app
         historyFile = File(app.filesDir, "history.json").also { file ->
             historyWriter.execute {
                 history = com.couchsubs.mobile.core.SubtitleHistory.load(file)
@@ -83,7 +109,7 @@ object Services {
         Backend.init(app)
         Meta.init(app)
         applyMeasurement()
-        packStore = PackStore(File(app.filesDir, "packs-remote"), HttpPackServer(BuildConfig.PACKS_URL.trimEnd('/')))
+        packStore = PackStore(File(app.filesDir, "packs-remote"), packServer, bundledHashes = { bundledPackHashes(app) })
         importedPacksDirectory = File(app.filesDir, "packs-imported")
         // Açılışta hemen, sonra uygulama açık kaldıkça günde bir yeni ve güncellenen paketlere bakılır (iPhone'daki gibi).
         refreshPacks(force = true)
@@ -103,11 +129,24 @@ object Services {
      */
     private fun reportPreviousExits(app: Application) {
         val duringTranslation = settings.translating
+        val lastHealth = settings.lastHealth
         settings.translating = false
         scope.launch(Dispatchers.IO) {
-            settings.lastExitReportAt = Backend.reportPreviousExits(app, settings.lastExitReportAt, duringTranslation)
+            settings.lastExitReportAt = Backend.reportPreviousExits(app, settings.lastExitReportAt, duringTranslation, lastHealth)
         }
     }
+
+    @Volatile private var bundledHashes: Map<String, String>? = null
+
+    /** Uygulamayla gelen paketlerin SHA-256'sı (kimlik → özet); bir kez hesaplanır, sürüm içinde değişmez. */
+    private fun bundledPackHashes(context: Context): Map<String, String> = bundledHashes ?: try {
+        (context.assets.list("packs") ?: emptyArray()).filter { GamePackLibrary.isPackFile(it) }.associate { name ->
+            GamePackLibrary.baseName(name) to PackStore.sha256(context.assets.open("packs/$name").use { it.readBytes() })
+        }
+    } catch (error: java.io.IOException) {
+        Log.w(TAG, "uygulamayla gelen paketler okunamadı", error)
+        emptyMap()
+    }.also { bundledHashes = it }
 
     /** Profil › Kullanım verisi değişince ya da karşılama geçilince (iPhone'daki gibi). */
     fun applyMeasurement() {
@@ -127,28 +166,71 @@ object Services {
      */
     fun refreshPacks(force: Boolean, maxAgeMs: Long = PackStore.REFRESH_INTERVAL_MS, onChanged: (() -> Unit)? = null) {
         if (BuildConfig.PACKS_URL.isBlank()) return
-        scope.launch(Dispatchers.IO) {
-            try {
-                val result = packStore.refresh(force, maxAgeMs)
-                if (result.downloaded.isNotEmpty() || result.removed.isNotEmpty()) onChanged?.invoke()
-                if (!result.skipped) packsVersion.value++
-            } catch (error: Exception) {
-                Log.w(TAG, "paketler", error)
-            }
-        }
+        if (force) packStatus.value = PackStatus.DOWNLOADING
+        scope.launch(Dispatchers.IO) { runRefresh(force, maxAgeMs, onChanged) }
     }
+
+    /**
+     * Oyun paketleri › "Paketleri güncelle": süresine bakmadan listeyi sunucudan (önbelleksiz, gerekirse yedek adresten)
+     * alır, değişen paketleri indirir ve neyin geldiğini özetler. [before]: ekrandaki kurulu paketler (kimlik → satır).
+     * Paket sunucusu yapılandırılmamışsa null.
+     */
+    suspend fun updatePacksNow(before: List<Pair<String, Int>>): com.couchsubs.mobile.packs.PackUpdateOutcome? {
+        if (BuildConfig.PACKS_URL.isBlank()) return null
+        packStatus.value = PackStatus.DOWNLOADING
+        val (result, error) = kotlinx.coroutines.withContext(Dispatchers.IO) {
+            // Çalışan çeviri hizmeti de yeni paketleri okusun (TranslationService'teki yenilemede olduğu gibi).
+            runRefresh(force = true, maxAgeMs = 0, onChanged = { onLocalPacksChanged?.invoke() })
+        }
+        return com.couchsubs.mobile.packs.PackUpdateOutcome.of(before, result, error)
+    }
+
+    /** Yenilemeyi şimdi yapar (bloklar); durumu ve ekranın sürümünü günceller. Sonuç ya da hata döner. */
+    private fun runRefresh(force: Boolean, maxAgeMs: Long, onChanged: (() -> Unit)?): Pair<PackStore.Refresh?, Throwable?> =
+        try {
+            val result = packStore.refresh(force, maxAgeMs)
+            if (result.downloaded.isNotEmpty() || result.removed.isNotEmpty()) onChanged?.invoke()
+            // "Yeni bir paket geldiğinde" (Profil; iPhone ile aynı): yeni ya da güncellenen paket bildirilir.
+            if (com.couchsubs.mobile.packs.PackNotice.shouldNotify(settings.notifyNewPacks, result.firstCheck, result.downloadedPacks.size,
+                    com.couchsubs.mobile.service.ConnectionAlert.appVisible()))
+                application.let { app -> com.couchsubs.mobile.packs.PackNotice.post(app, result.downloadedPacks.map { it.title }) }
+            if (!result.skipped) {
+                packStatus.value = packStatus(result)
+                if (result.failed.isNotEmpty()) Log.w(TAG, "paketler inemedi: ${result.failed}")
+                packsVersion.value++
+            }
+            result to null
+        } catch (error: Throwable) {
+            // Exception değil Throwable: bellek yetmezse (OutOfMemoryError) durum "güncelleniyor"da kalıyor, düğme bir
+            // daha basılamıyordu.
+            Log.w(TAG, "paketler", error)
+            packStatus.value = packStatus(error)
+            // Ekran yeniden okusun: sunucudaki liste alınamadıysa yalnız bu telefondakiler görünür.
+            packsVersion.value++
+            null to error
+        }
 
     /** Paket ekranında gösterilen oyun; [installed] false ise sunucuda var ama henüz inmedi. */
     data class CatalogEntry(val id: String, val title: String, val entries: Int, val installed: Boolean)
 
-    /** Bu telefondaki paketler ve sunucuda olup henüz inmemiş olanlar (bloklar). */
+    /** Bu telefondaki paketler ve sunucuda olup henüz inmemiş olanlar (bloklar). Sunucu listesi alınamazsa durum yazılır. */
     fun catalog(context: Context): List<CatalogEntry> {
         val local = packLibrary(context).infos
         val remote = if (BuildConfig.PACKS_URL.isBlank()) emptyList()
-        else runCatching { HttpPackServer(BuildConfig.PACKS_URL.trimEnd('/')).list() }.getOrDefault(emptyList())
-        return local.map { CatalogEntry(it.id, it.title, it.entries, true) } +
-            remote.filter { pack -> local.none { it.id == pack.id } }.map { CatalogEntry(it.id, it.title, it.entries, false) }
+        else try {
+            packServer.list()
+        } catch (error: Exception) {
+            Log.w(TAG, "paket listesi", error)
+            if (packStatus.value != PackStatus.DOWNLOADING) packStatus.value = packStatus(error)
+            emptyList()
+        }
+        return merge(local, remote)
     }
+
+    /** Kurulu paketler, ardından sunucuda olup henüz inmemiş olanlar (aynı kimlik bir kez). */
+    fun merge(local: List<GamePackLibrary.Info>, remote: List<com.couchsubs.mobile.packs.RemotePack>): List<CatalogEntry> =
+        local.map { CatalogEntry(it.id, it.title, it.entries, true) } +
+            remote.filter { pack -> local.none { it.id == pack.id } }.map { CatalogEntry(it.id, it.title, it.entries, false) }
 
     /**
      * Okuma hattının paket kitaplığı: uygulamayla gelen paketler, üstüne sunucudan inmiş yeni ya da güncel sürümler

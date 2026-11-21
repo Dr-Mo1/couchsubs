@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.update
 
 /** Okuma hattının arayüze gösterdiği durum (servis yazar, ekranlar okur). */
 data class LiveStatus(
+    val pairing: com.couchsubs.mobile.core.SubtitlePairing.Ticket? = null,
+    val legacyTv: Boolean = false,
     val running: Boolean = false,
     /** Deneme modu: görüntü konsoldan değil uygulamadaki örnek karelerden (bkz. TranslationService.startDemo). */
     val demo: Boolean = false,
@@ -15,7 +17,13 @@ data class LiveStatus(
     val phase: String = "",
     /** Konsol görüntüsü geliyor (oturum Streaming); arayüz [phase] metnini karşılaştırmak yerine buna bakar. */
     val streaming: Boolean = false,
+    /** Bağlantının gittiği an (duvar saati, ms; bağlıyken null): "Yeniden bağlan" düğmesi (bkz. ReconnectOffer). */
+    val notLiveSince: Long? = null,
+    /** Oturum yeniden denemeyi bıraktı: "Yeniden bağlan" hemen görünür. */
+    val gaveUp: Boolean = false,
     val connectedTvs: Int = 0,
+    /** TV uygulamasını kendiliğinden açmanın son denemesi neden olmadı (ana ekranda tek satır); açıldıysa null. */
+    val tvOpenProblem: com.couchsubs.mobile.tv.TvOpenProblem? = null,
     /** Son gösterilen çeviriler, yeniden eskiye. */
     val recent: List<ShownPair> = emptyList(),
     /** Telefon ekranında şu an gösterilen altyazı (yoksa boş). */
@@ -32,6 +40,10 @@ data class LiveStatus(
     val packInUse: String? = null,
     val error: String? = null,
     val framesReceived: Long = 0,
+    /** Görüntünün bu bağlantıda ilk geldiği an (duvar saati, ms); bağlı değilken null. */
+    val framesSince: Long? = null,
+    /** Görüntü bir dakikadır geliyor ama tek satır gösterilmedi: "oyunun kendi altyazısını açın" (bkz. SubtitleOffTip). */
+    val subtitleOffTip: Boolean = false,
     /** Okumanın başladığı an (duvar saati, ms); süre göstergesi için. */
     val startedAt: Long = 0,
     /** Seçili çeviri motorunun görünen adı ("DeepL", "Ücretsiz"). */
@@ -49,14 +61,30 @@ data class LiveStatus(
     val offeredAreaProfileGame: String? = null,
     /** Alanların kaydedilebileceği oyun (çeviri sürüyor ve oyun biliniyor). */
     val areaProfileTarget: String? = null,
+    /** Hedef oyunun kayıtlı alanları var ama uygulanmadı: "X için kaydet" yerine "Kayıtlı alanları kullan". */
+    val areaProfileTargetSaved: Boolean = false,
     /** Alanlar profilden geldi ya da geri döndü: açık Ayarlar ekranı alanları yeniden okur. */
     val areasVersion: Int = 0,
+    /** Oyun profilleri listesi değişti (eklendi, adı değişti, silindi, seçildi). */
+    val profilesVersion: Int = 0,
 ) {
     /**
      * Sunucunun olayı telefon ekranına: yeni satır öncekini üste iter; aynı cümlenin uzamış ya da düzelmiş okuması
      * (`replaces`) öncekinin yerine geçer, üste yığılmaz (TV ve iPhone ile aynı). Temizlenince ekran boşalır.
      */
     enum class ScreenState { IDLE, WORKING, SHOWN }
+
+    /** Kare sayacı güncellendi ([now]: duvar saati, ms): görüntü süresi ve "altyazıyı açın" ipucu yeniden hesaplanır. */
+    fun withFrames(frames: Long, now: Long): LiveStatus {
+        val since = com.couchsubs.mobile.remoteplay.SubtitleOffTip.framesSince(framesSince, streaming, framesReceived, frames, now)
+        return copy(framesReceived = frames, framesSince = since,
+            subtitleOffTip = running && !demo &&
+                com.couchsubs.mobile.remoteplay.SubtitleOffTip.visible(streaming, shownLines > 0, since?.let { now - it }))
+    }
+
+    /** Bağlantı durumu değişti: koptuysa görüntü süresi baştan sayılır, ipucu kalkar. */
+    fun withStreaming(streaming: Boolean): LiveStatus =
+        if (streaming) copy(streaming = true) else copy(streaming = false, framesSince = null, subtitleOffTip = false)
 
     fun phoneEvent(event: com.couchsubs.mobile.core.SubtitleEvent): LiveStatus = when (event) {
         is com.couchsubs.mobile.core.SubtitleEvent.Subtitle ->
@@ -81,6 +109,7 @@ object LiveState {
     fun shown(pair: ShownPair, packTitle: String?) = state.update {
         // Paketten gelen son satırın oyunu, oturum boyunca "… paketi kullanılıyor" olarak kalır.
         it.copy(recent = (listOf(pair) + it.recent).take(RECENT), packInUse = packTitle ?: it.packInUse,
-            shownLines = it.shownLines + 1, packLines = it.packLines + if (pair.origin == "paket") 1 else 0)
+            shownLines = it.shownLines + 1, packLines = it.packLines + if (pair.origin == "paket") 1 else 0,
+            subtitleOffTip = false)
     }
 }

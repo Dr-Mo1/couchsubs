@@ -20,6 +20,40 @@ public sealed partial class AndroidTvInstaller(string host, string keyDirectory,
     /// <summary>Kurulum sırasında TV'nin onay sorusunu göstermesi.</summary>
     public Action? OnApprovalNeeded { get; init; }
 
+    /// <summary>
+    /// Uygulama açılırken verilen başlatma parametreleri (webOS ve Samsung'daki gibi JSON, ör. <c>{"server":"http://…:8787"}</c>).
+    /// TV uygulaması bunu <c>params</c> ekinden okur; altyazı sunucusu 8787 dışında bir portta olsa da onu bulur (#617).
+    /// </summary>
+    public string? LaunchParams { get; init; }
+
+    /// <summary>Uygulamayı açan ADB komutu; <paramref name="launchParams"/> varsa <c>--es params '…'</c> ile.</summary>
+    public static string StartCommand(string? launchParams)
+    {
+        var command = $"shell:am start -n {PackageName}/.MainActivity";
+        // TV'de sh çalıştırır: değer tek tırnak içinde gider; tek tırnak ve satır sonu içeren değer hiç gönderilmez.
+        if (string.IsNullOrEmpty(launchParams) || launchParams.IndexOfAny(['\'', '\n', '\r', '\0']) >= 0) return command;
+        return $"{command} --es params '{launchParams}'";
+    }
+
+    /// <summary>
+    /// CouchSubs TV çalışıyor mu: etkinlik yığınlarındaki kayıtlar (ekran arka planda olsa da yığındadır) ve paketin
+    /// servisleri (katman). Mac/iPhone'daki AndroidTVApp.runningCommand ve Android telefondaki ile aynı.
+    /// </summary>
+    public const string RunningCommand =
+        $"shell:dumpsys activity activities | grep Hist; dumpsys activity services {PackageName} | grep ServiceRecord";
+
+    /// <summary>Uygulama zaten açıkken <see cref="OpenAsync"/>'in döndürdüğü sonuç (<c>am start</c> gönderilmedi).</summary>
+    public const string AlreadyRunning = "zaten açık";
+
+    /// <summary>
+    /// <see cref="RunningCommand"/> çıktısında CouchSubs TV'nin ekranı ya da katman servisi var mı. Boş ya da tanınmayan
+    /// çıktı (çok eski TV'de <c>grep</c> yok) çalışmıyor sayılır: eski yol, bekçinin açma sınırı yine geçerli.
+    /// </summary>
+    public static bool IsRunning(string output) =>
+        output.Split('\n').Any(line =>
+            ((line.Contains("Hist") && line.Contains("ActivityRecord{")) || line.Contains("ServiceRecord{"))
+            && line.Contains(PackageName + "/"));
+
     /// <summary>TV'de ADB açık mı (port yanıt veriyor mu)?</summary>
     public static async Task<bool> IsReachableAsync(string host, int port = DefaultPort, TimeSpan? timeout = null)
     {
@@ -98,7 +132,7 @@ public sealed partial class AndroidTvInstaller(string host, string keyDirectory,
             return (fromPlay, true);
         await InstallAsync(adb, apkPath, cancellationToken);
         await GrantOverlayAsync(adb, cancellationToken);
-        await adb.RunAsync($"shell:am start -n {PackageName}/.MainActivity", cancellationToken: cancellationToken);
+        await adb.RunAsync(StartCommand(LaunchParams), cancellationToken: cancellationToken);
         return (version, true);
     }
 
@@ -153,6 +187,63 @@ public sealed partial class AndroidTvInstaller(string host, string keyDirectory,
         return await adb.RunAsync($"exec:cmd package install -r -S {apk.Length}", apk, cancellationToken);
     }
 
+    /// <summary>
+    /// Kurulu uygulamayı bu bilgisayarın adresiyle açar (kurmadan, sessizce; çeviri başlarken bekçi çağırır). TV bu
+    /// bilgisayarı hiç onaylamadıysa onay sorusu beklenmez: <see cref="AndroidInstallError.NotApproved"/> fırlatılır.
+    /// ADB kapalıysa <see cref="AndroidInstallError.Unreachable"/>.
+    /// </summary>
+    /// <remarks>
+    /// Uygulama TV'de zaten çalışıyorsa (ekranı önde ya da arkada, ya da katmanı) <c>am start</c> gönderilmez ve
+    /// <see cref="AlreadyRunning"/> döner. X'te bildirildi (Android TV 8, beta.74): <c>am start</c> çalışan uygulamayı öne
+    /// çekiyor, TV uygulaması da parametreli açılışta kayıtlı katman tercihine dönüp ekranı kapatıyordu; kullanıcı
+    /// CouchSubs'ın ekranında HDMI seçemiyor, TV'nin kendi girişindeyken de CouchSubs öne geliyordu.
+    /// </remarks>
+    /// <returns><c>am start</c> çıktısı ya da <see cref="AlreadyRunning"/>.</returns>
+    public static async Task<string> OpenAsync(string host, string keyDirectory, string? launchParams, int port = DefaultPort,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await IsReachableAsync(host, port, TimeSpan.FromSeconds(2)))
+            throw new AndroidInstallException(AndroidInstallError.Unreachable, "ADB kapalı");
+        await using var adb = await AdbConnection.ConnectAsync(host, port, LoadOrCreateKey(keyDirectory),
+            () => throw new AndroidInstallException(AndroidInstallError.NotApproved, "onay gerekiyor"), cancellationToken: cancellationToken);
+        return await OpenOnAsync(adb, launchParams, cancellationToken);
+    }
+
+    /// <summary><see cref="OpenAsync"/>'in kurulmuş bağlantıdaki adımları: çalışıyorsa dokunmaz, değilse <c>am start</c>.</summary>
+    internal static async Task<string> OpenOnAsync(AdbConnection adb, string? launchParams, CancellationToken cancellationToken = default)
+    {
+        string running;
+        try
+        {
+            running = await adb.RunAsync(RunningCommand, cancellationToken: cancellationToken);
+        }
+        catch (Exception error) when (error is not OperationCanceledException and not AndroidInstallException)
+        {
+            running = "";
+        }
+        if (IsRunning(running))
+        {
+            // Çalışan uygulama bize bağlı değil (bekçi yalnız o zaman açar): kayıtlı eski bir adrese (bu bilgisayarın eski
+            // portu, başka bir CouchSubs) bağlı kalmış olabilir. Adres ekranı öne çekmeden bildirilir (TV 0.9.63+; eskisi yok sayar).
+            if (AddressCommand(launchParams) is { } address)
+            {
+                try { await adb.RunAsync(address, cancellationToken: cancellationToken); }
+                catch (Exception error) when (error is not OperationCanceledException and not AndroidInstallException) { }
+            }
+            return AlreadyRunning;
+        }
+        return (await adb.RunAsync(StartCommand(launchParams), cancellationToken: cancellationToken)).Trim();
+    }
+
+    /// <summary>
+    /// TV'de çalışan CouchSubs'a adresi bildiren yayın (TV uygulamasındaki AddressReceiver): ekranı öne çekmez, görüntü
+    /// modunu değiştirmez. Parametre yoksa ya da kabukta güvenle gönderilemiyorsa (tek tırnak, satır sonu) null.
+    /// Mac/iPhone ve Android telefondaki addressCommand ile aynı.
+    /// </summary>
+    public static string? AddressCommand(string? launchParams) =>
+        string.IsNullOrEmpty(launchParams) || launchParams.IndexOfAny(['\'', '\n', '\r', '\0']) >= 0 ? null
+            : $"shell:am broadcast -a {PackageName}.action.ADDRESS -n {PackageName}/.AddressReceiver --es params '{launchParams}'";
+
     private Task<AdbConnection> ConnectAsync(CancellationToken cancellationToken) =>
         AdbConnection.ConnectAsync(host, port, LoadOrCreateKey(keyDirectory), OnApprovalNeeded, cancellationToken: cancellationToken);
 
@@ -164,20 +255,46 @@ public sealed partial class AndroidTvInstaller(string host, string keyDirectory,
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "adbkey");
         var key = RSA.Create();
+        var corrupt = false;
         if (File.Exists(path))
         {
+            // Okuma hatası (G/Ç) yükselir: okunamayan anahtarın üstüne yenisi yazılmaz.
+            var pem = File.ReadAllText(path);
             try
             {
-                key.ImportFromPem(File.ReadAllText(path));
+                key.ImportFromPem(pem);
                 if (key.KeySize == 2048) return key;
             }
-            catch (CryptographicException) { /* bozuk dosya: yenisi üretilir */ }
+            catch (Exception error) when (error is CryptographicException or ArgumentException) { /* bozuk dosya: yenisi üretilir */ }
+            corrupt = true;
         }
         key.Dispose();
         key = RSA.Create(2048);
-        File.WriteAllText(path, key.ExportPkcs8PrivateKeyPem());
-        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        return key;
+        // Önce geçici dosyaya yazılır, sonra yerine taşınır: yarım kalan yazma anahtarı bozmaz. Aynı anda iki işlem (Mac'te
+        // kurulum yardımcısı ve bekçinin yardımcısı) anahtar üretirse ilk yazılan kalır, ikincisi onu okur; yoksa TV'nin
+        // onayladığı anahtarın üstüne başkası yazılır, TV yeniden sorar.
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        File.WriteAllText(temporary, key.ExportPkcs8PrivateKeyPem());
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        if (corrupt)
+        {
+            // Bozuk dosyanın yerine.
+            File.Move(temporary, path, overwrite: true);
+            return key;
+        }
+        try
+        {
+            File.Move(temporary, path, overwrite: false);
+            return key;
+        }
+        catch (IOException) when (File.Exists(path))
+        {
+            File.Delete(temporary);
+            key.Dispose();
+            var existing = RSA.Create();
+            existing.ImportFromPem(File.ReadAllText(path));
+            return existing;
+        }
     }
 
     [GeneratedRegex(@"versionName=(\S+)")]

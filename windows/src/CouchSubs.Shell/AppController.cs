@@ -44,8 +44,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private bool tvAppMissing;
     /// <summary>TV uygulaması denetimi sürüyor (bekleme ekranı ve çeviri başlangıcı aynı anda çağırabilir).</summary>
     private bool refreshingTvApp;
-    /// <summary>"TV uygulamasını yeniden kur"a basıldı: Android TV'de uygulama kuruluysa da TV'de açılır.</summary>
+    /// <summary>"TV uygulamasını yeniden kur"a basıldı: Samsung ve Android TV'de uygulama kuruluysa da TV'de açılır.</summary>
     private bool openTvAppAfterCheck;
+    /// <summary>Birden çok Android TV bulununca kullanıcının seçtiği TV; yalnız bir sonraki denetimde kullanılır. Kurulum
+    /// başarılı olursa TV'nin adresi zaten kaydedilir; olmazsa bir sonraki denemede yeniden sorulur (#425).</summary>
+    private string? androidTvChoice;
     private int? devModeHoursLeft;
     private UserSettings settings;
     private bool isRunning;
@@ -64,6 +67,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private Task? modelDownload;
 
     private SubtitleServer server = new(DefaultServerPort);
+
+    /// <summary>Oturumun konuşan renkleri (TV'ye gidenle aynı; bilgisayar ekranındaki pencereler buradan boyar).</summary>
+    public SpeakerColorBook SpeakerBook => server.SpeakerBook;
     private bool serverStarted;
     private IStreamSession? session;
     private IKeeper? keeper;
@@ -86,6 +92,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private string? dubbingError;
     private IReadOnlyList<GamePackLibrary.Info> installedPacks = [];
     private Timer? poolTimer;
+    private Timer? usageTimer;
+    /// <summary>Bu çeviri oturumunun kullanım verisi sayımı; çeviri yokken null.</summary>
+    private UsageSession? usageSession;
     /// <summary>Bağlıyken iki dakikada bir PS5'e çalışan oyunu sorar (havuza giden satırlar oyunla gider).</summary>
     private CancellationTokenSource? gameProbe;
     public static readonly TimeSpan GameProbeInterval = TimeSpan.FromMinutes(2);
@@ -119,6 +128,13 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         this.sleep = sleep;
         this.text = text;
         this.post = post;
+        var accessKey = store.Load<string>(StoreKeys.SubtitleAccessKey);
+        if (string.IsNullOrEmpty(accessKey))
+        {
+            accessKey = SubtitleAccess.CreateKey();
+            store.Save(StoreKeys.SubtitleAccessKey, accessKey);
+        }
+        server.RotateKey(accessKey);
         if (services.Xbox is { } xbox) xbox.TokenUpdated += OnXboxTokenUpdated;
         accountId = store.Load<byte[]>(StoreKeys.AccountId);
         console = store.Load<RegisteredConsole>(StoreKeys.Console);
@@ -132,11 +148,16 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             store.Save(StoreKeys.XboxConsole, xboxConsole);
         }
         tv =store.Load<LgTv>(StoreKeys.Tv);
+        LoadSamsungAppKnowledge();
         var loaded = settingsStore.Load();
         settings = loaded.WithCuratedModels() with
         {
             CpuTranslationThreads = CpuThreadOptions.Normalize(loaded.CpuTranslationThreads, Environment.ProcessorCount),
         };
+        // beta.63'te varsayılan açık gelen otomatik ekran yazısı bir kez kapatılır; açık olanlara bir kez söylenir.
+        (settings, ShowsAutoScreenTextNotice) = AutoScreenTextMigration.Apply(settings);
+        // Otomatik ekran yazısı kapalıyken hazır alanlar ve GTA 6 telefonu da bir kez kapatılır (altyazı dışında çeviri yok).
+        settings = ScreenTextExtrasMigration.Apply(settings);
         // Uygulama oturum sürerken kapandıysa oyunun profili açık kalmış olabilir: açılışta genel alanlar geri gelir.
         if (settings.ActiveAreaProfile is not null || settings.GeneralAreas is not null) settings = settings.WithGeneralAreas();
         services.Translation.SelectCpuThreads(settings.CpuTranslationThreads);
@@ -181,13 +202,68 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     {
         server.ClientsChanged += OnClientsChanged;
         server.EventSent += OnSubtitleEvent;
+        server.LegacyClientConnected += OnLegacyClient;
+        server.PairingRequested += OnPairingRequest;
         server.SendsToTv = settings.Output.ShowsOnTv();
+        server.SpeakerColors = settings.SpeakerColors;
+        server.SetApart = settings.SetTextApart;
     }
 
     private void DetachServer()
     {
         server.ClientsChanged -= OnClientsChanged;
         server.EventSent -= OnSubtitleEvent;
+        server.LegacyClientConnected -= OnLegacyClient;
+        server.PairingRequested -= OnPairingRequest;
+    }
+
+    public event Action<SubtitlePairing.Ticket>? TvPairingRequested;
+    /// <summary>
+    /// TV'nin eşleştirme isteği. Arayüze sunucudaki bekleyen istek verilir: olay arayüze ulaşana kadar istek yerini
+    /// yenisine bıraktıysa (TV'de Tamam ile yeniden denendi) yenisi gösterilir.
+    /// </summary>
+    private void OnPairingRequest(SubtitlePairing.Ticket ticket) => post(() => {
+        SubtitleLog.Write("TV eşleştirme istedi; onay bekleniyor");
+        if (server.Pairing.Pending is { } pending) TvPairingRequested?.Invoke(pending);
+    });
+    public bool ResolveTvPairing(string id, bool accept)
+    {
+        var resolved = server.Pairing.Resolve(id, accept);
+        SubtitleLog.Write($"TV eşleştirme isteği {(accept ? "onaylandı" : "reddedildi")}{(resolved ? "" : " (istek artık geçerli değil)")}");
+        return resolved;
+    }
+    /// <summary>
+    /// Onay bekleyen istek (yoksa null). Onaylanan istek artık geçerli değilse (süresi doldu, TV yeniden denedi) arayüz
+    /// bekleyen yeni isteği buradan gösterir (Mac ile aynı).
+    /// </summary>
+    public SubtitlePairing.Ticket? PendingTvPairing => server.Pairing.Pending;
+    /// <summary>Onay penceresini olay anında açamayan arayüzler (Linux paneli) isteğin hâlâ beklediğini buradan sorar.</summary>
+    public bool IsTvPairingPending(string id) => server.Pairing.Pending?.Id == id;
+    public async Task OpenTvPairingAsync()
+    {
+        await StartServerAsync();
+        server.Pairing.Open();
+        SubtitleLog.Write($"TV eşleştirme elle açıldı (2 dk); port={ServerPort}");
+    }
+    public bool LegacyTvWarning => server.HasLegacyClient;
+    public string ObsAddress => $"http://localhost:{ServerPort}/obs?k={server.AccessKey}";
+
+    private void OnLegacyClient() => post(() =>
+    {
+        SubtitleLog.Write("TV bağlantısı geçiş izniyle anahtarsız açıldı; TV uygulamasını güncelleyin.");
+        Changed(nameof(LegacyTvWarning));
+        _ = RefreshTvAppAsync();
+    });
+
+    public void RotateSubtitleKey()
+    {
+        var key = SubtitleAccess.CreateKey();
+        store.Save(StoreKeys.SubtitleAccessKey, key);
+        keeper?.Stop();
+        keeper = null;
+        server.RotateKey(key);
+        StartKeeper();
+        Changed(nameof(ObsAddress), nameof(NetworkObsAddress), nameof(SecondScreenAddress));
     }
 
     // --- Durum ---
@@ -202,6 +278,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             ClearFirewallPrompt();
             // Sihirbaz bitince ana ekran TV'siz de açılsın.
             if (value == OnboardingStep.Done) store.Save(StoreKeys.SetupComplete, true);
+            services.Usage?.Record(UsageStats.Event.Screen(ScreenName(value)));
+            if (value == OnboardingStep.Done && !demoMode)
+                services.Usage?.Record(UsageStats.Event.OnboardingDone(UsageTarget, UsageConsole));
         }
     }
     public int StepCount => (int)OnboardingStep.Done - (consoleKind == GameConsoleKind.Xbox ? 1 : 0);
@@ -209,7 +288,17 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public GameConsoleKind ConsoleKind => consoleKind;
     public bool ConsoleKindLocked => consoleKindLocked;
     public bool IsXbox => consoleKind == GameConsoleKind.Xbox;
-    public string ConsoleTitle => IsXbox ? "Xbox" : settings.FrameSource == FrameSource.CaptureWindow ? text["Selected window"] : "PS5";
+    public string ConsoleTitle => demoMode ? text["Demo mode"] : IsXbox ? "Xbox" : settings.FrameSource == FrameSource.CaptureWindow ? text["Selected window"] : "PS5";
+    /// <summary>
+    /// Ana ekrandaki "Görüntü kaynağı" satırının değeri: görüntünün nereden okunduğu, dokununca Ayarlar › Görüntü kaynağı
+    /// açılır. DM'de bildirildi: ayar yalnız Ayarlar'ın alt sıralarında olduğu için bulunamıyordu. Xbox'ta seçim yok, null.
+    /// </summary>
+    public string? PictureSourceTitle => IsXbox ? null : text[settings.FrameSource switch
+    {
+        FrameSource.RemotePlayWindow => "Remote Play window on this PC",
+        FrameSource.CaptureWindow => "OBS projector or game window",
+        _ => "The PS5 (second account)",
+    }];
     public bool HasXboxAccount => xboxToken is not null;
     public XboxConsole? SelectedXboxConsole => xboxConsole;
     public void SelectConsoleKind(GameConsoleKind kind)
@@ -219,6 +308,64 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         store.Save(StoreKeys.ConsoleKind, kind);
         Changed(nameof(ConsoleKind), nameof(IsXbox), nameof(ConsoleTitle), nameof(StepCount), nameof(StepNumber), nameof(CanStart), nameof(CanAdvance), nameof(Ps5StatusText));
     }
+    /// <summary>
+    /// Ayarlar › Konsol (Mac ConsoleSettingsCard / choosePlatform ile aynı): kurulumdan sonra da PS5 ile Xbox arasında
+    /// geçilir. Çeviri sürüyorsa durur ve yeni konsolla yeniden başlar (konsol hazırsa). Eskiden konsol türü kurulumda
+    /// kilitleniyordu; değiştirmenin tek yolu "Kurulumu sıfırla"ydı.
+    /// </summary>
+    public void ChangeConsoleKind(GameConsoleKind kind)
+    {
+        if (kind == consoleKind || kind == GameConsoleKind.Xbox && services.Xbox is null) return;
+        var wasRunning = isRunning && !demoMode;
+        if (wasRunning) StopForRestart();
+        consoleKind = kind;
+        store.Save(StoreKeys.ConsoleKind, kind);
+        RemotePlayLog.Note($"Konsol türü: {(kind == GameConsoleKind.Xbox ? "Xbox (Beta)" : "PlayStation 5")}");
+        Changed(nameof(ConsoleKind), nameof(IsXbox), nameof(ConsoleTitle), nameof(StepCount), nameof(StepNumber), nameof(CanStart),
+            nameof(CanAdvance), nameof(Ps5StatusText), nameof(PictureSourceTitle), nameof(NeedsXboxLink), nameof(XboxLinkTitle));
+        if (wasRunning && CanStart)
+            _ = StartAsync().ContinueWith(task => RemotePlayLog.Note($"Çeviri yeniden başlatılamadı: {task.Exception?.GetBaseException().Message}"),
+                                          TaskContinuationOptions.OnlyOnFaulted);
+    }
+
+    /// <summary>Bu sürümde Xbox ev yayını var mı (Ayarlar'daki konsol seçimi yalnız o zaman görünür).</summary>
+    public bool XboxAvailable => services.Xbox is not null;
+
+    /// <summary>Xbox seçili ama Microsoft girişi ya da Xbox seçimi eksik: ana ekranda ve Ayarlar'da bağlama düğmesi görünür.</summary>
+    public bool NeedsXboxLink => IsXbox && (xboxToken is null || xboxConsole is null);
+
+    /// <summary>Bağlama düğmesinin adı: giriş yoksa "Microsoft ile giriş yap", varsa "Xbox'ını seç" (Mac ile aynı).</summary>
+    public string XboxLinkTitle => text[xboxToken is null ? "Sign in with Microsoft" : "Choose your Xbox"];
+
+    /// <summary>Kurulumun Xbox adımlarına dönüldü ("Microsoft ile giriş yap" / "Xbox'ını seç"); Xbox seçilince ana ekrana dönülür.</summary>
+    private bool linkingXbox;
+
+    /// <summary>
+    /// "Microsoft ile giriş yap" / "Xbox'ını seç" (Mac linkXbox ile aynı): kurulumun Xbox adımları açılır; giriş varsa
+    /// doğrudan Xbox seçimine gidilir. Xbox seçilince kurulumun geri kalanı atlanır, ana ekrana dönülür.
+    /// </summary>
+    public void LinkXbox()
+    {
+        if (!IsXbox || services.Xbox is null) return;
+        linkingXbox = true;
+        Step = xboxToken is null ? OnboardingStep.PsnLogin : OnboardingStep.Console;
+    }
+
+    /// <summary>
+    /// "Microsoft hesabından çıkış" (Mac signOutXbox ile aynı): Xbox çevirisi durur, Microsoft jetonu silinir. Seçilen Xbox
+    /// kalır; yeniden giriş yapınca aynı Xbox kullanılır.
+    /// </summary>
+    public void SignOutXbox()
+    {
+        if (IsXbox && isRunning && !demoMode) Stop();
+        xboxGeneration++;
+        services.Xbox?.Clear();
+        store.Remove(StoreKeys.XboxToken);
+        xboxToken = null;
+        RemotePlayLog.Note("Xbox: Microsoft hesabından çıkıldı");
+        Changed(nameof(HasXboxAccount), nameof(CanStart), nameof(CanAdvance), nameof(Ps5StatusText), nameof(NeedsXboxLink), nameof(XboxLinkTitle));
+    }
+
     public async Task<XboxLoginChallenge> BeginXboxLoginAsync()
     {
         var login = await (services.Xbox ?? throw new InvalidOperationException(text["Xbox streaming isn't available in this version."])).BeginLoginAsync();
@@ -229,7 +376,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     {
         xboxToken = await (services.Xbox ?? throw new InvalidOperationException(text["Xbox streaming isn't available in this version."])).CompleteLoginAsync();
         store.Save(StoreKeys.XboxToken, xboxToken);
-        Changed(nameof(HasXboxAccount), nameof(CanAdvance), nameof(CanStart));
+        Changed(nameof(HasXboxAccount), nameof(CanAdvance), nameof(CanStart), nameof(NeedsXboxLink), nameof(XboxLinkTitle));
     }
     private void OnXboxTokenUpdated(string token)
     {
@@ -305,15 +452,21 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         if (!selected.StreamingEnabled) return;
         xboxConsole = selected;
         store.Save(StoreKeys.XboxConsole, selected);
-        Changed(nameof(SelectedXboxConsole), nameof(CanAdvance), nameof(CanStart), nameof(Ps5StatusText));
+        Changed(nameof(SelectedXboxConsole), nameof(CanAdvance), nameof(CanStart), nameof(Ps5StatusText), nameof(NeedsXboxLink), nameof(XboxLinkTitle));
     }
     public bool HasAccount => accountId is not null;
     public RegisteredConsole? Console => console;
     public LgTv? Tv => tv;
-    public bool IsRunning { get => isRunning; private set => Set(ref isRunning, value, [nameof(Ps5StatusText), nameof(Ps5Tone), nameof(TvTone), nameof(ShowsMainAccountTip)]); }
+    public bool IsRunning { get => isRunning; private set => Set(ref isRunning, value, [nameof(Ps5StatusText), nameof(Ps5Tone), nameof(TvTone), nameof(ShowsMainAccountTip), nameof(ShowTvOpenHint)]); }
     public bool IsStarting { get => isStarting; private set => Set(ref isStarting, value); }
-    public SessionState SessionState { get => sessionState; private set => Set(ref sessionState, value, [nameof(Ps5StatusText), nameof(Ps5Tone)]); }
-    public string Ps5StatusText => IsXbox ? XboxStatusText()
+    /// <summary>
+    /// Deneme modu (Mac/iPhone demoMode, Android ile aynı): konsol, hesap ve TV olmadan uygulamadaki örnek karelerle çeviri.
+    /// Açıkken kurulum bitmemiş olsa da ana ekran gösterilir.
+    /// </summary>
+    public bool DemoMode { get => demoMode; private set => Set(ref demoMode, value, [nameof(ConsoleTitle), nameof(Ps5StatusText), nameof(ShowsMainAccountTip)]); }
+    private bool demoMode;
+    public SessionState SessionState { get => sessionState; private set => Set(ref sessionState, value, [nameof(Ps5StatusText), nameof(Ps5Tone), nameof(ShowsMainAccountTip)]); }
+    public string Ps5StatusText => demoMode ? text["Sample pictures"] : IsXbox ? XboxStatusText()
         : settings.FrameSource == FrameSource.RemotePlayWindow
             ? WindowStatusText(sessionState, isRunning, text, installed: !RemotePlayMissing)
             : settings.FrameSource == FrameSource.CaptureWindow
@@ -330,7 +483,47 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         _ => text["Retrying the Xbox connection…"],
     };
     public StatusTone Ps5Tone => Ps5ToneFor(sessionState, isRunning);
-    public int TvClients { get => tvClients; private set => Set(ref tvClients, value, [nameof(TvTone), nameof(TvStatusText), nameof(CanReinstallTvApp)]); }
+    public int TvClients { get => tvClients; private set => Set(ref tvClients, value, [nameof(TvTone), nameof(TvStatusText), nameof(CanReinstallTvApp), nameof(CanReconnectTv), nameof(CanChangeTv), nameof(ShowTestTvHint), nameof(ShowTvOpenHint)]); }
+
+    /// <summary>
+    /// Son "TV'de test et"te TV uygulaması bağlanmadı ve hâlâ bağlı değil: ana ekran eşleştirme yönergesini gösterir. TV'deki
+    /// 6 haneli kodun nereye yazılacağı aranıyordu; kod yazılmaz, bu bilgisayarda açılan pencerede onaylanır.
+    /// </summary>
+    public bool ShowTestTvHint => testTvNotConnected && tvClients == 0;
+
+    /// <summary>
+    /// Çeviri sürüyor, altyazı TV'ye gidiyor ama TV uygulaması bağlı değil: ana ekranda CouchSubs'ın TV'de nerede
+    /// bulunduğu (markaya göre), otomatik açmanın neden olmadığı ve "Otomatik açmayı dene" görünür (Mac, iPhone ve Android
+    /// ile aynı). Eskiden açma sessizce başarısız oluyor, kullanıcı TV'den açması gerektiğini bilmiyordu.
+    /// </summary>
+    public bool ShowTvOpenHint => isRunning && !demoMode && ShowsOnTv && HasTv && tvClients == 0;
+    public string TvOpenHintText => tv is { } target ? text[TvOpenText.OpenOnTv(target.Brand)] : "";
+    /// <summary>Bekçinin son açma denemesi neden olmadı; bilinmiyorsa ya da açıldıysa boş.</summary>
+    public string TvOpenReasonText => TvOpenText.Reason(tvOpenProblem) is { } key ? text[key] : "";
+    public bool HasTvOpenReason => tvOpenProblem is not null;
+    private TvOpenProblem? tvOpenProblem;
+    private TvOpenProblem? OpenProblem
+    {
+        get => tvOpenProblem;
+        set => Set(ref tvOpenProblem, value, [nameof(TvOpenReasonText), nameof(HasTvOpenReason)]);
+    }
+
+    private void OpenResult(TvOpenProblem? problem, TvBrand brand) =>
+        OpenProblem = isRunning && tvClients == 0
+            ? TvOpenText.Shown(problem, brand, !string.IsNullOrEmpty(store.Load<string>(StoreKeys.TvKey))) : null;
+
+    /// <summary>Ana ekrandaki "Otomatik açmayı dene": bekçi TV uygulamasını beklemeden yeniden açmaya çalışır.</summary>
+    public void RetryTvOpen()
+    {
+        OpenProblem = null;
+        if (!isRunning) return;
+        if (keeper is null) StartKeeper();
+        else keeper.Reconnect();
+    }
+
+    private bool TestTvNotConnected { get => testTvNotConnected; set => Set(ref testTvNotConnected, value, [nameof(ShowTestTvHint)]); }
+
+    private bool testTvNotConnected;
     public StatusTone TvTone => HasTv ? TvToneFor(tvClients, isRunning) : StatusTone.Idle;
     public string TvStatusText => !HasTv ? text["Not set up"] : tvClients > 0 ? text["Connected"] : text["Waiting for the TV app"];
     /// <summary>Eşleşmiş bir TV var.</summary>
@@ -347,11 +540,47 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                               || settings.FrameSource == FrameSource.CaptureWindow && settings.CaptureWindow is
                                  { ProcessName.Length: > 0, Title.Length: > 0 }
                               || settings.FrameSource == FrameSource.Ps5 && console is not null && accountId is not null)
-                            && (ShowsOnComputer || HasTv);
+                            && settings.Output.HasDestination(HasTv);
     public string LastSource { get => lastSource; private set => Set(ref lastSource, value); }
     public string LastTranslation { get => lastTranslation; private set => Set(ref lastTranslation, value, [nameof(ShowsMainAccountTip)]); }
-    /// <summary>PS5'ten (ikinci hesap) çeviri başladı, ilk altyazı gelmedi: "kolu açınca ana hesabı seçin" ipucu görünür (GitHub #231).</summary>
-    public bool ShowsMainAccountTip => isRunning && !IsXbox && settings.FrameSource == FrameSource.Ps5 && lastTranslation.Length == 0;
+    /// <summary>PS5'ten (ikinci hesap) çeviri sürüyor, ilk altyazı gelmedi ya da bağlantı koptu: "kolu açınca ana hesabı seçin"
+    /// ipucu görünür (GitHub #231, <see cref="MainAccountTipVisible"/>).</summary>
+    public bool ShowsMainAccountTip => isRunning && !demoMode && MainAccountTipVisible(!IsXbox && settings.FrameSource == FrameSource.Ps5,
+        lastTranslation.Length > 0, sessionState.Phase == SessionPhase.Streaming);
+
+    /// <summary>
+    /// "Kolu açınca ana hesabı seçin" ipucunun kuralı (Mac/iPhone MainAccountTip, Android MainAccountTip.kt ile aynı).
+    /// CouchSubs PS5'e ikinci hesapla bağlanır. Fiziksel kol da o hesaba atanmışsa PS5 her bağlanışta kolu Uzaktan Oynatma'ya
+    /// devredip kapatır; oyuncu kolu açıp yine ikinci hesabı seçince Uzaktan Oynatma kesilir, yeniden bağlanınca kol yine kapanır
+    /// (Play yorumu 20 Kas, #231, #5). İpucu eskiden yalnız ilk altyazıdan önce görünüyordu; artık bağlantı koptuğunda da görünür.
+    /// </summary>
+    public static bool MainAccountTipVisible(bool ps5, bool hasSubtitle, bool streaming) => ps5 && (!hasSubtitle || !streaming);
+    /// <summary>
+    /// Görüntü bir dakikadır geliyor ama bu çeviride tek altyazı satırı okunmadı: "oyunun kendi altyazısını açın" ipucu
+    /// (<see cref="SubtitleOffTip"/>; GitHub #503, #554, #566, #572).
+    /// </summary>
+    public bool ShowsSubtitleOffTip { get => showsSubtitleOffTip; private set => Set(ref showsSubtitleOffTip, value, [nameof(ShowsSubtitleBackgroundTip)]); }
+    /// <summary>İpucu görünürken GTA 6 altyazı zemini izleme açıksa ayrıca söylenir: zemin yoksa bütün satırlar atlanır.</summary>
+    public bool ShowsSubtitleBackgroundTip => showsSubtitleOffTip && settings.WatchSubtitleBackground;
+    /// <summary>
+    /// Otomatik ekran yazısı göçle kapatıldı (beta.63'te açıktı): bu oturumda bir kez "deneysel; Ayarlar'dan açabilirsiniz"
+    /// bilgisi görünür. Kullanıcı ayarı değiştirince kalkar.
+    /// </summary>
+    public bool ShowsAutoScreenTextNotice { get => showsAutoScreenTextNotice; private set => Set(ref showsAutoScreenTextNotice, value); }
+    private bool showsAutoScreenTextNotice;
+    private bool showsSubtitleOffTip;
+    /// <summary>Görüntünün bu bağlantıda ilk geldiği an (bağlantı koparsa sıfırlanır).</summary>
+    private DateTime? framesSince;
+    /// <summary>Bu çeviride en az bir altyazı satırı gösterildi.</summary>
+    private bool sawLineThisRun;
+
+    /// <summary>Kare geldi ya da satır gösterildi: ipucu yeniden değerlendirilir (arayüz iş parçacığında).</summary>
+    private void UpdateSubtitleOffTip(bool frameArrived = false)
+    {
+        if (frameArrived && isRunning && sessionState.Phase == SessionPhase.Streaming) framesSince ??= Clock();
+        ShowsSubtitleOffTip = isRunning && !demoMode && !subtitlesPaused && SubtitleOffTip.IsVisible(sessionState.Phase == SessionPhase.Streaming,
+            sawLineThisRun, framesSince is { } since ? Clock() - since : null);
+    }
     /// <summary>TV'ye giden son satırın ölçümleri tek satırda ("OCR 40 ms · Çeviri 300 ms · Gecikme 520 ms"); satır gelene kadar boş.</summary>
     public string MetricsText { get => metricsText; private set => Set(ref metricsText, value); }
     /// <summary>Çevrilen satırlar, en yenisi başta (bu ve önceki oturumlar). Değişince bu özellik bildirilir.</summary>
@@ -390,16 +619,23 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         set
         {
             value = value with { CpuTranslationThreads = CpuThreadOptions.Normalize(value.CpuTranslationThreads, Environment.ProcessorCount) };
+            // Kullanım verisi ayarı değiştiyse ilk açılış notu artık gerekmez.
+            if (value.UsageData != settings.UsageData) value = value with { UsageNoticeSeen = true };
             var old = settings;
             if (!Set(ref settings, value, [nameof(UsesFreeGemini)])) return;
             settingsStore.Save(value);
+            server.SetApart = value.SetTextApart;
             server.SendStyle(value.Style);
             if (old.Output != value.Output) OutputChanged();
             if (old.Dubbing != value.Dubbing) DubbingSettingsChanged(old.Dubbing);
             if (old.GamePacks != value.GamePacks && pipeline is not null) ConnectPacks(pipeline);
             if (pipeline is not null) pipeline.ShowSpeakerNames = value.ShowSpeakerNames;
+            server.SpeakerColors = value.SpeakerColors;
             if ((old.MisreadWaitMs != value.MisreadWaitMs || old.PartialWaitMs != value.PartialWaitMs) && pipeline is not null) ApplyWaits(pipeline);
             if (old.SharePool != value.SharePool) services.Pool?.SetEnabled(value.SharePool);
+            if (old.AutoScreenText != value.AutoScreenText) ShowsAutoScreenTextNotice = false;
+            if (old.UsageData != value.UsageData) services.Usage?.SetEnabled(value.UsageData);
+            if (old.UsageNoticeSeen != value.UsageNoticeSeen) Changed(nameof(ShowsUsageNotice));
             if (old.TranslationDevice != value.TranslationDevice)
             {
                 GpuFallbackWarning = false;
@@ -410,7 +646,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             UpdateRegionWatcher();
             if (old.ActiveAreaProfile != value.ActiveAreaProfile || old.AreaProfiles != value.AreaProfiles || old.Areas != value.Areas
                 || old.FrameSource != value.FrameSource)
-                Changed(nameof(AreaProfileGame), nameof(AreaProfileUnsaved), nameof(AreaProfileTarget));
+                Changed(nameof(AreaProfileGame), nameof(AreaProfileUnsaved), nameof(AreaProfileTarget), nameof(GameProfiles));
             if (old.FrameSource != value.FrameSource || old.CaptureWindow != value.CaptureWindow)
                 Changed(nameof(CanStart), nameof(Ps5StatusText), nameof(ConsoleTitle));
             var windowAppChanged = value.FrameSource == FrameSource.RemotePlayWindow && old.RemotePlayApp != value.RemotePlayApp;
@@ -426,7 +662,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                                               TaskContinuationOptions.OnlyOnFaulted);
             }
             var translationChanged = old.OnlineTranslation != value.OnlineTranslation || old.OnlineEngine != value.OnlineEngine
-                                     || old.GeminiModel != value.GeminiModel || old.OpenAiModel != value.OpenAiModel
+                                     || old.GeminiModel != value.GeminiModel || old.GeminiPaidTier != value.GeminiPaidTier
+                                     || old.OpenAiModel != value.OpenAiModel
                                      || old.ClaudeModel != value.ClaudeModel
                                      || old.LocalAiBaseUrl != value.LocalAiBaseUrl || old.LocalAiModel != value.LocalAiModel
                                      || old.AiInstruction != value.AiInstruction
@@ -435,6 +672,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             if (translationChanged && !isRunning) RefreshTranslatorStatus();
             if (isRunning && (old.SourceLanguage != value.SourceLanguage || old.TargetLanguage != value.TargetLanguage
                               || translationChanged || old.FastSubtitleDetection != value.FastSubtitleDetection
+                              || old.WatchSubtitleBackground != value.WatchSubtitleBackground
                               || old.OcrEngine != value.OcrEngine))
             {
                 RefreshTranslatorStatus();
@@ -450,7 +688,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         OnboardingStep.Welcome or OnboardingStep.SecondAccount or OnboardingStep.Test or OnboardingStep.BetterTranslation => true,
         OnboardingStep.PsnLogin => IsXbox ? xboxToken is not null : accountId is not null,
         OnboardingStep.Console => IsXbox ? xboxConsole is not null : console is not null,
-        OnboardingStep.Tv => HasTv || settings.Output == SubtitleOutput.Computer,
+        OnboardingStep.Tv => HasTv || !ShowsOnTv,
         OnboardingStep.Translation => ModelInstalled,
         _ => false,
     };
@@ -465,6 +703,13 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             consoleKindLocked = true;
             store.Save(StoreKeys.ConsoleKindLocked, true);
             Changed(nameof(ConsoleKindLocked));
+        }
+        // Ayarlar'dan Xbox bağlanırken Xbox seçilince kurulumun geri kalanı atlanır.
+        if (linkingXbox && step == OnboardingStep.Console)
+        {
+            linkingXbox = false;
+            Step = OnboardingStep.Done;
+            return;
         }
         Step = step == OnboardingStep.Welcome && IsXbox ? OnboardingStep.PsnLogin : step + 1;
     }
@@ -607,6 +852,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             // İptal yalnız cs_register'ın süresi dolunca olur: PS5 yanıt vermemiştir.
             RegistrationFailure.NoReply or RegistrationFailure.Canceled => AppError.ConsoleNoReply,
             RegistrationFailure.BadAddress => AppError.BadAddress,
+            RegistrationFailure.PairingClosed => AppError.ConsolePairingClosed,
+            RegistrationFailure.ConnectFailed => AppError.ConsoleConnectFailed,
+            RegistrationFailure.NoFreePort => AppError.NoFreePort,
             _ => AppError.RegistrationFailed,
         };
         var message = AppException.Describe(kind, text);
@@ -695,7 +943,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     {
         await StartServerAsync();
         var savedKey = store.Load<string>(StoreKeys.TvKey);
-        var pairing = await services.PairTvAsync(target, savedKey, ServerAddress(target));
+        var pairing = await services.PairTvAsync(target, savedKey, ServerAddress(target), server.AccessKey);
         if (tv?.Brand != target.Brand || (target.Brand != TvBrand.AndroidTv && tv?.Host != target.Host))
             store.Remove(StoreKeys.TvAppVersion);
         tv = target;
@@ -704,9 +952,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         store.Save(StoreKeys.TvKey, SamsungTokenHolder.KeptToken(savedKey, pairing.Key));
         tvAppMissing = !pairing.Launched;
         // Daha önce "TV'm yok" seçildiyse TV bağlanınca altyazı TV'ye gider.
-        if (settings.Output == SubtitleOutput.Computer) Settings = settings with { Output = SubtitleOutput.Tv };
-        Changed(nameof(Tv), nameof(CanAdvance), nameof(CanInstallTvApp), nameof(CanReinstallTvApp), nameof(HasTv), nameof(NeedsTv), nameof(CanStart),
-            nameof(TvStatusText), nameof(TvTone));
+        // "Yalnız OBS (yayın)" seçiliyken TV eşlenirse de altyazı TV'ye gider (Mac ve telefonlarla aynı).
+        if (!settings.Output.ShowsOnTv()) Settings = settings with { Output = SubtitleOutput.Tv };
+        Changed(nameof(Tv), nameof(CanAdvance), nameof(CanInstallTvApp), nameof(CanReinstallTvApp), nameof(CanReconnectTv), nameof(CanChangeTv), nameof(HasTv), nameof(NeedsTv), nameof(CanStart),
+            nameof(TvStatusText), nameof(TvTone), nameof(ShowTvOpenHint), nameof(TvOpenHintText));
         if (target.Brand == TvBrand.Lg) await RefreshTvAppAsync();
         // Samsung girişi ya da Android onayı dakikalar sürebilir; eşleşme beklemesin.
         else _ = RefreshTvAppAsync();
@@ -813,6 +1062,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private async Task RefreshSamsungAppAsync(LgTv target)
     {
         if (services.BundledApp(TvBrand.Samsung) is not { } bundled) return;
+        // "TV uygulamasını yeniden kur": güncel uygulama da TV'de açılır (Android'deki gibi). İstek bir kerelik.
+        var open = openTvAppAfterCheck;
+        openTvAppAfterCheck = false;
         var remembered = !NeedsInstall(bundled);
         // TV 8001'de geliştirici modunu ve Host PC IP'yi söyler (Android ve iPhone uygulaması da buna bakar). Host PC IP
         // bu bilgisayarınki değilse TV 26101'de sdb el sıkışmasında bağlantıyı keser ve önceden yalnız genel "TV bu
@@ -839,9 +1091,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         samsungCheckRunning = true;
         try
         {
-            var (version, installed) = await services.InstallSamsungAppAsync(target.Host, bundled, e => post(() => InstallEvent(e)));
+            var (version, installed) = await services.InstallSamsungAppAsync(target.Host, bundled, open, e => post(() => InstallEvent(e)));
             version = string.IsNullOrWhiteSpace(version) ? bundled.Version : version;
             store.Save(StoreKeys.TvAppVersion, version);
+            SamsungAppKnowledge.Mark(target.Host);
             TvApp = new TvAppState(TvAppKind.UpToDate, version);
             if (installed) await OpenTvAppAfterInstallAsync(target);
         }
@@ -880,19 +1133,29 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                 TvApp = new TvAppState(TvAppKind.UpToDate, InstalledAppVersion ?? bundled.Version);
                 return;
             }
-            if ((await services.ScanAndroidTvsAsync()).FirstOrDefault() is not { } found)
+            // Birden çok TV varsa ilk bulunana gidilmez: kayıtlı ya da seçilen TV, yoksa kullanıcıya sorulur. Eskiden izin
+            // sorusu başka odadaki TV'de çıkıyor, kurulum "onaylanmadı" diye bitiyordu (#425).
+            var choice = androidTvChoice;
+            androidTvChoice = null;
+            var found = await services.ScanAndroidTvsAsync();
+            var hosts = AndroidTvPick.Hosts(found);
+            if (AndroidTvPick.Pick(found, [choice, target.Host]) is not { } picked)
             {
-                TvApp = new TvAppState(TvAppKind.DevModeOff);
+                TvApp = hosts.Count == 0 ? new TvAppState(TvAppKind.DevModeOff) : new TvAppState(TvAppKind.ChooseAndroidTv, Hosts: hosts);
                 return;
             }
-            host = found;
+            host = picked;
         }
         TvApp = new TvAppState(TvAppKind.Working);
         var open = openTvAppAfterCheck;
         openTvAppAfterCheck = false;
         try
         {
-            var version = await services.InstallAndroidAppAsync(host, bundled, open, e => post(() => InstallEvent(e)));
+            // Açılan uygulamaya altyazı sunucusunun adresi verilir: sunucu 8787 dışında bir portta olsa da (8787 doluysa ya da
+            // Linux'ta COUCHSUBS_SERVER_PORT) TV uygulaması onu bulur (#617). Eşleştirme yine TV'deki kodla yapılır.
+            try { await StartServerAsync(); } catch (SocketException) { }
+            var launch = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string> { ["server"] = ServerAddress(target with { Host = host }) });
+            var version = await services.InstallAndroidAppAsync(host, bundled, open, launch, e => post(() => InstallEvent(e)));
             // TV'nin adresi bundan sonra sürüm denetimi için kullanılır.
             var located = target with { Host = host };
             tv = located;
@@ -936,22 +1199,77 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     }
 
     /// <summary>
-    /// Samsung ve Android TV'de TV uygulaması bağlı değilken "TV uygulamasını yeniden kur" görünür (ana ekran ve TV kartı).
-    /// TV'den kaldırılan uygulama bu bilgisayarın kaydında "kurulu" kalıyordu (#352, #389).
+    /// TV uygulaması bağlı değilken üç markada da "TV uygulamasını yeniden kur" görünür (ana ekran ve TV kartı). TV'den
+    /// kaldırılan uygulama bu bilgisayarın kaydında "kurulu" kalıyordu (#352, #389). LG'de önceden yoktu: kayıtlı anahtar
+    /// varsa Passphrase sorulmadan, yoksa Passphrase adımıyla yeniden kurulur.
     /// </summary>
-    public bool CanReinstallTvApp => tv is { Brand: TvBrand.Samsung or TvBrand.AndroidTv } && CanInstallTvApp && tvClients == 0;
+    public bool CanReinstallTvApp => tv is not null && CanInstallTvApp && tvClients == 0;
+
+    /// <summary>
+    /// TV eşleşmiş ama TV uygulaması bağlı değilken (LG dahil) ana ekranda "TV'ye bağlan" görünür: TV adımı açılır, başka
+    /// TV seçilebilir ya da LG kurulum adımları (Developer Mode, Passphrase) yeniden izlenir. Önceden kurulum bittikten
+    /// sonra LG'de TV adımına dönmenin görünür bir yolu yoktu (yalnız Hakkında › Yeniden kur).
+    /// </summary>
+    public bool CanReconnectTv => HasTv && !CanReinstallTvApp && tvClients == 0;
+
+    /// <summary>
+    /// TV eşleşmişken (TV uygulaması bağlı olsa da) ana ekranda "TV'yi değiştir" görünür: yalnız TV adımı açılır, başka TV
+    /// seçilir; "Yeniden kur…" ile bütün kurulumu baştan yapmak gerekmez. "TV'ye bağlan" aynı yere gittiği için ikisi
+    /// birden çıkmaz.
+    /// </summary>
+    public bool CanChangeTv => HasTv && !CanReconnectTv;
+
+    /// <summary>LG'de "yeniden kur" istendi: TV'deki sürüm güncel olsa da paket yeniden kurulur. İstek bir kerelik.</summary>
+    private bool lgReinstallRequested;
 
     /// <summary>
     /// Kurulan sürüm kaydını unutur ve TV'ye yeniden bakar: uygulama TV'de yoksa kurulur, Android TV'de varsa açılır.
     /// TV'ye ulaşılamazsa kart geliştirici modu / hata ayıklama adımlarını gösterir.
     /// </summary>
+    /// <summary>Birden çok Android TV arasından seçilen TV'ye kurulur (#425).</summary>
+    public async Task ChooseAndroidTvAsync(string host)
+    {
+        androidTvChoice = host;
+        TvApp = new TvAppState(TvAppKind.Working);
+        await RefreshTvAppAsync();
+    }
+
     public async Task ReinstallTvAppAsync()
     {
         if (tv is null) return;
+        if (tv is { Brand: TvBrand.Lg } lg)
+        {
+            await ReinstallLgAppAsync(lg);
+            return;
+        }
         store.Remove(StoreKeys.TvAppVersion);
         openTvAppAfterCheck = true;
         TvApp = TvAppState.Unknown;
         await RefreshTvAppAsync();
+    }
+
+    /// <summary>
+    /// LG'de TV uygulamasını yeniden kurar: kayıtlı anahtar varsa Passphrase sorulmadan paket yeniden kurulur ve açılır;
+    /// anahtar yoksa (ya da TV reddederse) Passphrase adımı, geliştirici modu kapalıysa adımları görünür.
+    /// </summary>
+    private async Task ReinstallLgAppAsync(LgTv target)
+    {
+        if (services.BundledTvAppVersion is not { } bundled) return;
+        lgReinstallRequested = true;
+        // Kurulum adımları görünsün: TV uygulaması bağlı değil, kullanıcı yeniden kurmak istiyor.
+        tvAppMissing = true;
+        TvApp = new TvAppState(TvAppKind.Working);
+        if (!await services.IsDevModeOnAsync(target.Host))
+        {
+            TvApp = new TvAppState(TvAppKind.DevModeOff);
+            return;
+        }
+        if (store.Load<string>(StoreKeys.TvDevKey) is not { } devKey)
+        {
+            TvApp = new TvAppState(TvAppKind.NeedsPassphrase);
+            return;
+        }
+        await InstallTvAppAsync(target, devKey, bundled);
     }
 
     /// <summary>Key Server'dan anahtarı alır (TV ekranındaki parolayla) ve uygulamayı kurar.</summary>
@@ -977,7 +1295,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         try
         {
             var installed = await services.InstalledTvAppVersionAsync(target.Host, devKey);
-            if (installed is not null && !DevModeInstaller.IsNewer(bundled, installed))
+            // "Yeniden kur": TV'deki sürüm güncel görünse de paket yeniden kurulur (anahtar reddedilirse istek sürer,
+            // Passphrase yazılınca kurulur).
+            var force = lgReinstallRequested;
+            lgReinstallRequested = false;
+            if (!force && installed is not null && !DevModeInstaller.IsNewer(bundled, installed))
             {
                 TvApp = new TvAppState(TvAppKind.UpToDate, installed);
                 await RenewDevSessionIfDueAsync(target, devKey);
@@ -1025,13 +1347,14 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             keeper.Reconnect();
             return;
         }
-        try { await services.PairTvAsync(target, store.Load<string>(StoreKeys.TvKey), ServerAddress(target)); }
+        try { await services.PairTvAsync(target, store.Load<string>(StoreKeys.TvKey), ServerAddress(target), server.AccessKey); }
         catch (Exception) { /* TV uygulaması kuruldu; açılmadıysa kullanıcı açabilir */ }
     }
 
     /// <summary>TV ağda yeni bir adreste bulundu.</summary>
     public void TvMoved(LgTv moved)
     {
+        if (moved.Brand == TvBrand.Samsung) SamsungAppKnowledge.Carry(tv?.Host, moved.Host);
         tv = moved;
         store.Save(StoreKeys.Tv, moved);
         Changed(nameof(Tv));
@@ -1088,7 +1411,75 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public async Task SendTestSubtitleAsync()
     {
         try { await StartServerAsync(); } catch (SocketException) { }
+        // Çeviri sürmüyorken TV'nin eşleştirme isteği (TV 0.9.34+) reddediliyordu: Android TV anahtarı başlatma yoluyla
+        // alamaz, "TV'de test et"e TV'de yalnız "Eşleştirme tamamlanmadı" çıkıyordu. Deneme, Ayarlar'daki "TV eşleştir"
+        // gibi iki dakikalık onay penceresi açar; TV kodu gösterince bilgisayarda onay sorulur.
+        if (!isRunning) server.Pairing.Open();
+        // TV uygulaması bağlı değilse deneme altyazısı kimseye gitmiyordu: bekçi yalnız çeviri sürerken çalışır, TV
+        // uygulaması kapalıysa ya da bilgisayarı arıyorsa "TV'de test et"e TV'de hiçbir şey çıkmıyordu (Samsung 65S95F).
+        // Önce TV uygulaması açılır (Samsung'da geliştirici bağlantısıyla) ve bağlanması beklenir.
+        if (ShowsOnTv && HasTv && tv is { Brand: not TvBrand.AndroidTv } target && server.ConnectedClients == 0)
+            await OpenTvAppForTestAsync(target);
+        // Android TV uygulaması bilgisayarı kendisi bulur; eşleştirme onayı da gerekebilir. Yazı TV bağlanınca gitsin.
+        else if (ShowsOnTv && HasTv && tv is { Brand: TvBrand.AndroidTv } && server.ConnectedClients == 0)
+            await WaitForTvForTestAsync(TestPairWait);
+        TestTvNotConnected = ShowsOnTv && HasTv && server.ConnectedClients == 0;
         SendTestSubtitle();
+    }
+
+    /// <summary>"TV'de test et"te TV uygulamasının açılıp bağlanması için en çok bu kadar beklenir.</summary>
+    public TimeSpan TestTvWait { get; set; } = TimeSpan.FromSeconds(20);
+
+    /// <summary>Android TV'de deneme altyazısı için TV'nin bağlanması (gerekirse eşleştirme onayı) en çok bu kadar beklenir.</summary>
+    public TimeSpan TestPairWait { get; set; } = TimeSpan.FromSeconds(30);
+
+    private async Task WaitForTvForTestAsync(TimeSpan wait)
+    {
+        OpeningTvAppForTest = true;
+        try
+        {
+            var deadline = DateTime.UtcNow + wait;
+            while (server.ConnectedClients == 0 && DateTime.UtcNow < deadline) await Task.Delay(250);
+        }
+        finally { OpeningTvAppForTest = false; }
+    }
+
+    /// <summary>Deneme altyazısından önce TV uygulaması bağlanıyor (ana ekrandaki düğme beklerken bunu gösterir).</summary>
+    public bool OpeningTvAppForTest
+    {
+        get => openingTvAppForTest;
+        private set => Set(ref openingTvAppForTest, value);
+    }
+
+    private bool openingTvAppForTest;
+
+    /// <summary>
+    /// TV uygulamasını açar ve bağlanmasını bekler. Çeviri sürüyorsa bekçi hemen yeniden dener; sürmüyorsa geçici bir
+    /// bekçi kurulur, bekleme bitince kapanır.
+    /// </summary>
+    private async Task OpenTvAppForTestAsync(LgTv target)
+    {
+        IKeeper? temporary = null;
+        if (keeper is not null) keeper.Reconnect();
+        else
+        {
+            var running = server;
+            temporary = services.MakeKeeper(target, store.Load<string>(StoreKeys.TvKey),
+                new Dictionary<string, string> { ["server"] = ServerAddress(target), ["key"] = running.AccessKey }, () => running.ConnectedClients > 0,
+                moved => post(() => TvMoved(moved)), key => post(() => store.Save(StoreKeys.TvKey, key)), () => server.ConsolePort);
+            temporary.Start(TimeSpan.FromSeconds(5));
+        }
+        OpeningTvAppForTest = true;
+        try
+        {
+            var deadline = DateTime.UtcNow + TestTvWait;
+            while (server.ConnectedClients == 0 && DateTime.UtcNow < deadline) await Task.Delay(250);
+        }
+        finally
+        {
+            temporary?.Stop();
+            OpeningTvAppForTest = false;
+        }
     }
 
     /// <summary>
@@ -1120,15 +1511,15 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public event Action<string, int>? PcResultReady;
 
     /// <summary>
-    /// 1, 2 ya da 3 numaralı ek bölgeyi şimdi bir kez okuyup çevirir; sonuç ayardaki yere (TV, bilgisayar ya da ikisi) gider
-    /// (görev paneli gibi yazılar için). Çeviri sürmüyorsa, bölge kapalıysa ya da önceki istek bitmediyse hiçbir şey yapılmaz.
+    /// 1, 2 ya da 3. sıradaki ek alanı şimdi bir kez okuyup çevirir; sonuç alanın seçimindeki yere (TV, bilgisayar ya da
+    /// ikisi) gider (görev paneli gibi yazılar için). Çeviri sürmüyorsa, o sırada alan yoksa ya da önceki istek bitmediyse
+    /// hiçbir şey yapılmaz.
     /// </summary>
-    public async Task<ExtraRegionOutcome> TranslateExtraRegionAsync(int slot)
+    public async Task<ExtraRegionOutcome> TranslateExtraRegionAsync(int number)
     {
-        if (settings.ExtraRegion(slot) is not { } region) return ExtraRegionOutcome.NotConfigured;
+        if (settings.ExtraAreaAt(number) is not { } area) return ExtraRegionOutcome.NotConfigured;
         if (lastFrame is not { } frame) return ExtraRegionOutcome.NotRunning;
-        var target = settings.ExtraTarget(slot);
-        return (await RunRegionAsync(frame, region, target != ResultTarget.Pc, target != ResultTarget.Tv)).Outcome;
+        return (await RunRegionAsync(frame, area.Region, area.Target != ResultTarget.Pc, area.Target != ResultTarget.Tv)).Outcome;
     }
 
     /// <summary>
@@ -1193,61 +1584,101 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     /// <summary>Süren "ekranı çevir" işi; yeniden basılınca iptal edilir.</summary>
     private CancellationTokenSource? screenWork;
-    /// <summary>TV'deki ekran çevirilerinin kalkacağı an; bu andan önce yeniden basmak onları kaldırır.</summary>
+    /// <summary>TV'deki ekran çevirilerinin kalkacağı an; bu andan önce yeniden basınca ekran değişmediyse onlar kalkar.</summary>
     private DateTime screenShownUntil;
+    /// <summary>Ekrandaki çevirilerin okunduğu karenin yazı izi (<see cref="ScreenTranslation.Fingerprint"/>).</summary>
+    private string screenFingerprint = "";
+    /// <summary>Ekrandaki son çeviriler: telefon kartı izlenirken süresi bunlarla uzatılır.</summary>
+    private IReadOnlyList<ScreenTranslation.Item> screenItems = [];
+    /// <summary>Telefon kartı ekrandayken sohbeti izleyen yoklama (<see cref="ScreenPhoneFollow"/>); kart yoksa null.</summary>
+    private ScreenPhoneFollow? screenFollow;
+    private CancellationTokenSource? screenFollowWork;
+    /// <summary>"Ekranı çevir" çevirilerinin hafızası (telefon mesajları sohbet başlığıyla); dil ya da motor değişince yenilenir.</summary>
+    private PhoneChatMemory screenMemory = new();
+    private string screenMemoryKey = "";
 
     /// <summary>
-    /// Num 9: oyunun şu anki karesinin tamamını bir kez okur, her yazı grubunu ayrı çevirip TV'de kendi yerine koyar.
-    /// Çeviriler hazırlandıkça TV'ye gider. Çeviri sürerken ya da çeviriler TV'deyken yeniden basmak onları kaldırır.
+    /// Num 9: oyunun şu anki karesinin tamamını bir kez okur, her yazı grubunu ayrı çevirip TV'de kendi yerine, özgün
+    /// stilinde koyar (GTA 6 telefonunun yazıları yanında mesaj kartında). Çeviriler hazırlandıkça TV'ye gider. Çeviri
+    /// sürerken yeniden basmak onu durdurur. Çeviriler ekrandayken yeniden basınca kare yine okunur: ekran değiştiyse
+    /// (telefonda başka sohbet) yenisi çevrilir, değişmediyse çeviriler kalkar. Karede GTA 6 telefonu varsa kart ekrandayken
+    /// telefon izlenir (<see cref="FollowPhoneAsync"/>): sohbet değişince kart kendiliğinden yenilenir, telefon kapanınca
+    /// kalkar. <paramref name="refresh"/>: bu izlemenin yenilemesi (tuşa basılmadı).
     /// </summary>
-    public async Task<ScreenOutcome> TranslateScreenAsync()
+    public async Task<ScreenOutcome> TranslateScreenAsync(bool refresh = false)
     {
         var reader = activeReader;
         if (!isRunning || reader is null) return ScreenOutcome.NotRunning;
         if (lastFrame is not { } frame)
         {
             // Çeviri sürüyor ama PS5'ten henüz görüntü gelmedi: tuş sessizce yok sayılmasın.
-            server.SendSubtitle(text["Couldn't capture the screen: no picture from the PS5 yet."], 4000);
+            if (!refresh) server.SendSubtitle(text["Couldn't capture the screen: no picture from the PS5 yet."], 4000);
             return ScreenOutcome.NotRunning;
         }
         if (screenWork is { } running)
         {
+            if (refresh) return ScreenOutcome.Shown;
             running.Cancel();
             screenWork = null;
             HideScreen();
             return ScreenOutcome.Cleared;
         }
-        if (DateTime.UtcNow < screenShownUntil)
-        {
-            HideScreen();
-            return ScreenOutcome.Cleared;
-        }
+        var wasShown = !refresh && DateTime.UtcNow < screenShownUntil;
+        var previous = screenFingerprint;
 
         using var work = new CancellationTokenSource();
         screenWork = work;
         server.SendStyle(settings.Style);
-        server.SendSubtitle(text["Translating the screen…"], 2500);
+        if (!wasShown && !refresh) server.SendSubtitle(text["Translating the screen…"], 2500);
+        var memoryKey = $"{settings.SourceLanguage}|{settings.TargetLanguage}|{OnlineTranslationActive}|{settings.OnlineEngine}";
+        if (memoryKey != screenMemoryKey)
+        {
+            screenMemoryKey = memoryKey;
+            screenMemory = new PhoneChatMemory();
+        }
+        var memory = screenMemory;
         ITextTranslator? translator = null;
         try
         {
             translator = MakeTranslator();
+            // Altyazı zaten kendi yerinde çevriliyor: ekran çevirisinde ikinci kez çizilmez (bkz. SubtitleEcho).
+            var reading = await ScreenTranslation.ReadAsync(frame, reader, SubtitleEcho, work.Token);
+            var fingerprint = ScreenTranslation.Fingerprint(reading);
+            if (wasShown)
+            {
+                work.Token.ThrowIfCancellationRequested();
+                if (ScreenTranslation.IsSameScreen(fingerprint, previous))
+                {
+                    if (screenWork == work) screenWork = null;
+                    HideScreen();
+                    return ScreenOutcome.Cleared;
+                }
+                server.SendSubtitle(text["Translating the screen…"], 2500);
+            }
+            screenFingerprint = fingerprint;
             // Yapay zekâda ekranın bütün yazıları tek istekte gider (bkz. AiTranslator.TranslateAllAsync).
             // Arabic fork: in Arabic the result is one subtitle block at the bottom (ScreenTranslation.SubtitleBlock), not
             // every item in its own box on the TV.
             var block = settings.TargetLanguage == "ar";
-            var items = await ScreenTranslation.TranslateAsync(frame, reader, translator, shown =>
+            var items = await ScreenTranslation.TranslateAsync(reading, translator, shown =>
             {
                 if (work.IsCancellationRequested || block) return;
-                server.SendScreen(shown, ScreenTranslation.DisplayMilliseconds(shown));
-                screenShownUntil = DateTime.UtcNow.AddMilliseconds(ScreenTranslation.DisplayMilliseconds(shown));
-            }, work.Token);
-            server.Clear();
+                // İzlemenin yenilemesinde aynı çeviriler yeniden gönderilmez (TV'de kart yeniden çizilmesin).
+                if (refresh && shown.SequenceEqual(screenItems)) return;
+                var milliseconds = ScreenTranslation.DisplayMilliseconds(shown);
+                server.SendScreen(shown, milliseconds);
+                screenItems = shown;
+                screenShownUntil = DateTime.UtcNow.AddMilliseconds(milliseconds);
+            }, work.Token, frame, memory);
+            if (!refresh) server.Clear();
             var joined = block ? ScreenTranslation.SubtitleBlock(items) : null;
             // Arabic fork: Num 9 shows up in altyazi.log (session report).
             SubtitleLog.Write($"ekran çevirisi: {items.Count} parça" + (block ? $", blok {joined?.Split('\n').Length ?? 0} satır" : ""));
             if (items.Count == 0 || (block && joined is null))
             {
-                server.SendSubtitle(text["No text found on the screen."], 2500);
+                // Yeni karede yazı yok: önceki ekranın çevirileri de kalkar.
+                if (wasShown || refresh) HideScreen();
+                if (!refresh) server.SendSubtitle(text["No text found on the screen."], 2500);
                 return ScreenOutcome.NoText;
             }
             if (joined is not null)
@@ -1256,6 +1687,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                 server.SendSubtitle(joined, ms, paragraphs: true);
                 screenShownUntil = DateTime.UtcNow.AddMilliseconds(ms);
             }
+            else _ = FollowPhoneAsync(frame);
             return ScreenOutcome.Shown;
         }
         catch (OperationCanceledException)
@@ -1266,19 +1698,91 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         {
             SubtitleLog.Write($"ekran çevirisi hata: {error.Status}");
             post(() => TranslatorStatus = error.Status);
-            ShowScreenFailure(error, translator);
+            // İzlemenin yenilemesi başarısızsa eski kart kalır; aynı görüntü yeniden denenmez.
+            if (refresh) _ = FollowPhoneAsync(frame);
+            else ShowScreenFailure(error, translator);
             return ScreenOutcome.TranslatorUnavailable;
         }
         catch (Exception error)
         {
             RemotePlayLog.Note($"Ekran çevrilemedi: {error.GetType().Name}: {error.Message}");
-            ShowScreenFailure(error, translator);
+            if (refresh) _ = FollowPhoneAsync(frame);
+            else ShowScreenFailure(error, translator);
             return ScreenOutcome.Failed;
         }
         finally
         {
             if (screenWork == work) screenWork = null;
         }
+    }
+
+    /// <summary>
+    /// Ekran bu kareyle çevrildi: karede telefon varsa kart ekrandayken telefon izlenir (<see cref="ScreenPhoneFollow"/>).
+    /// Sohbet değişip durulunca ekran yeniden çevrilir (hafızadaki mesajlar hemen gelir), telefon aynıyken kartın süresi
+    /// uzar, telefon kapanınca kart kalkar. Önceden kart tek karenin çevirisiydi: başka sohbete geçince eskisi kalıyor,
+    /// süresi dolunca kayboluyordu (Mac ile aynı).
+    /// </summary>
+    private async Task FollowPhoneAsync(Frame frame)
+    {
+        var follow = screenFollow ?? new ScreenPhoneFollow();
+        var look = await Task.Run(() => ScreenPhoneFollow.Look(frame)).ConfigureAwait(true);
+        if (look is not { } found)
+        {
+            if (screenFollow == follow) StopFollowing();
+            return;
+        }
+        follow.Settled(found.Box, found.Signature);
+        if (screenFollow == follow) return;
+        StopFollowing();
+        screenFollow = follow;
+        var work = new CancellationTokenSource();
+        screenFollowWork = work;
+        try
+        {
+            while (!work.IsCancellationRequested)
+            {
+                await Task.Delay(ScreenPhoneFollow.Interval, work.Token).ConfigureAwait(true);
+                if (screenFollow != follow || !isRunning || DateTime.UtcNow >= screenShownUntil) return;
+                if (screenWork is not null || lastFrame is not { } current) continue;
+                var seen = await Task.Run(() => ScreenPhoneFollow.Look(current), work.Token).ConfigureAwait(true);
+                if (work.IsCancellationRequested || screenFollow != follow) return;
+                switch (follow.Next(seen?.Box, seen?.Signature))
+                {
+                    case ScreenPhoneFollow.Step.Keep:
+                        KeepScreen();
+                        break;
+                    case ScreenPhoneFollow.Step.Refresh:
+                        _ = TranslateScreenAsync(refresh: true);
+                        break;
+                    case ScreenPhoneFollow.Step.Stop:
+                        HideScreen();
+                        return;
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            // İzleme bitince (kart kalktı, süresi doldu) sonraki kart yeni bir izlemeyle başlar.
+            if (screenFollow == follow) StopFollowing();
+            work.Dispose();
+        }
+    }
+
+    private void StopFollowing()
+    {
+        screenFollowWork?.Cancel();
+        screenFollowWork = null;
+        screenFollow = null;
+    }
+
+    /// <summary>Telefon kartı izlenirken telefon aynı: çevirilerin süresi dolmak üzereyse yeniden gönderilip uzatılır.</summary>
+    private void KeepScreen()
+    {
+        if (screenItems.Count == 0 || (screenShownUntil - DateTime.UtcNow).TotalSeconds >= 5) return;
+        var milliseconds = ScreenTranslation.DisplayMilliseconds(screenItems);
+        server.SendScreen(screenItems, milliseconds);
+        screenShownUntil = DateTime.UtcNow.AddMilliseconds(milliseconds);
     }
 
     /// <summary>Ekran çevrilemedi: nedeni TV'de (ve bilgisayardaki altyazıda) birkaç saniye görünür, sessizce kaybolmaz.</summary>
@@ -1309,7 +1813,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     private void HideScreen()
     {
+        StopFollowing();
         screenShownUntil = default;
+        screenFingerprint = "";
+        screenItems = [];
         server.ClearScreen();
         server.Clear();
     }
@@ -1321,7 +1828,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         xboxGeneration++;
         services.Xbox?.Clear();
         foreach (var key in new[] { StoreKeys.AccountId, StoreKeys.Console, StoreKeys.ConsoleKind, StoreKeys.ConsoleKindLocked, StoreKeys.XboxToken, StoreKeys.XboxConsole,
-                     StoreKeys.Tv, StoreKeys.TvKey, StoreKeys.TvDevKey, StoreKeys.TvAppVersion, StoreKeys.SetupComplete, StoreKeys.LoginPasscode }) store.Remove(key);
+                     StoreKeys.Tv, StoreKeys.TvKey, StoreKeys.TvDevKey, StoreKeys.TvAppVersion, StoreKeys.TvAppSeen, StoreKeys.SetupComplete, StoreKeys.LoginPasscode }) store.Remove(key);
+        SamsungAppKnowledge.Forget(tv?.Host);
         accountId = null;
         console = null;
         consoleKind = GameConsoleKind.PlayStation;
@@ -1333,7 +1841,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         TvApp = TvAppState.Unknown;
         Step = OnboardingStep.Welcome;
         Changed(nameof(HasAccount), nameof(Console), nameof(ConsoleKind), nameof(ConsoleKindLocked), nameof(IsXbox), nameof(ConsoleTitle), nameof(HasXboxAccount),
-            nameof(SelectedXboxConsole), nameof(StepCount), nameof(StepNumber), nameof(Ps5StatusText), nameof(Tv), nameof(CanReinstallTvApp), nameof(HasTv), nameof(NeedsTv), nameof(CanStart), nameof(HasLoginPasscode));
+            nameof(SelectedXboxConsole), nameof(StepCount), nameof(StepNumber), nameof(Ps5StatusText), nameof(Tv), nameof(CanReinstallTvApp), nameof(CanReconnectTv), nameof(CanChangeTv), nameof(HasTv), nameof(NeedsTv), nameof(CanStart), nameof(HasLoginPasscode));
     }
 
     /// <summary>İkinci hesabın PS5 giriş şifresi şifreli depoda kayıtlı mı (şifrenin kendisi arayüze dönmez).</summary>
@@ -1359,11 +1867,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public async Task StartAsync()
     {
         // Düğmeye iki kez basılması ya da beklerken tekrar çağrılması ikinci bir oturum açmaz.
-        if (isRunning || isStarting || !CanStart) return;
-        // PS5 için hesap gerekir; Remote Play, açıkça seçilen OBS/oyun penceresi ve Xbox için gerekmez.
-        var readsWindow = !IsXbox && settings.FrameSource == FrameSource.RemotePlayWindow;
-        var readsCapture = !IsXbox && settings.FrameSource == FrameSource.CaptureWindow;
-        if (!IsXbox && !readsWindow && !readsCapture && (console is null || accountId is null)) return;
+        if (isRunning || isStarting || (!CanStart && !demoMode)) return;
+        // PS5 için hesap gerekir; Remote Play, açıkça seçilen OBS/oyun penceresi ve Xbox için gerekmez. Deneme modu hiçbirini istemez.
+        var readsWindow = !demoMode && !IsXbox && settings.FrameSource == FrameSource.RemotePlayWindow;
+        var readsCapture = !demoMode && !IsXbox && settings.FrameSource == FrameSource.CaptureWindow;
+        if (!demoMode && !IsXbox && !readsWindow && !readsCapture && (console is null || accountId is null)) return;
         IsStarting = true;
         try
         {
@@ -1372,20 +1880,29 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             RefreshTranslatorStatus();
             try { await StartServerAsync(); } catch { /* port açılamadıysa TV durumu "bekleniyor" kalır */ }
             server.SendStyle(settings.Style);
+            // Konuşan renkleri oturum başına: yeni oturumda kişiler yeniden sıralanır.
+            server.SpeakerBook.Reset();
             SubtitlesPaused = false;
             MetricsText = "";
+            framesSince = null;
+            sawLineThisRun = false;
+            ShowsSubtitleOffTip = false;
             MakePipeline();
             if (settings.Dubbing.Enabled && DubbingInstalled) MakeDubber()?.Prepare();
             SubtitleLog.Write($"oturum başladı: {settings.SourceLanguage}→{settings.TargetLanguage}, "
-                + $"motor: {(OnlineTranslationActive ? settings.OnlineEngine.ToString() : "ücretsiz")}, paketler: {(settings.GamePacks ? "açık" : "kapalı")}, "
-                + $"görüntü: {(IsXbox ? "Xbox" : readsWindow ? "Remote Play penceresi" : readsCapture ? "seçilen pencere" : "PS5")}");
+                + $"motor: {(OnlineTranslationActive ? settings.OnlineEngine.ToString() : "ücretsiz")}, seçilen motor: {settings.Engine}, paketler: {(settings.GamePacks ? "açık" : "kapalı")}, "
+                + $"görüntü: {(demoMode ? "deneme modu" : IsXbox ? "Xbox" : readsWindow ? "Remote Play penceresi" : readsCapture ? "seçilen pencere" : "PS5")}");
 
             IStreamSession stream;
-            if (IsXbox)
+            if (demoMode)
+            {
+                RemotePlayLog.Note("Deneme modu başladı (örnek kareler)");
+                stream = services.MakeDemoStream();
+            }
+            else if (IsXbox)
             {
                 RemotePlayLog.Note($"Çeviri başladı; {ConsoleTitle} bağlantısı açılıyor.");
-                stream = (services.Xbox ?? throw new InvalidOperationException(text["Xbox streaming isn't available in this version."]))
-                    .MakeStream(xboxConsole!, xboxToken!, settings.XboxLegacyFrameRate, settings.XboxAudioOnComputer);
+                stream = MakeConsoleStream();
                 xboxNameChecked = false;
             }
             else if (readsWindow)
@@ -1402,20 +1919,31 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             else
             {
                 RemotePlayLog.Note($"Çeviri başladı; PS5'e bağlanılıyor: {console!.Name} {console.Host}");
-                stream = services.MakeStream(console, accountId!, store.Load<string>(StoreKeys.LoginPasscode));
+                stream = MakeConsoleStream();
             }
-            stream.StateChanged += state => post(() => SessionStateChanged(state));
-            stream.ConsoleMoved += moved => post(() => ConsoleMoved(moved));
-            stream.FrameReceived += HandleFrame;
-            stream.Start();
+            sessionIsConsole = !demoMode && !readsWindow && !readsCapture;
+            Attach(stream);
+            // Oturum başlamadan atanır: bağlanır bağlanmaz gelen durum "eski oturumun" sayılıp atılmasın (bkz. Attach).
             session = stream;
+            stream.Start();
+            reconnectOffer.Reset(Clock());
 
+            server.Pairing.SetSession(true);
             StartKeeper();
-            StartGameSense();
+            // Deneme karelerinde oyun yoktur: oyun sorulmaz, oyuna göre alan uygulanmaz.
+            if (demoMode) gameSense.StartSession();
+            else StartGameSense();
 
             sleep.Begin(KeepsDisplayOn);
             IsRunning = true;
             UpdateTroubleClocks();
+            if (!settings.UsageNoticeSeen) Settings = settings with { UsageNoticeSeen = true };
+            if (!demoMode)
+            {
+                usageSession = new UsageSession();
+                services.Usage?.Record(UsageStats.Event.SessionStart(UsageTarget,
+                    OnlineTranslationActive ? settings.OnlineEngine.ToString().ToLowerInvariant() : "free", settings.GamePacks, UsageConsole));
+            }
         }
         catch (Exception error)
         {
@@ -1438,8 +1966,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     {
         if (keeper is not null || !ShowsOnTv || !HasTv || tv is not { } target) return;
         var running = server;
-        var tvKeeper = services.MakeKeeper(target, store.Load<string>(StoreKeys.TvKey), new Dictionary<string, string> { ["server"] = ServerAddress(target) },
-            () => running.ConnectedClients > 0, moved => post(() => TvMoved(moved)), key => post(() => store.Save(StoreKeys.TvKey, key)));
+        var tvKeeper = services.MakeKeeper(target, store.Load<string>(StoreKeys.TvKey), new Dictionary<string, string> { ["server"] = ServerAddress(target), ["key"] = server.AccessKey },
+            () => running.ConnectedClients > 0, moved => post(() => TvMoved(moved)), key => post(() => store.Save(StoreKeys.TvKey, key)), () => server.ConsolePort,
+            problem => post(() => OpenResult(problem, target.Brand)));
         tvKeeper.Start(TimeSpan.FromSeconds(5));
         keeper = tvKeeper;
         _ = RefreshTvAppAsync();
@@ -1462,7 +1991,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             OverlayAdjusting = false;
             OverlayHidden?.Invoke();
         }
-        Changed(nameof(ShowsOnTv), nameof(ShowsOnComputer), nameof(NeedsTv), nameof(CanStart), nameof(CanAdvance));
+        Changed(nameof(ShowsOnTv), nameof(ShowsOnComputer), nameof(NeedsTv), nameof(CanStart), nameof(CanAdvance), nameof(ShowTvOpenHint));
         UpdateTroubleClocks();
         if (!isRunning) return;
         sleep.Begin(KeepsDisplayOn);
@@ -1489,8 +2018,18 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     private bool overlayAdjusting;
 
-    /// <summary>Pencerenin yeri ve genişliği ayarlanıyor: örnek yazı görünür, tıklamalar geçmez.</summary>
-    public bool OverlayAdjusting { get => overlayAdjusting; set => Set(ref overlayAdjusting, value); }
+    /// <summary>Pencerenin yeri ve boyu ayarlanıyor ("Altyazıyı konumlandır"): örnek yazı görünür, tıklamalar geçmez;
+    /// değişiklik <see cref="CommitOverlayEdit"/> ile kaydedilir, başka yoldan kapanırsa (Esc, altyazı bilgisayardan
+    /// kalktı) kaydedilmez.</summary>
+    public bool OverlayAdjusting
+    {
+        get => overlayAdjusting;
+        set
+        {
+            if (value != overlayAdjusting) OverlayDraft = null;
+            Set(ref overlayAdjusting, value);
+        }
+    }
 
     private bool hotkeysPaused;
 
@@ -1505,6 +2044,24 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     /// <summary>Taşınan ya da genişletilen pencerenin yeri kaydedilir.</summary>
     public void SaveOverlayBounds(OverlayBounds bounds) => Settings = settings with { Overlay = bounds };
+
+    /// <summary>Düzenlenirken pencerenin son yeri ve boyu; kaydedilmemiştir (<see cref="CommitOverlayEdit"/> kaydeder).</summary>
+    public OverlayBounds? OverlayDraft { get; set; }
+
+    /// <summary>"Altyazıyı konumlandır" bitti (çift tık, Enter ya da Bitti): yeni yer kaydedilir, düzenleme kapanır.</summary>
+    public void CommitOverlayEdit()
+    {
+        if (OverlayAdjusting && OverlayDraft is { } draft) SaveOverlayBounds(draft);
+        OverlayDraft = null;
+        OverlayAdjusting = false;
+    }
+
+    /// <summary>Esc: düzenleme kapanır, kayıt değişmez; pencere düzenlemeden önceki yerine döner.</summary>
+    public void CancelOverlayEdit()
+    {
+        OverlayDraft = null;
+        OverlayAdjusting = false;
+    }
 
     private void OnSubtitleEvent(SubtitleEvent e)
     {
@@ -1536,10 +2093,39 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     }
 
     /// <summary>Bilgisayarın ağ adresiyle OBS sayfası; localhost'u kabul etmeyen yayın programları (TikTok LIVE Studio) için.</summary>
-    public string? NetworkObsAddress => LocalAddress(null) is { } address ? $"http://{address}:{ServerPort}/obs" : null;
+    public string? NetworkObsAddress => LocalAddress(null) is { } address ? $"http://{address}:{ServerPort}/obs?k={server.AccessKey}" : null;
 
-    /// <summary>Kullanıcı çeviriyi durdurdu: oturum biter, TV uygulaması da kapanır (#268).</summary>
-    public void Stop() => _ = StopSession(closeTvApp: true);
+    /// <summary>"Başka bir cihazda göster" adresi (QR kodu da bundan); bilgisayar ev ağına bağlı değilse null.</summary>
+    public string? SecondScreenAddress => LocalAddress(null) is { } address ? SecondScreen.Address(address, ServerPort, server.AccessKey) : null;
+
+    /// <summary>
+    /// Deneme modunu açar: konsol, hesap ve TV olmadan örnek karelerle çeviri başlar (altyazı ana pencerede ve seçiliyse
+    /// bilgisayar ekranında ya da TV'de). Çalışan çeviri önce durdurulur. Başlatılamazsa deneme modu kapanır.
+    /// </summary>
+    public async Task StartDemoAsync()
+    {
+        if (isStarting) return;
+        if (isRunning) Stop();
+        DemoMode = true;
+        try
+        {
+            await StartAsync();
+        }
+        finally
+        {
+            if (!isRunning) DemoMode = false;
+        }
+    }
+
+    /// <summary>Deneme modundan çıkar; uygulama kaldığı yere (kurulum ya da ana ekran) döner.</summary>
+    public void ExitDemo() => Stop();
+
+    /// <summary>Kullanıcı çeviriyi durdurdu: oturum biter, TV uygulaması da kapanır (#268). Deneme modu da kapanır.</summary>
+    public void Stop()
+    {
+        _ = StopSession(closeTvApp: true);
+        DemoMode = false;
+    }
 
     /// <summary>
     /// Ayar değişikliği gibi iç yeniden başlatmalarda kullanılır: oturum biter ama TV uygulaması açık kalır; hemen
@@ -1550,9 +2136,16 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     /// <summary>Oturumu bitirir; TV uygulamasına çıkış gönderildiyse mesajın yazılmasını bekleyen görevi döner.</summary>
     private Task StopSession(bool closeTvApp)
     {
+        if (usageSession is { } finished)
+        {
+            usageSession = null;
+            services.Usage?.Record(UsageStats.Event.SessionStop((int)(DateTime.UtcNow - finished.Started).TotalSeconds, finished.Lines, finished.PackLines));
+        }
+        server.Pairing.SetSession(false);
         var stoppedKeeper = keeper;
         keeper = null;
         stoppedKeeper?.Stop();
+        OpenProblem = null;
         var exiting = closeTvApp && stoppedKeeper is not null ? server.ExitTvApp() : Task.CompletedTask;
         session?.Stop();
         session?.Dispose();
@@ -1561,6 +2154,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         StopGameSense();
         EndGameAreas();
         pipeline?.Reset();
+        framesSince = null;
+        ShowsSubtitleOffTip = false;
         if (pipeline is not null) SubtitleLog.Write("oturum bitti");
         pipeline = null;
         UpdateRegionWatcher();
@@ -1578,6 +2173,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         if (isRunning) sleep.End();
         IsRunning = false;
         SessionState = SessionState.Disconnected(DisconnectKind.Stopped);
+        reconnectOffer.Reset();
+        sessionIsConsole = false;
+        UpdateReconnectOffer();
         UpdateTroubleClocks();
         firewallRuleSeen = false;
         ClearFirewallPrompt();
@@ -1589,9 +2187,109 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     /// <summary>Bilgisayar uykudan uyanınca bağlantıları hemen yenile.</summary>
     public void SystemResumed()
     {
-        session?.ReconnectNow();
+        if (session?.HasGivenUp == true)
+        {
+            // Oturum yeniden denemeyi bırakmıştı: ReconnectNow bir şey yapmaz; yeni oturum açılır (Mac ve iPhone ile aynı).
+            // Kayıt ya da giriş şifresi sorununda açılmaz (aynı yere çıkar; "Yeniden bağlan" düğmesi görünür).
+            if (ReconnectsOnReturn(sessionState))
+            {
+                Reconnect("uykudan uyanış; oturum yeniden denemeyi bırakmıştı");
+                return;
+            }
+        }
+        else session?.ReconnectNow();
         keeper?.Reconnect();
     }
+
+    /// <summary>Konsola (PS5 ya da Xbox) bağlanan oturumu kurar; başlatmaz. "Çeviriyi başlat" ve "Yeniden bağlan" kullanır.</summary>
+    private IStreamSession MakeConsoleStream() => IsXbox
+        ? (services.Xbox ?? throw new InvalidOperationException(text["Xbox streaming isn't available in this version."]))
+            .MakeStream(xboxConsole!, xboxToken!, settings.XboxLegacyFrameRate, settings.XboxAudioOnComputer)
+        : services.MakeStream(console!, accountId!, store.Load<string>(StoreKeys.LoginPasscode));
+
+    /// <summary>
+    /// Oturumun olayları denetçiye bağlanır. Yeniden bağlanırken kapatılan eski oturumun geç gelen olayı (Xbox'ta "durdu",
+    /// PS5'te kapanış) yeni oturumun durumunu ezmez, eski oturumun karesi okunmaz.
+    /// </summary>
+    private void Attach(IStreamSession stream)
+    {
+        stream.StateChanged += state => post(() =>
+        {
+            if (ReferenceEquals(session, stream)) SessionStateChanged(state);
+        });
+        stream.ConsoleMoved += moved => post(() => ConsoleMoved(moved));
+        stream.FrameReceived += frame =>
+        {
+            if (ReferenceEquals(session, stream)) HandleFrame(frame);
+        };
+    }
+
+    /// <summary>
+    /// "Yeniden bağlan" (ve oturumun bıraktığı bağlantıda uykudan uyanış): konsol oturumu kapatılıp yenisi açılır, TV
+    /// bağlantısı yoklanır. Çeviri sürer (geçmiş, oyun seçimi, süre korunur). Eskiden oturum yeniden denemeyi bırakınca
+    /// (PS5'te Uzaktan Oynatma çöktü, Xbox denemeleri bitti) ya da uzun süre bağlanamayınca tek çare uygulamayı kapatıp
+    /// açmaktı (Mac, iPhone ve Android ile aynı).
+    /// </summary>
+    public void Reconnect(string reason = "kullanıcı")
+    {
+        if (!isRunning || isStarting || demoMode || !sessionIsConsole) return;
+        RemotePlayLog.Note($"Yeniden bağlanılıyor ({reason}); son durum: {sessionState.Phase} ({DisconnectLogName(sessionState.Reason)})");
+        SubtitleLog.Write($"bağlantı yeniden kuruluyor ({reason})");
+        var old = session;
+        session = null;
+        old?.Stop();
+        old?.Dispose();
+        frameGate.Reset();
+        framesSince = null;
+        IStreamSession stream;
+        try
+        {
+            stream = MakeConsoleStream();
+        }
+        catch (Exception error)
+        {
+            RemotePlayLog.Note($"Yeniden bağlanılamadı: {error.GetType().Name}: {error.Message}");
+            SessionState = SessionState.Disconnected(DisconnectKind.Other, error.Message);
+            UpdateReconnectOffer();
+            return;
+        }
+        Attach(stream);
+        session = stream;
+        if (IsXbox) xboxNameChecked = false;
+        SessionState = SessionState.Connecting;
+        stream.Start();
+        reconnectOffer.Reset(Clock());
+        UpdateReconnectOffer();
+        UpdateSubtitleOffTip();
+        UpdateTroubleClocks();
+        if (keeper is null) StartKeeper();
+        else keeper.Reconnect();
+    }
+
+    /// <summary>
+    /// Oturum yeniden denemeyi bıraktıysa uykudan uyanınca kendiliğinden yeniden bağlanılır mı. Kayıt ya da giriş şifresi
+    /// sorununda hayır: aynı yere çıkar (yanlış şifre yeniden gönderilmez); kullanıcı düzeltip düğmeye basar (iPhone
+    /// PhoneModel.reconnectsOnReturn ile aynı kural).
+    /// </summary>
+    public static bool ReconnectsOnReturn(SessionState state) =>
+        state.Phase != SessionPhase.Disconnected || state.Reason?.Kind is not
+            (DisconnectKind.RegistrationInvalid or DisconnectKind.LoginPasscode or DisconnectKind.LoginPasscodeIncorrect
+             or DisconnectKind.Stopped);
+
+    /// <summary>
+    /// Ana ekrandaki "Yeniden bağlan" düğmesi: oturum yeniden denemeyi bıraktıysa hemen, süren denemelerde 45 sn sonra
+    /// (bkz. <see cref="ReconnectOffer"/>; Mac, iPhone ve Android ile aynı kural). Yalnız konsola doğrudan bağlanırken
+    /// (pencereden okurken ya da deneme modunda yok).
+    /// </summary>
+    public bool OffersReconnect { get => offersReconnect; private set => Set(ref offersReconnect, value); }
+    private bool offersReconnect;
+    private readonly ReconnectOffer reconnectOffer = new();
+    /// <summary>Bu çeviri PS5'e ya da Xbox'a doğrudan bağlanıyor (Remote Play ya da seçilen pencereden okumuyor).</summary>
+    private bool sessionIsConsole;
+
+    private void UpdateReconnectOffer() =>
+        OffersReconnect = isRunning && !demoMode && sessionIsConsole && session is not null
+                          && reconnectOffer.Shows(session.HasGivenUp, Clock());
 
     /// <summary>Çeviri başlamamışken bağlı olmamak bir sorun değildir; nokta gri kalır.</summary>
     public static StatusTone Ps5ToneFor(SessionState state, bool running) =>
@@ -1643,7 +2341,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         {
             DisconnectKind.ConsoleAsleep => text["Turn on your PS5"],
             DisconnectKind.InUse => text["Remote Play is in use on another device"],
-            DisconnectKind.Refused => text["The PS5 refused the connection. Set up the PS5 again."],
+            // Eskiden "PS5'i yeniden kurun" deniyordu; TCP reddi eşleme sorunu değildir, yeniden eşlemek çözmez.
+            DisconnectKind.Refused => text["The PS5 did not accept the connection yet. It may still be starting up, or its network address may have changed. Reconnecting and searching for the PS5… If this keeps happening, make sure the PS5 is on and on the same network."],
             DisconnectKind.LoginPasscode => text["The PS5 asks for this account's login passcode. Enter it in Settings, or turn off this account's login passcode on the PS5."],
             // Yanlış şifre bir kez gönderilir; PS5 yeniden isterse oturum kapanır (döngü yok).
             DisconnectKind.LoginPasscodeIncorrect => text["The PS5 didn't accept the login passcode in Settings. Correct it, or turn off this account's login passcode on the PS5."],
@@ -1651,10 +2350,18 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             DisconnectKind.RegistrationInvalid => text["The PS5 didn't accept this pairing. Pair the PS5 again with the second account in Settings."],
             // Eskiden ağ hatası, bulunamayan PS5 ve diğer nedenler hep yalnız "Yeniden bağlanılıyor…" idi.
             DisconnectKind.NotFound => text.Format("PS5 not found at %@. Make sure it is on and on the same network. Reconnecting…", detail ?? "?"),
-            DisconnectKind.Network => text["Can't reach the PS5. Reconnecting…"],
+            // Kablosuz ağda akış sık kopuyordu (GitHub #388, #401): yeniden bağlanılır, kalıcı çözüm kablodur.
+            DisconnectKind.Network => text["Lost the connection to the PS5. Reconnecting… If this keeps happening, connect the PS5 to the router with a cable."],
+            // 0x80108b12: PS5'te Uzaktan Oynatma kapalı (GitHub #9). Ayar açılınca yeniden denemede bağlanılır.
+            DisconnectKind.Rejected when detail == ApplicationReasons.RemotePlayDisabled =>
+                text.Format("Remote Play is turned off on the PS5 (code %@). On the PS5, go to Settings › System › Remote Play and turn on Enable Remote Play.", detail),
             // Eskiden "Yeniden bağlanılıyor… (Unknown Session Request Error)" görünüyordu (GitHub #33, #202).
             DisconnectKind.Rejected when !string.IsNullOrEmpty(detail) => text.Format("The PS5 rejected the connection (code %@). Another Remote Play app (PS Remote Play) may be open, or the PS5 may be in another session. Close PS Remote Play, restart the PS5, then try again.", detail),
             DisconnectKind.Rejected => text["The PS5 didn't start the session. Another Remote Play app (PS Remote Play) may be open, or the PS5 may be in another session. Close PS Remote Play, restart the PS5, then try again."],
+            // Eskiden İngilizce "Remote Play on Console has crashed" ile sonsuza kadar "Yeniden bağlanılıyor…" (GitHub #519).
+            // PS5 akışı kendisi kapattı (ör. oyun sırasında PS5'te kullanıcı değişti): eskiden "kabloyla bağlayın" deniyordu.
+            DisconnectKind.ConsoleClosed => text["The PS5 ended Remote Play. This usually happens when the user is switched on the PS5 during the game. Reconnecting…"],
+            DisconnectKind.ConsoleRemotePlayCrashed => text["Remote Play on the PS5 has crashed. Turn the PS5 off completely (not rest mode) and back on, then connect again."],
             DisconnectKind.Other when !string.IsNullOrEmpty(detail) => text.Format("Reconnecting… (%@)", detail),
             _ => text["Reconnecting…"],
         };
@@ -1673,6 +2380,12 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         server.Dispose();
         poolTimer?.Dispose();
         packTimer?.Dispose();
+        usageTimer?.Dispose();
+        if (services.Usage is { } usage)
+        {
+            try { usage.FlushAsync().Wait(TimeSpan.FromSeconds(2)); }
+            catch (AggregateException) { }
+        }
         // Kapanırken kuyruk bir kez daha gönderilir; en çok birkaç saniye beklenir.
         if (services.Pool is { } pool)
         {
@@ -1748,10 +2461,85 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public bool AreaProfileUnsaved => settings.AreasDifferFromProfile;
 
     /// <summary>
-    /// Alanların kaydedilebileceği oyun: çeviri sürüyor ve oyun biliniyor. Profil etkinse o profilin oyunu; değilse
-    /// oynanan oyun ("Bu alanları X için kaydet").
+    /// Alanların kaydedilebileceği oyun (çeviri sürerken): oynanan oyun, bilinmiyorsa etkin profilin oyunu. Kaydetme
+    /// düğmesi bu adı taşır; başka bir oyunun profiline sessizce yazılmaz.
     /// </summary>
-    public string? AreaProfileTarget => session is null ? null : AreaProfileGame ?? PlayedGame;
+    public string? AreaProfileTarget => session is null ? null : PlayedGame ?? AreaProfileGame;
+
+    /// <summary>
+    /// Hedef oyunun kayıtlı profili var ama uygulanmadı (öneri bekliyor ya da "Hayır" dendi): "X için kaydet" yerine
+    /// "Kayıtlı alanları kullan" gösterilir; kayıtlı alanların üzerine yazılmaz.
+    /// </summary>
+    public bool AreaProfileTargetHasOther =>
+        AreaProfiles.Key(AreaProfileTarget, settings.AreaSource) is { } key && key != settings.ActiveAreaProfile
+        && settings.FindAreaProfile(key) is not null;
+
+    /// <summary>Ayarlar'daki oyun profilleri (şu anki görüntü kaynağının), ada göre.</summary>
+    public IReadOnlyList<AreaProfile> GameProfiles => settings.GameProfiles;
+
+    /// <summary>Okunan alanlar adı yazılan oyunun yeni profili olur ve oynanan oyun o olur (çeviri dururken de).</summary>
+    public AreaProfiles.Edit SaveAreaProfileAs(string game)
+    {
+        var (next, edit) = settings.WithNewAreaProfile(game);
+        if (edit != AreaProfiles.Edit.Done) return edit;
+        if (next.ActiveAreaProfile is { } key) declinedAreaProfiles.Remove(key);
+        SetOfferedAreaProfile(null);
+        Settings = next;
+        SubtitleLog.Write("yeni alan profili: " + next.ActiveAreaProfile);
+        ChooseProfileGame(game);
+        return edit;
+    }
+
+    /// <summary>Listeden profil seçildi: alanları uygulanır, oynanan oyun o olur.</summary>
+    public void UseAreaProfile(string key)
+    {
+        if (settings.FindAreaProfile(key) is not { } profile) return;
+        declinedAreaProfiles.Remove(key);
+        SetOfferedAreaProfile(null);
+        ApplyAreaProfile(profile);
+        ChooseProfileGame(profile.Game);
+    }
+
+    /// <summary>Profil yeniden adlandırılır; etkin profilse oynanan oyun da yeni ad olur.</summary>
+    public AreaProfiles.Edit RenameAreaProfile(string key, string game)
+    {
+        var wasActive = settings.ActiveAreaProfile == key;
+        var (next, edit) = settings.WithRenamedAreaProfile(key, game);
+        if (edit != AreaProfiles.Edit.Done) return edit;
+        Settings = next;
+        if (wasActive) ChooseProfileGame(game);
+        return edit;
+    }
+
+    /// <summary>Profilin alanları başka bir oyun adıyla kopyalanır.</summary>
+    public AreaProfiles.Edit DuplicateAreaProfile(string key, string game)
+    {
+        var (next, edit) = settings.WithDuplicatedAreaProfile(key, game);
+        if (edit == AreaProfiles.Edit.Done) Settings = next;
+        return edit;
+    }
+
+    /// <summary>Listeden profil silinir; etkinse genel alanlara dönülür.</summary>
+    public void DeleteAreaProfile(string key)
+    {
+        if (offeredAreaProfile == key) SetOfferedAreaProfile(null);
+        Settings = settings.WithoutAreaProfile(key);
+        SubtitleLog.Write("alan profili silindi: " + key);
+    }
+
+    /// <summary>Profil seçilince oynanan oyun o olur; çeviri dururken yalnız seçim saklanır (oturum başlayınca uygulanır).</summary>
+    private void ChooseProfileGame(string game)
+    {
+        if (session is not null)
+        {
+            ChooseGame(game);
+            return;
+        }
+        if (RunningGame.Named(game)?.Name is not { } clean) return;
+        gameSense.Choose(clean);
+        services.GamePacks?.LimitToGame(gameSense.PackLimit);
+        PlayedGame = clean;
+    }
 
     /// <summary>Paketten tanınan oyunun kayıtlı alanları var; kullanıcıya sorulur. Kartta gösterilen oyun adı.</summary>
     public string? OfferedAreaProfileGame => settings.FindAreaProfile(offeredAreaProfile)?.Game;
@@ -1782,7 +2570,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     /// <summary>Okunan alanlar etkin profile, profil yoksa oynanan oyuna kaydedilir.</summary>
     public void SaveAreaProfile()
     {
-        if (AreaProfileTarget is not { } game) return;
+        if (AreaProfileTarget is not { } game || AreaProfileTargetHasOther) return;
         declinedAreaProfiles.RemoveWhere(key => key == AreaProfiles.Key(game, settings.AreaSource));
         Settings = settings.WithSavedAreaProfile(game);
         SubtitleLog.Write("alan profili kaydedildi: " + settings.ActiveAreaProfile);
@@ -1791,9 +2579,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     /// <summary>Etkin profil silinir ve genel alanlara dönülür.</summary>
     public void DeleteAreaProfile()
     {
-        if (settings.ActiveAreaProfile is not { } key) return;
-        Settings = settings.WithoutAreaProfile(key);
-        SubtitleLog.Write("alan profili silindi: " + key);
+        if (settings.ActiveAreaProfile is { } key) DeleteAreaProfile(key);
     }
 
     private void ApplyAreaProfile(AreaProfile profile)
@@ -1848,7 +2634,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         PlayedGame = current?.Name;
         FollowGameAreas();
         if (current == publishedGame) return;
+        // Yeni oyunda aynı HUD satırının çevirisi ve paketi farklı olabilir.
+        regionWatcher?.Reset();
         publishedGame = current;
+        UpdateRegionWatcher();
         services.Pool?.SetGame(current);
         if (current is not null && services.PackUpdates is { } packUpdater) _ = RefreshPacksAsync(packUpdater, maxAge: PackUpdater.GameCheckInterval);
     }
@@ -1882,6 +2671,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     private void StopGameSense()
     {
+        gameSense.EndSession();
         gameAsk?.Cancel();
         gameAsk?.Dispose();
         gameAsk = null;
@@ -1901,6 +2691,70 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     private PackMatch? FindShown(string text) => settings.TargetLanguage == "ar" ? services.FindInArabicPacks(text) : services.FindInPacks(text);
 
+    /// <summary>Kullanım verisi dakikada bir, arka planda gönderilir; ağ hatasında sonraki tura kalır.</summary>
+    private void StartUsage()
+    {
+        if (services.Usage is not { } usage) return;
+        usage.SetEnabled(settings.UsageData);
+        usage.Record(UsageStats.Event.Screen(ScreenName(step)));
+        usageTimer = new Timer(_ => _ = usage.FlushAsync(), null, UsageStats.FlushInterval, UsageStats.FlushInterval);
+    }
+
+    /// <summary>Kullanım verisinde ekranın adı (Mac ile aynı); kurulum bitince ana ekran.</summary>
+    public static string ScreenName(OnboardingStep step) => step switch
+    {
+        OnboardingStep.Welcome => "welcome",
+        OnboardingStep.SecondAccount => "second_account",
+        OnboardingStep.PsnLogin => "psn_login",
+        OnboardingStep.Console => "console",
+        OnboardingStep.Tv => "tv",
+        OnboardingStep.Translation => "translation",
+        OnboardingStep.Test => "test",
+        OnboardingStep.BetterTranslation => "better_translation",
+        _ => "home",
+    };
+
+    /// <summary>Ayarlar, geçmiş gibi ayrı pencereler açıldı (kullanım verisinde ekran).</summary>
+    public void NoteScreen(string name) => services.Usage?.Record(UsageStats.Event.Screen(name));
+
+    /// <summary>Kullanım verisindeki altyazı hedefi (tv, computer, both) ve konsol türü (ps5, xbox).</summary>
+    private string UsageTarget => settings.Output.ToString().ToLowerInvariant();
+    private string UsageConsole => IsXbox ? "xbox" : "ps5";
+
+    /// <summary>Kullanım verisindeki TV markası (Mac ile aynı adlar).</summary>
+    public static string UsageBrand(TvBrand? brand) => brand switch
+    {
+        TvBrand.Lg => "lg",
+        TvBrand.Samsung => "samsung",
+        TvBrand.AndroidTv => "androidTV",
+        _ => "unknown",
+    };
+
+    /// <summary>İlk açılıştaki kullanım verisi notu: ölçüm bu derlemede varsa ve not daha önce görülmediyse.</summary>
+    public bool ShowsUsageNotice => services.Usage is { IsConfigured: true } && !settings.UsageNoticeSeen;
+    /// <summary>Ayarlardaki "Kullanım verisi" anahtarı yalnız ölçüm bu derlemede varsa görünür.</summary>
+    public bool UsageConfigured => services.Usage is { IsConfigured: true };
+
+    /// <summary>Gösterilen satır kullanım verisinin oturum sayımına girer; paketten geldiyse paketi oturumda bir kez bildirilir.</summary>
+    private void CountUsageLine(bool fromPack, string? pack)
+    {
+        if (usageSession is not { } current) return;
+        current.Lines++;
+        if (fromPack)
+        {
+            current.PackLines++;
+            if (pack is not null && current.Packs.Add(pack)) services.Usage?.Record(UsageStats.Event.PackHit(pack));
+        }
+    }
+
+    private sealed class UsageSession
+    {
+        public DateTime Started { get; } = DateTime.UtcNow;
+        public int Lines { get; set; }
+        public int PackLines { get; set; }
+        public HashSet<string> Packs { get; } = [];
+    }
+
     private void StartPacksAndPool()
     {
         // Paketler ilk altyazıyı bekletmesin diye açılışta arka planda yüklenir.
@@ -1911,6 +2765,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                 post(() => InstalledPacks = packs.Packs);
             });
         StartPackUpdates();
+        StartUsage();
         if (services.Pool is not { } pool) return;
         pool.SetEnabled(settings.SharePool);
         // Beş dakikada bir gönderilir; sunucuya ulaşılamazsa kuyruk diskte bekler, sonra yeniden denenir.
@@ -1930,6 +2785,52 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             _ = RefreshPacksAsync(updater, force: first);
             first = false;
         }, null, TimeSpan.Zero, PackUpdater.RefreshInterval);
+    }
+
+    /// <summary>Paket sunucusu yapılandırılmış ("Paketleri şimdi güncelle" düğmesi açık).</summary>
+    public bool CanUpdatePacks => services.PackUpdates is not null && services.GamePacks is not null;
+
+    /// <summary>
+    /// Elle güncelleme (Ayarlar > Oyun paketleri; telefonlardaki "Paketleri şimdi güncelle" ile aynı): süresine bakmadan
+    /// listeyi sunucudan alır, değişen paketleri indirir ve neyin geldiğini özetler. Paket sunucusu yapılandırılmamışsa null.
+    /// </summary>
+    public async Task<PackUpdateOutcome?> UpdatePacksNowAsync()
+    {
+        if (services.PackUpdates is not { } updater || services.GamePacks is not { } packs) return null;
+        var text = Localizer.Current;
+        var unreachable = text["No internet connection, or the pack server could not be reached."];
+        return await Task.Run(async () =>
+        {
+            var before = packs.Packs.Select(pack => (pack.Id, pack.Entries)).ToList();
+            PackUpdater.Refresh result;
+            try
+            {
+                result = await updater.RefreshAsync(force: true).ConfigureAwait(false);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or HttpRequestException)
+            {
+                return new PackUpdateOutcome(PackUpdateOutcome.Kind.Failed, new PackUpdateSummary(before, []), unreachable);
+            }
+            if (result.Changed)
+            {
+                packs.Reload();
+                post(() => InstalledPacks = packs.Packs);
+                SubtitleLog.Write("paketler güncellendi: " + string.Join(", ", result.Downloaded.Concat(result.Removed)));
+            }
+            var after = packs.Packs;
+            var titles = updater.InstalledPacks.GroupBy(pack => pack.Id).ToDictionary(group => group.Key, group => group.Last().Title);
+            var summary = new PackUpdateSummary(before, result.Downloaded.Select(id =>
+            {
+                // Satır sayısı yeniden okunan kitaplıktan (gerçekte yüklenen).
+                var pack = after.LastOrDefault(pack => pack.Id == id);
+                return new PackUpdateSummary.Downloaded(id, pack?.Title ?? titles.GetValueOrDefault(id, id), pack?.Entries ?? 0);
+            }));
+            if (result.Failed) return new PackUpdateOutcome(PackUpdateOutcome.Kind.Failed, summary, unreachable);
+            if (result.Incomplete)
+                return new PackUpdateOutcome(PackUpdateOutcome.Kind.Failed, summary,
+                    text["A downloaded pack could not be verified; it may have arrived incomplete."]);
+            return new PackUpdateOutcome(summary.IsEmpty ? PackUpdateOutcome.Kind.UpToDate : PackUpdateOutcome.Kind.Updated, summary);
+        }).ConfigureAwait(true);
     }
 
     private async Task RefreshPacksAsync(PackUpdater updater, bool force = false, TimeSpan? maxAge = null)
@@ -1986,7 +2887,21 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         }, CancellationToken.None);
     }
 
-    private void ConnectPacks(SubtitlePipeline target) => target.PackLookup = PacksActive ? FindShown : null;
+    private void ConnectPacks(SubtitlePipeline target)
+    {
+        // Deneme satırları paketlerde aranmaz (havuza da önerilmez, bkz. OfferToPool).
+        if (demoMode)
+        {
+            target.PackLookup = null;
+            target.PartialPackLookup = null;
+            return;
+        }
+        target.PackLookup = PacksActive ? FindShown : null;
+        // Kısmi eşleşme yalnız GTA'da denendi; öteki oyunlarda okumanın tamamı eskisi gibi motora gider.
+        target.PartialPackLookup = PacksActive && settings.TargetLanguage == "tr"
+            ? text => ScreenText.IsGta(gameSense.Current?.Name) ? services.FindPartialInPacks(text) : null
+            : null;
+    }
 
     /// <summary>Gelişmiş ayarlardaki bekleme süreleri (0–2 sn).</summary>
     private void ApplyWaits(SubtitlePipeline target)
@@ -1999,7 +2914,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private void OfferToPool(string text)
     {
         // Arabic fork: the pool feeds the Turkish packs, so nothing is sent for other targets.
-        if (settings.SourceLanguage != "en" || settings.TargetLanguage != "tr" || services.Pool is not { } pool) return;
+        if (demoMode || settings.SourceLanguage != "en" || settings.TargetLanguage != "tr" || services.Pool is not { } pool) return;
         if (!PacksActive && services.FindInPacks(text) is not null) return;
         pool.Offer(text);
     }
@@ -2012,8 +2927,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         pipeline?.Reset();
         pipeline = null;
         // Ek bölge okuyucusu da yeni dil ve motorla yeniden kurulur.
-        regionWatcher?.Reset();
-        regionWatcher = null;
+        ResetRegionWatcher(discard: true);
         // Eski hatta süren okuma beklenmez; yeni hat ilk karesini hemen alır.
         frameGate.Reset();
         ActiveSourceLanguage = settings.SourceLanguage;
@@ -2025,10 +2939,17 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         if (reader is null) return;
         var scheduler = new ReadScheduler(maxReuse: settings.FastSubtitleDetection
             ? ReadScheduler.FastMaxReuse : ReadScheduler.DefaultMaxReuse);
-        var built = new SubtitlePipeline(reader, MakeTranslator(), server, scheduler)
+        // Ekranda menü varken altyazı gönderilmez: altyazı alanındaki menü satırları (alttaki seçenekler, tuş çubuğu)
+        // otomatik ekran yazısı olarak kendi yerinde çevriliyor, altyazıya karışmasın.
+        var sender = new MenuPausedSender(server, () => Volatile.Read(ref screenText)?.InMenu == true);
+        var built = new SubtitlePipeline(reader, MakeTranslator(), sender, scheduler)
         {
             ShowSpeakerNames = settings.ShowSpeakerNames,
             SkipsTurkish = settings.TargetLanguage == "tr",
+            WatchSubtitleBackground = settings.WatchSubtitleBackground,
+            DropsScreenText = () => !demoMode && ScreenText.IsGta(gameSense.Current?.Name),
+            Echo = SubtitleEcho,
+            EchoPaused = () => Volatile.Read(ref screenText)?.InMenu == true,
         };
         built.MetricsReady += metrics => post(() => MetricsText = metrics.Summary(text));
         built.PairShown += (source, translation) =>
@@ -2038,6 +2959,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             // Satır yalnız tek bir pakette bulunduysa o pakete bir oy: son 20 satırın 5'i aynı paketten gelince oyun odur.
             var hit = ShownPacks?.TakeDistinctiveHit();
             var recognised = gameSense.NoteLine(origin == LineOrigin.Pack ? hit?.Id : null, origin == LineOrigin.Pack ? hit?.Title : null);
+            var pack = origin == LineOrigin.Pack ? services.GamePacks?.SearchScope : null;
             post(() =>
             {
                 if (recognised)
@@ -2047,8 +2969,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                 }
                 LastSource = source;
                 LastTranslation = translation;
+                sawLineThisRun = true;
+                UpdateSubtitleOffTip();
                 if (box is not null) lastSubtitleBox = box;
                 AddToHistory(source, translation, origin);
+                CountUsageLine(origin == LineOrigin.Pack, pack);
             });
         };
         // Model bu arada inmiş olabilir; her çeviri sonucu durumu günceller.
@@ -2057,6 +2982,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         built.PackMissed += OfferToPool;
         built.Log = SubtitleLog.Write;
         built.PackName = () => ShownPacks?.SearchScope;
+        built.MissionChanged += OnMissionChanged;
+        built.NoticesChanged += OnNoticesChanged;
         ConnectPacks(built);
         ApplyWaits(built);
         OnlineIssue = null;
@@ -2066,6 +2993,75 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     /// <summary>Sürekli okunan ek bölgeleri okuyup çeviren; çeviri sürerken ve en az bir bölge sürekli okunurken var.</summary>
     private RegionWatcher? regionWatcher;
+    /// <summary>
+    /// Altyazı hattının son satırları ve alanı: ekran yazısı (otomatik, hazır alanlar, görev satırı, "Ekranı çevir")
+    /// altyazıyı ikinci kez çizmesin (bkz. <see cref="CouchSubs.Core.SubtitleEcho"/>). Uygulamada tek denetleyici, tek hat
+    /// vardır. Testler, sahte okuyucu altyazıya ve ek alana aynı yazıyı verdiğinde kapatır (çeviri başlamadan).
+    /// </summary>
+    public SubtitleEcho? SubtitleEcho { get; set; } = new();
+    private readonly object regionGate = new();
+    private IReadOnlyList<WatchedArea> savedWatchedAreas = [];
+    private IReadOnlyList<WatchedArea> watchedAreas = [];
+    private GamePhoneTracker? phoneTracker;
+    private WatchedArea? phoneArea;
+    private CancellationTokenSource? phoneLifetime;
+    private bool watcherRequested;
+    /// <summary>Ekran yazılarını kendiliğinden bulan (ayar açık ve çeviri sürerken var) ve bulduğu geçici alanlar.</summary>
+    private ScreenTextDetector? screenText;
+    private IReadOnlyList<WatchedArea> autoAreas = [];
+    /// <summary>Oynanan oyunun hazır ek alanları (bkz. <see cref="UserSettings.PresetAreas"/>); çeviri sürmezken boş.</summary>
+    private IReadOnlyList<WatchedArea> presetAreas = [];
+    private bool presetRunning;
+    private int screenTextBusy;
+    /// <summary>Altyazıdan ayrılan görev satırının ek alanı (bkz. <see cref="MissionLine"/>); yoksa null.</summary>
+    private WatchedArea? missionArea;
+    /// <summary>Altyazıdan ayrılan kenar bildirimlerinin ek alanları (bkz. <see cref="ScreenNotices"/>); yoksa boş.</summary>
+    private IReadOnlyList<WatchedArea> noticeAreas = [];
+
+    /// <summary>
+    /// "Tam ekran" alanda ekranın kenarındaki bildirim kartı (sağ altta mesaj önizlemesi, solda kayan bildirim) altyazıya
+    /// girmez: bölgesi "auto-notice-&lt;n&gt;" ek alanı olur, çevirisi kendi yerinde ve özgün stilinde görünür; ekranın ortasına
+    /// çizilmez. Bildirim kalkınca alan çıkar (Mac ve Android ile aynı).
+    /// </summary>
+    private void OnNoticesChanged(IReadOnlyList<WatchedArea> areas)
+    {
+        var request = false;
+        lock (regionGate)
+        {
+            noticeAreas = areas;
+            ComposeWatchedAreas();
+            if (areas.Count > 0 && regionWatcher is null && !watcherRequested) request = watcherRequested = true;
+        }
+        if (request) post(UpdateRegionWatcher);
+    }
+
+    /// <summary>
+    /// Altyazı hattı görev satırını altyazıdan ayırdı: bölgesi "auto-mission" ek alanı olur, çevirisi kendi yerinde ve özgün
+    /// stilinde görünür. Görev kalkınca alan çıkar (RegionWatcher kutusunu kaldırır). Otomatik ekran yazısı kapalıysa
+    /// görev yine altyazıya girmez ama ayrıca gösterilmez.
+    /// </summary>
+    private void OnMissionChanged(CropRegion? region)
+    {
+        var request = false;
+        lock (regionGate)
+        {
+            missionArea = region is null || !settings.AutoScreenText ? null
+                : new WatchedArea(MissionLine.AreaId, "Mission", region) { Auto = true };
+            ComposeWatchedAreas();
+            if (missionArea is not null && regionWatcher is null && !watcherRequested) request = watcherRequested = true;
+        }
+        if (request) post(UpdateRegionWatcher);
+    }
+
+    // regionGate altında: kullanıcının ek alanları, otomatik bulunan ekran yazıları ve açık telefon.
+    private void ComposeWatchedAreas()
+    {
+        presetAreas = presetRunning ? settings.PresetAreas(gameSense.Current?.Name, phoneArea is not null) : [];
+        // Oyun telefonu açıkken telefonun yazıları telefon okuyucusundadır; kenar bildirimi sayılmaz.
+        watchedAreas = [.. savedWatchedAreas, .. presetAreas, .. autoAreas,
+                        .. missionArea is null ? [] : new[] { missionArea }, .. phoneArea is null ? noticeAreas : [],
+                        .. phoneArea is null ? [] : new[] { phoneArea }];
+    }
 
     /// <summary>
     /// Ek bölge okuyucusu gerekiyorsa kurulur, gerekmiyorsa kaldırılır (kutuları TV'den kalkar). Kendi yazı tanıma motoru
@@ -2074,19 +3070,154 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     /// </summary>
     private void UpdateRegionWatcher()
     {
-        if (pipeline is null || subtitlesPaused || settings.WatchedAreas().Count == 0)
+        lock (regionGate)
         {
+            watcherRequested = false;
+            var running = pipeline is not null && !subtitlesPaused;
+            if (running && settings.ReadsGamePhone && GameName.Key(gameSense.Current?.Name) == "gta 6")
+                phoneTracker ??= new GamePhoneTracker();
+            else
+            {
+                ClosePhone();
+                phoneTracker = null;
+            }
+            if (running && settings.AutoScreenText && !settings.ExtraAreasPausedByFullScreen)
+                screenText ??= new ScreenTextDetector();
+            else
+            {
+                screenText = null;
+                autoAreas = [];
+            }
+            // Otomatik ekran yazısı kapandı (ya da çeviri durdu): görev satırının ayrı kutusu da kalkar; görev yine
+            // altyazıya girmez ama altyazı alanı dışında hiçbir yazı çevrilmez.
+            if (!running || !settings.AutoScreenText) missionArea = null;
+            if (!running) noticeAreas = [];
+            savedWatchedAreas = running ? settings.WatchedAreas() : [];
+            presetRunning = running;
+            ComposeWatchedAreas();
+            if (watchedAreas.Count == 0)
+            {
+                if (phoneTracker is null && screenText is null && missionArea is null && noticeAreas.Count == 0)
+                {
+                    regionWatcher?.Reset();
+                    regionWatcher = null;
+                }
+                return;
+            }
+            if (regionWatcher is null)
+            {
+                if (services.MakeReader(settings.SourceLanguage, settings.OcrEngine) is not { } reader)
+                {
+                    // Okuyucu kurulamadıysa her örnekte tekrar açma. Yeni telefon veya ayar değişikliği yeniden dener.
+                    watcherRequested = phoneArea is not null || autoAreas.Count > 0 || missionArea is not null || noticeAreas.Count > 0;
+                    return;
+                }
+                regionWatcher = new RegionWatcher(reader, MakeTranslator(), server) { Log = SubtitleLog.Write, SubtitleEcho = SubtitleEcho };
+            }
+            // Okunup yazısız ya da gürültülü çıkan otomatik alan dedektöre bildirilir (o görüntüde yeniden önerilmez).
+            var detector = screenText;
+            regionWatcher.Rejected = detector is null ? null : detector.Reject;
+            regionWatcher.PackLookup = PacksActive && !demoMode ? FindShown : null;
+            regionWatcher.SkipsTurkish = settings.TargetLanguage == "tr";
+            regionWatcher.TranslatesUiCommands = settings.SourceLanguage == "en" && settings.TargetLanguage == "tr";
+            regionWatcher.EnglishPhoneMessages = settings.SourceLanguage == "en";
+            regionWatcher.Game = () => gameSense.Current?.Name;
+            // Ayarlar'daki ekran yazısı türleri (telefon, görev, yardım/eylemler, menüler, diğer).
+            regionWatcher.Allows = kind => Volatile.Read(ref settings).ScreenTextAllows(kind);
+            regionWatcher.Slowdown = () => ReadPressure.Slowdown(pipeline?.LastReadMs, frameGate.BusyMs(Environment.TickCount64));
+        }
+    }
+
+    // regionGate altında. Kapanan telefonun geç tamamlanan isteği yeni bir telefona veya diğer alanlara yazamaz.
+    private void ClosePhone()
+    {
+        if (phoneArea is null) return;
+        phoneLifetime!.Cancel();
+        regionWatcher?.RemovePanel(phoneArea.Id);
+        phoneLifetime.Dispose();
+        phoneLifetime = null;
+        phoneArea = null;
+        watcherRequested = false;
+        ComposeWatchedAreas();
+    }
+
+    private void ResetRegionWatcher(bool discard)
+    {
+        lock (regionGate)
+        {
+            ClosePhone();
+            phoneTracker?.Reset();
+            screenText?.Reset();
+            autoAreas = [];
+            missionArea = null;
+            noticeAreas = [];
+            ComposeWatchedAreas();
             regionWatcher?.Reset();
-            regionWatcher = null;
-            return;
+            if (discard) regionWatcher = null;
         }
-        if (regionWatcher is null)
+    }
+
+    private void OfferWatchedAreas(Frame frame, long arrived)
+    {
+        if (Volatile.Read(ref regionWatcher) is null && Volatile.Read(ref phoneTracker) is null && Volatile.Read(ref screenText) is null) return;
+        // Okuyucu ayarlar değişirken kuruluyorsa ana altyazı karesini bekletme.
+        if (!Monitor.TryEnter(regionGate)) return;
+        var requestWatcher = false;
+        try
         {
-            if (services.MakeReader(settings.SourceLanguage, settings.OcrEngine) is not { } reader) return;
-            regionWatcher = new RegionWatcher(reader, MakeTranslator(), server) { Log = SubtitleLog.Write };
+            if (phoneTracker is not null && phoneTracker.TrySample(frame, arrived, out var region))
+            {
+                if (region is null)
+                    ClosePhone();
+                else
+                {
+                    phoneLifetime ??= new CancellationTokenSource();
+                    var area = phoneTracker.WithPose(new WatchedArea("game-phone", "Phone", region) { PanelLifetime = phoneLifetime.Token });
+                    if (area != phoneArea)
+                    {
+                        phoneArea = area;
+                        ComposeWatchedAreas();
+                    }
+                }
+                if (region is not null && regionWatcher is null && !watcherRequested)
+                    requestWatcher = watcherRequested = true;
+            }
+            regionWatcher?.Offer(frame, watchedAreas);
+            if (screenText is { } detector && detector.Due(arrived) && Interlocked.CompareExchange(ref screenTextBusy, 1, 0) == 0)
+            {
+                // Karo örneği kare iş parçacığını tutmaz: arka planda, tek uçuşta (sürerken gelen kare atlanır).
+                IReadOnlyList<CropRegion> excluded = [.. savedWatchedAreas.Select(item => item.Region),
+                                                      .. presetAreas.Select(item => item.Region),
+                                                      .. phoneArea is null ? [] : new[] { phoneArea.Region }];
+                var subtitle = settings.Region;
+                _ = Task.Run(() => SampleScreenText(detector, frame, arrived, excluded, subtitle));
+            }
         }
-        regionWatcher.PackLookup = PacksActive ? FindShown : null;
-        regionWatcher.SkipsTurkish = settings.TargetLanguage == "tr";
+        finally { Monitor.Exit(regionGate); }
+        // OCR/çevirmen yalnız doğrulanmış bir panelde gerekir. İlk kuruluş kare iş parçacığını tutmaz.
+        if (requestWatcher) post(UpdateRegionWatcher);
+    }
+
+    private void SampleScreenText(ScreenTextDetector detector, Frame frame, long arrived, IReadOnlyList<CropRegion> excluded, CropRegion subtitle)
+    {
+        var requestWatcher = false;
+        try
+        {
+            detector.Sample(frame, arrived, excluded, subtitle);
+            var next = detector.Areas;
+            lock (regionGate)
+            {
+                // Ayar kapandı ya da oturum yenilendi: eski dedektörün sonucu yazılmaz. Reddedilen alan da burada düşer.
+                if (!ReferenceEquals(screenText, detector) || next.SequenceEqual(autoAreas)) return;
+                autoAreas = next;
+                ComposeWatchedAreas();
+                if (autoAreas.Count > 0 && regionWatcher is null && !watcherRequested)
+                    requestWatcher = watcherRequested = true;
+            }
+        }
+        catch (Exception error) { SubtitleLog.Write($"ekran yazısı örneği hata verdi: {error.Message}"); }
+        finally { Volatile.Write(ref screenTextBusy, 0); }
+        if (requestWatcher) post(UpdateRegionWatcher);
     }
 
     // --- Geçmiş ---
@@ -2125,7 +3256,14 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
     }
 
+    /// <summary>Deneme modunda seçili motor çeviremezse (model inmemiş, ağ ya da anahtar yok) örnek satırların hazır çevirisi.</summary>
     private ITextTranslator MakeTranslator()
+    {
+        var translator = MakeEngineTranslator();
+        return demoMode ? new DemoTranslator(translator) : translator;
+    }
+
+    private ITextTranslator MakeEngineTranslator()
     {
         var local = MakeLocalTranslator();
         // Açılamayan ücretsiz motor yedek olamaz; çevrimiçi motor çeviremeyince satır yeniden denenir.
@@ -2146,7 +3284,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         {
             if (store.Load<string>(storeKey) is not { Length: > 0 } key) return local;
             online = engine.Provider() is { } provider
-                ? services.MakeAiTranslator(provider, key, provider.Model(settings.ModelFor(provider)).Id, fallback, game, settings.AiInstruction)
+                ? services.MakeAiTranslator(provider, key, provider.Model(settings.ModelFor(provider)).Id, fallback, game, settings.AiInstruction,
+                    settings.GeminiPaidTier && provider == AiProvider.Gemini)
                 : services.MakeOnlineTranslator(key, fallback);
         }
         if (online is null) return local;
@@ -2199,8 +3338,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public async Task<OnlineKeyCheck> SetDeepLKeyAsync(string key)
     {
         key = key.Trim();
+        SubtitleLog.Write("API anahtarı testi başladı: deepl");
         var check = await services.CheckOnlineKeyAsync(key);
-        if (check.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded) SaveKey(TranslationEngine.DeepL, key);
+        if (check.State != OnlineKeyState.Valid) SubtitleLog.Write($"API anahtarı testi sonucu: deepl {check.State}");
+        if (check.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded && !SaveKey(TranslationEngine.DeepL, key))
+            return new OnlineKeyCheck(OnlineKeyState.KeychainWriteFailed);
         return check;
     }
 
@@ -2218,9 +3360,13 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public async Task<AiTestResult> SetAiKeyAsync(AiProvider provider, string key)
     {
         key = key.Trim();
+        var name = provider.ToString().ToLowerInvariant();
+        SubtitleLog.Write($"API anahtarı testi başladı: {name}");
         var result = await services.TestAiKeyAsync(provider, key, provider.Model(settings.ModelFor(provider)).Id);
-        if (result.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded or OnlineKeyState.ModelRejected or OnlineKeyState.Busy)
-            SaveKey(provider.Engine(), key);
+        if (result.State != OnlineKeyState.Valid) SubtitleLog.Write($"API anahtarı testi sonucu: {name} {result.State}");
+        if (result.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded or OnlineKeyState.ModelRejected or OnlineKeyState.Busy
+            && !SaveKey(provider.Engine(), key))
+            return new AiTestResult(OnlineKeyState.KeychainWriteFailed);
         return result;
     }
 
@@ -2241,8 +3387,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         typed = typed.Trim();
         var key = typed.Length > 0 ? typed : store.Load<string>(StoreKeys.LocalAiKey) ?? "";
         var result = await services.TestLocalAiAsync(server, key);
-        if (typed.Length > 0 && result.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded or OnlineKeyState.ModelRejected or OnlineKeyState.Busy)
-            SaveKey(TranslationEngine.Local, typed);
+        if (typed.Length > 0 && result.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded or OnlineKeyState.ModelRejected or OnlineKeyState.Busy
+            && !SaveKey(TranslationEngine.Local, typed))
+            return new AiTestResult(OnlineKeyState.KeychainWriteFailed);
         return result;
     }
 
@@ -2261,16 +3408,31 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         RefreshTranslatorStatus();
     }
 
-    private void SaveKey(TranslationEngine engine, string key)
+    /// <summary>
+    /// Anahtar şifreli depoya yazılır ve geri okunur; yazılamadıysa (dosya kilitli, DPAPI hatası) kayıt başarılı sayılmaz,
+    /// motor değişmez (Mac'teki Anahtar Zinciri kuralıyla aynı). Depo dosyayı geçici dosyayla değiştirir: önceki kayıt korunur.
+    /// </summary>
+    private bool SaveKey(TranslationEngine engine, string key)
     {
-        if (engine.StoreKey() is not { } storeKey) return;
-        store.Save(storeKey, key);
+        if (engine.StoreKey() is not { } storeKey) return false;
+        try { store.Save(storeKey, key); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
+        {
+            SubtitleLog.Write($"API anahtarı şifreli depoya kaydedilemedi: {engine} ({error.GetType().Name})");
+            return false;
+        }
+        if (store.Load<string>(storeKey) != key)
+        {
+            SubtitleLog.Write($"API anahtarı şifreli depoya kaydedilemedi: {engine}");
+            return false;
+        }
         Changed(nameof(HasDeepLKey));
         // Motor zaten seçiliydi, anahtar yeni geldi: hat yeni anahtarla kurulsun.
         if (settings.Engine == engine && isRunning) MakePipeline();
         else Settings = settings.WithEngine(engine);
         Changed(nameof(UsesFreeGemini));
         RefreshTranslatorStatus();
+        return true;
     }
 
     private void RefreshTranslatorStatus()
@@ -2292,19 +3454,37 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         Changed(nameof(Console), nameof(Ps5StatusText));
     }
 
+    /// <summary>altyazi.log'a yazılan kopma nedeni: türü; adres (NotFound) yazılmaz, PS5'in kodu ve libchiaki metni yazılır.</summary>
+    public static string DisconnectLogName(DisconnectReason? reason) => reason switch
+    {
+        null => "?",
+        { Kind: DisconnectKind.Rejected or DisconnectKind.Other, Detail: { Length: > 0 } detail } => $"{reason.Kind}: {detail}",
+        _ => reason.Kind.ToString(),
+    };
+
     private void SessionStateChanged(SessionState state)
     {
-        // Altyazı günlüğünde yalnız durumun türü (adres ve ayrıntı remoteplay.log'da).
+        // Altyazı günlüğünde durumun türü ve kopmanın nedeni (adres remoteplay.log'da). Neden eskiden yazılmıyordu; GitHub
+        // #456'daki altyazi.log'da 30 kopmanın hiçbirinin nedeni görünmüyordu.
         if (state.Phase != SessionState.Phase)
             SubtitleLog.Write(state.Phase switch
             {
                 SessionPhase.Connecting => $"{ConsoleTitle}: bağlanıyor",
                 SessionPhase.Streaming => $"{ConsoleTitle}: bağlandı",
-                _ => $"{ConsoleTitle}: bağlantı yok",
+                _ => $"{ConsoleTitle}: bağlantı yok ({DisconnectLogName(state.Reason)})",
             });
+        // PS5'in kendi tarafındaki çökme ayrıca yazılır: kullanıcının günlüğünde nedeni görünsün (GitHub #519).
+        if (state.Reason?.Kind == DisconnectKind.ConsoleRemotePlayCrashed && SessionState.Reason?.Kind != DisconnectKind.ConsoleRemotePlayCrashed)
+            SubtitleLog.Write("PS5: Uzaktan Oynatma PS5'te çöktü (Remote Play on Console has crashed); PS5 tamamen kapatılıp açılmalı");
         SessionState = state;
+        reconnectOffer.Update(live: state.Phase == SessionPhase.Streaming, Clock());
+        UpdateReconnectOffer();
+        // Bağlantı kopunca görüntü süresi baştan sayılır.
+        if (state.Phase != SessionPhase.Streaming) framesSince = null;
+        UpdateSubtitleOffTip();
         UpdateTroubleClocks();
-        if (!IsXbox) UpdateGameProbe(state.Phase == SessionPhase.Streaming);
+        if (demoMode) { /* deneme karelerinde konsol yok: oyun ve Xbox adı sorulmaz */ }
+        else if (!IsXbox) UpdateGameProbe(state.Phase == SessionPhase.Streaming);
         else if (state.Phase == SessionPhase.Streaming && !xboxNameChecked)
         {
             xboxNameChecked = true;
@@ -2314,7 +3494,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         if (state.Phase == SessionPhase.Disconnected)
         {
             pipeline?.Reset();
-            regionWatcher?.Reset();
+            ResetRegionWatcher(discard: false);
             server.Clear();
             dubber?.Stop();
         }
@@ -2330,14 +3510,18 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         var arrived = Environment.TickCount64;
         try
         {
-            post(() => LastFrame = frame);
+            post(() =>
+            {
+                LastFrame = frame;
+                UpdateSubtitleOffTip(frameArrived: true);
+            });
             // Duraklatıldıysa kare yalnız ek bölgeler ve serbest alan için saklanır; altyazı okunmaz.
             if (subtitlesPaused) return;
             // Önceki kare hâlâ işleniyorsa bu kare atlanır; okuma kareleri biriktirmez.
             var current = pipeline;
             if (current is null) return;
             // Ek bölgeler ayrı ve seyrek okunur (saniyede bir, kendi okuyucusuyla); altyazı okumasını beklemez, onu bekletmez.
-            regionWatcher?.Offer(frame, settings.WatchedAreas());
+            OfferWatchedAreas(frame, arrived);
             var entry = frameGate.TryEnter(Environment.TickCount64);
             if (entry.Kind == FrameGate.EntryKind.Stuck)
             {
@@ -2362,9 +3546,20 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         }
     }
 
+    private bool preferredPortApplied;
+
     private async Task StartServerAsync()
     {
         if (serverStarted) return;
+        // Linux sunucusunda port elle seçilebilir (COUCHSUBS_SERVER_PORT, #617); doluysa aşağıdaki gibi boş bir porta geçilir.
+        if (!preferredPortApplied && services.PreferredServerPort is { } preferred && preferred != DefaultServerPort)
+        {
+            preferredPortApplied = true;
+            DetachServer();
+            // Eşleştirme durumu yeni örneğe taşınır (bekleyen istek, "TV eşleştir" süresi; Mac ile aynı).
+            server = new SubtitleServer(preferred, key: server.AccessKey, pairing: server.Pairing);
+            AttachServer();
+        }
         try
         {
             ServerPort = await server.StartAsync();
@@ -2373,16 +3568,33 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         {
             // 8787 başka bir uygulamada; TV'ye adres her seferinde bildirildiği için herhangi bir boş port olur.
             DetachServer();
-            server = new SubtitleServer(0);
+            server = new SubtitleServer(0, key: server.AccessKey, pairing: server.Pairing);
             AttachServer();
             ServerPort = await server.StartAsync();
         }
         serverStarted = true;
     }
 
+    /// <summary>
+    /// Samsung'da TV uygulamasının kurulu olduğu bilgisi yüklenir: uygulama o TV'den daha önce bağlandıysa
+    /// (<see cref="StoreKeys.TvAppSeen"/>) ya da bu bilgisayar kurduysa (<see cref="StoreKeys.TvAppVersion"/>). Bilinen
+    /// TV'de bekçi uygulamayı listeye bakmadan açar.
+    /// </summary>
+    private void LoadSamsungAppKnowledge()
+    {
+        SamsungAppKnowledge.Changed = host => store.Save(StoreKeys.TvAppSeen, host);
+        SamsungAppKnowledge.Log = SubtitleLog.Write;
+        SamsungAppKnowledge.Mark(store.Load<string>(StoreKeys.TvAppSeen), notify: false);
+        if (tv is { Brand: TvBrand.Samsung } known && InstalledAppVersion is not null) SamsungAppKnowledge.Mark(known.Host, notify: false);
+    }
+
     private void OnClientsChanged(int count) => post(() =>
     {
+        // TV uygulaması bağlandı: bu TV'de kurulu olduğu artık biliniyor (liste "yok" demiş olsa da).
+        if (count > 0 && tv is { Brand: TvBrand.Samsung } connected) SamsungAppKnowledge.Mark(connected.Host);
+        if (tvClients == 0 && count > 0 && isRunning) services.Usage?.Record(UsageStats.Event.TvConnected(count, UsageBrand(tv?.Brand)));
         TvClients = count;
+        if (count > 0) OpenProblem = null;
         UpdateTroubleClocks();
     });
 
@@ -2393,13 +3605,28 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     /// <paramref name="near"/> adresine (TV) ulaşan bu bilgisayar adresi; TV adresi bilinmiyorsa (null ya da geçersiz)
     /// Wi-Fi/Ethernet adresi. TV adresi biliniyorsa işletim sisteminin TV'ye çıkacağı bağdaştırıcının adresi önce gelir
     /// (birden çok bağdaştırıcıda doğru kaynak adres, #343). VPN ve sanal bağdaştırıcılar ancak başka adres yoksa seçilir
-    /// (<see cref="LocalNetwork.ChooseComputerAddress(IReadOnlyList{LocalNetwork.AdapterAddress}, IPAddress?, IPAddress?)"/>).
+    /// (<see cref="LocalNetwork.ChooseComputerAddress(IReadOnlyList{LocalNetwork.AdapterAddress}, IPAddress?, IPAddress?, IPAddress?)"/>).
+    /// TV adresi bilinmiyorsa internete çıkılan bağdaştırıcının (varsayılan yol) adresi önce gelir.
     /// </summary>
     public static string? LocalAddress(string? near)
     {
         IPAddress? target = IPAddress.TryParse(near, out var parsed) && parsed.AddressFamily == AddressFamily.InterNetwork ? parsed : null;
         var route = target is null ? null : LocalNetwork.RouteSourceAddress(target);
-        return LocalNetwork.ChooseComputerAddress(LocalNetwork.Ipv4Adapters(), target, route);
+        var defaultRoute = target is null ? LocalNetwork.DefaultRouteSourceAddress() : null;
+        return LocalNetwork.ChooseComputerAddress(LocalNetwork.Ipv4Adapters(), target, route, defaultRoute);
+    }
+
+    /// <summary>
+    /// Samsung kurulumunda Host PC IP için gösterilen adresin dışındaki ev ağı adresleri (Wi-Fi ve Ethernet ikisi de
+    /// bağlıysa ya da birden çok ağ varsa). TV gösterilen adresi kabul etmezse bunlar denenir.
+    /// </summary>
+    public string[] OtherComputerAddresses
+    {
+        get
+        {
+            var chosen = ComputerAddress;
+            return [.. LocalNetwork.HomeAddresses(LocalNetwork.Ipv4Adapters()).Where(a => a != chosen)];
+        }
     }
 
     // --- Windows Güvenlik Duvarı ---
@@ -2431,6 +3658,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public async Task CheckConnectionsAsync()
     {
         UpdateTroubleClocks();
+        UpdateReconnectOffer();
         if (!isRunning || services.Firewall is not { } firewall) return;
         if (ps5TroubleSince is null && tvWaitingSince is null)
         {
@@ -2560,7 +3788,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         var now = Clock();
         var ps5Trouble = !IsXbox && isRunning && sessionState.Phase != SessionPhase.Streaming && sessionState.Reason?.Kind is not
             (DisconnectKind.ConsoleAsleep or DisconnectKind.InUse or DisconnectKind.Refused or DisconnectKind.LoginPasscode
-             or DisconnectKind.LoginPasscodeIncorrect or DisconnectKind.RegistrationInvalid or DisconnectKind.Rejected);
+             or DisconnectKind.LoginPasscodeIncorrect or DisconnectKind.RegistrationInvalid or DisconnectKind.Rejected
+             or DisconnectKind.ConsoleRemotePlayCrashed or DisconnectKind.ConsoleClosed);
         ps5TroubleSince = ps5Trouble ? ps5TroubleSince ?? now : null;
         // Altyazı TV'ye gitmiyorsa ya da TV yoksa TV beklenmez.
         tvWaitingSince = isRunning && ShowsOnTv && HasTv && tvClients == 0 ? tvWaitingSince ?? now : null;
@@ -2575,6 +3804,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public string? UpdateError { get => updateError; private set => Set(ref updateError, value); }
     /// <summary>Kurulum dosyasıyla kurulduysa tek tıkla güncellenir; değilse sürüm sayfası açılır.</summary>
     public bool CanUpdateItself => services.Updater?.CanUpdateItself == true;
+
+    public Task<IReadOnlyList<ReleaseNoteRun>> LoadUpdateNotesAsync(string version) =>
+        UpdateVersion == version && services.Updater is { } updater ? updater.ReleaseNotesAsync(version)
+            : Task.FromResult<IReadOnlyList<ReleaseNoteRun>>([]);
 
     /// <summary>Açılışta bir kez; ağ yoksa sessizce geçer.</summary>
     public async Task CheckForUpdateAsync()
@@ -2636,7 +3869,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             if (isRunning && settings.OcrEngine == OcrEngine.Advanced) MakePipeline();
         }
         catch (Exception error) when (error is HttpRequestException or IOException or InvalidDataException or TaskCanceledException
-                                          or UnauthorizedAccessException)
+                                          or TimeoutException or UnauthorizedAccessException)
         {
             AdvancedOcrError = error.Message;
         }
@@ -2673,7 +3906,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             if (settings.Dubbing.Enabled && isRunning) MakeDubber()?.Prepare();
         }
         catch (Exception error) when (error is HttpRequestException or IOException or InvalidDataException or TaskCanceledException
-                                          or UnauthorizedAccessException)
+                                          or TimeoutException or UnauthorizedAccessException)
         {
             DubbingError = error.Message;
         }
@@ -2788,3 +4021,20 @@ public enum ExtraRegionOutcome { Shown, NoText, NotConfigured, NotRunning, Busy,
 
 /// <summary>"Ekranı çevir"in sonucu; <see cref="Cleared"/>: TV'deki çeviriler kaldırıldı ya da süren iş iptal edildi.</summary>
 public enum ScreenOutcome { Shown, NoText, Cleared, NotRunning, TranslatorUnavailable, Failed }
+
+/// <summary>Ağda hata ayıklaması açık bulunan Android TV'ler arasından kurulumun gideceği TV (Mac: AndroidTVPick).</summary>
+public static class AndroidTvPick
+{
+    /// <summary>Bulunan adresler (boşlar ve tekrarlar atılır, sıra korunur).</summary>
+    public static IReadOnlyList<string> Hosts(IEnumerable<string> found) => [.. found.Where(h => h.Length > 0).Distinct()];
+
+    /// <summary><paramref name="preferred"/>: seçilen ya da kayıtlı TV adresi (önce gelen önce). Bulunanlar arasındaysa o; tek TV
+    /// bulunduysa odur; hiç yoksa ya da birden çoksa (kullanıcıya sorulur) null.</summary>
+    public static string? Pick(IEnumerable<string> found, IEnumerable<string?> preferred)
+    {
+        var hosts = Hosts(found);
+        foreach (var host in preferred)
+            if (!string.IsNullOrEmpty(host) && hosts.Contains(host)) return host;
+        return hosts.Count == 1 ? hosts[0] : null;
+    }
+}

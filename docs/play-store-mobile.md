@@ -154,7 +154,7 @@ CouchSubs is an independent app. It is not affiliated with, endorsed or sponsore
   "Bu oyunların Türkçe yaması hazır" listesi. Paketler her derlemede uygulamayla gelir (`copyCouchSubsPacks`), yenileri
   `server/packs`'ten iner. Yeni paket eklenince iki açıklama da güncellenmeli.
 - Remote Play yalnız ev ağında: `couchsubs-jni.c`'de `holepunch_info = NULL` (internet üzerinden bağlantı yok).
-- Android 8+, 64 bit: `minSdk 26`, `abiFilters arm64-v8a`.
+- Android 8+, 64 ve 32 bit ARM: `minSdk 26`, `abiFilters arm64-v8a, armeabi-v7a`.
 - Çeviri motorları: `EngineChoice { FREE, DEEPL, GEMINI, OPENAI, CLAUDE }`; ücretsiz motor `MlKitTranslator` (model
   ~30 MB, ilk kullanımda iner).
 - TV'de gösterme: telefon ev ağında 8787 portunda altyazı sunucusu açar, TV uygulaması telefonu bulur. LG/Samsung TV
@@ -223,6 +223,8 @@ URL: `https://couchsubs.enmeraapps.com/gizlilik` (canlı, HTTP 200). Sayfada And
 "Uygulamanızda reklam var mı?" → **Hayır.** (Doğrulandı: AdMob/UMP bağımlılığı yok; `AD_ID`,
 `ACCESS_ADSERVICES_AD_ID` ve `ACCESS_ADSERVICES_ATTRIBUTION` izinleri manifestte `tools:node="remove"` ile çıkarılıyor.
 Meta App Events reklam göstermez; bkz. §4.6.)
+
+> **Not (19 Kas 2026):** Mobil tanıtım penceresi (Enmera'nın kendi ürünleri ve sponsor bağlantıları, `promo.json`) yayına girince Play'deki "Reklam içerir" beyanı yeniden değerlendirilecek.
 
 ### 4.3 Uygulama erişimi
 
@@ -368,7 +370,12 @@ Play Console › Uygulama içeriği › **Ön plan hizmeti izinleri**.
   6. (İsteğe bağlı, 45–55 sn) Aynı akış "Bu telefonda" hedefiyle: yatay altyazı ekranı.
   Videonun açıklamasına bir satır: "CouchSubs foreground service (connectedDevice) demo: PS5 Remote Play stream +
   subtitle server for a TV on the local network."
-- Diğer ön plan hizmeti türleri: yok (`specialUse`, `mediaProjection`, `dataSync` kullanılmıyor).
+- Diğer ön plan hizmeti türleri: yok (`specialUse`, `mediaProjection`, `dataSync` kullanılmıyor). `mediaProjection`
+  telefonun kendi ekranını kaydetmek içindir (burada görüntü PS5/Xbox'tan ağla gelir); `dataSync` Android 15'te 24 saatte
+  6 saatle sınırlı ve veri aktarımı içindir. Ağdaki harici cihazla süren oturum `connectedDevice`'a uyar.
+- Kalıcı bildirim: "CouchSubs çeviriyor" + "Çeviriyi durdur" düğmesi. Profil › "Arka planda sürdür (Resim içinde
+  resim)" yalnız Activity PiP penceresi açar (oyun görüntüsü + canlı altyazı); ön plan hizmetini değiştirmez, ayrı beyan
+  gerekmez.
 
 ### 4.8 Diğer beyanlar
 

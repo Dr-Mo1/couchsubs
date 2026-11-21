@@ -179,6 +179,69 @@ class SamsungInstallerTest {
         }
     }
 
+    private val bare118 = "app_id[CouchSubsT.CouchSubs] install start\napp_id[CouchSubsT.CouchSubs] install failed[118]"
+
+    /** Tizen 2.4 (#638): TV iki kez sebepsiz [118] derse başka biçimde hazırlanan paket bir kez denenir. */
+    @Test
+    fun bareFailureTwiceTriesTheAlternativePackageOnce() {
+        val tv = FakeTv(bare118, bare118, success)
+        var prepared = 0
+        SamsungInstaller.installWithRecovery(tv, {}, InstallLog(null), alternative = {
+            prepared++
+            "yalın paket"
+        })
+        assertEquals(3, tv.installs)
+        assertEquals(1, prepared)
+    }
+
+    /** Tizen 2.x'te TV'de (elle kurulmuş) kopya varsa ya da liste okunamadıysa kopya kaldırılmaz (#638). */
+    @Test
+    fun keepExistingNeverRemovesTheCopyOnTheTv() {
+        val tv = FakeTv(bare118, bare118)
+        val log = tempLog()
+        var prepared = 0
+        val error = runCatching {
+            SamsungInstaller.installWithRecovery(tv, {}, log, { prepared++; "yalın paket" }, keepExisting = true)
+        }.exceptionOrNull()
+        assertTrue(error is SamsungInstallException)
+        assertEquals(2, tv.installs)
+        assertEquals(1, prepared)
+        assertTrue(tv.commands.isEmpty())
+        assertTrue(log.file!!.readText().contains("eski kopya kaldırılmıyor"))
+
+        val lean = FakeTv(bare118, success)
+        SamsungInstaller.installWithRecovery(lean, {}, InstallLog(null), { "yalın paket" }, keepExisting = true)
+        assertEquals(2, lean.installs)
+        assertTrue(lean.commands.isEmpty())
+
+        val stuck = FakeTv(authorMismatch, success)
+        assertTrue(runCatching { SamsungInstaller.installWithRecovery(stuck, {}, InstallLog(null), keepExisting = true) }.exceptionOrNull() is SamsungInstallException)
+        assertEquals(1, stuck.installs)
+        assertTrue(stuck.commands.isEmpty())
+    }
+
+    @Test
+    fun alternativeIsNotPreparedWhenTheRetryWorksOrTheTvGivesAReason() {
+        var prepared = 0
+        val alternative: () -> String? = {
+            prepared++
+            "yalın paket"
+        }
+        val cleared = FakeTv(bare118, success)
+        SamsungInstaller.installWithRecovery(cleared, {}, InstallLog(null), alternative)
+        assertEquals(2, cleared.installs)
+
+        val stuck = FakeTv(authorMismatch, authorMismatch)
+        assertTrue(runCatching { SamsungInstaller.installWithRecovery(stuck, {}, InstallLog(null), alternative) }.exceptionOrNull() is SamsungInstallException)
+        assertEquals(2, stuck.installs)
+        assertEquals(0, prepared)
+
+        val failing = FakeTv(bare118, bare118, bare118)
+        val error = runCatching { SamsungInstaller.installWithRecovery(failing, {}, InstallLog(null), alternative) }.exceptionOrNull() as SamsungInstallException
+        assertEquals(SamsungInstallError.INSTALL_FAILED, error.error)
+        assertEquals(3, failing.installs)
+    }
+
     @Test
     fun failingUninstallStillRetriesAndIsLogged() {
         val tv = FakeTv(mismatch, success).apply { uninstallError = IOException("Remote closed channel") }
@@ -210,6 +273,23 @@ class SamsungInstallerTest {
         }
         fail("kurulum başarısız olmalıydı")
         throw IllegalStateException()
+    }
+
+    /** #524: TV "geliştirici modu açık, Host PC IP bu telefon" diyor ama 26101 reddediliyor: TV tam yeniden başlamamış. */
+    @Test
+    fun refusalCauseComesFromTheTvsOwnDeveloperState() {
+        fun info(mode: Boolean?, ip: String?) = SamsungTvInfo(null, null, mode, ip)
+        assertEquals(SamsungRefusal.NotRestarted, info(true, "192.168.1.6").refusal("192.168.1.6"))
+        assertEquals(SamsungRefusal.OtherHostIp("192.168.0.26"), info(true, "192.168.0.26").refusal("192.168.1.103"))
+        assertEquals(SamsungRefusal.DeveloperModeOff, info(false, null).refusal("192.168.1.6"))
+        assertEquals(SamsungRefusal.Unknown, info(true, null).refusal("192.168.1.6"))
+        assertEquals(SamsungRefusal.Unknown, info(true, "192.168.1.6").refusal(null))
+        assertEquals(SamsungRefusal.Unknown, info(null, null).refusal("192.168.1.6"))
+        // #484: TV 192.168.1.101, telefon başka ağda (Host PC IP de telefonun o adresi): neden ağ.
+        assertEquals(SamsungRefusal.DifferentNetworks("192.168.1.101", "192.168.0.26"),
+            info(true, "192.168.0.26").refusal("192.168.0.26", "192.168.1.101"))
+        assertEquals(SamsungRefusal.NotRestarted, info(true, "192.168.1.103").refusal("192.168.1.103", "192.168.1.101"))
+        assertEquals(false, SamsungTvInfo.differentNetworks("192.168.1.101", "tv.local"))
     }
 
     @Test

@@ -39,17 +39,49 @@ public partial class TvStep : UserControl
         Search.IsEnabled = false;
         Tvs.Children.Clear();
         var found = await Controller.DiscoverTvsAsync();
-        foreach (var tv in found)
-        {
-            var row = new Grid { Margin = new Thickness(0, 4, 0, 4) };
-            row.Children.Add(new TextBlock { Text = $"{tv.Name} — {tv.Host}", VerticalAlignment = VerticalAlignment.Center });
-            var connect = new Button { Content = Localizer.Current["Connect"], Style = (Style)FindResource("PrimaryButton"), HorizontalAlignment = HorizontalAlignment.Right };
-            connect.Click += async (_, _) => await PairAsync(tv);
-            row.Children.Add(connect);
-            Tvs.Children.Add(row);
-        }
+        foreach (var tv in found) AddRow(tv);
         NotFound.Visibility = found.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         Search.IsEnabled = true;
+    }
+
+    private void AddRow(LgTv tv)
+    {
+        var row = new Grid { Margin = new Thickness(0, 4, 0, 4), Tag = tv.Host };
+        row.Children.Add(new TextBlock { Text = $"{tv.Name} — {tv.Host}", VerticalAlignment = VerticalAlignment.Center });
+        var connect = new Button { Content = Localizer.Current["Connect"], Style = (Style)FindResource("PrimaryButton"), HorizontalAlignment = HorizontalAlignment.Right };
+        connect.Click += async (_, _) => await PairAsync(tv);
+        row.Children.Add(connect);
+        Tvs.Children.Add(row);
+    }
+
+    /// <summary>Elle yazılan adres: TV'nin türü (LG, Samsung, Android TV) TV'ye sorulur ve listeye eklenir. Android TV'de
+    /// "Bağlan" Android TV akışını o adresle başlatır; hiçbir yoklamaya yanıt gelmezse TV LG sayılır ve bu söylenir.</summary>
+    private async Task AddManualAsync()
+    {
+        Error.Text = "";
+        if (LgDiscovery.NormalizeHost(ManualHost.Text) is not { } host)
+        {
+            Error.Text = Localizer.Current["This is not a valid IP address. Type it like 192.168.1.20, without http:// or a port number."];
+            return;
+        }
+        if (Tvs.Children.OfType<Grid>().Any(row => Equals(row.Tag, host))) return;
+        AddManual.IsEnabled = false;
+        var manual = await LgDiscovery.ManualTvAsync(host);
+        AddRow(manual.Tv);
+        if (!manual.Recognised) Error.Text = Localizer.Current.Format(ManualTvNotRecognised, host);
+        NotFound.Visibility = Visibility.Collapsed;
+        ManualHost.Text = "";
+        AddManual.IsEnabled = true;
+    }
+
+    private const string ManualTvNotRecognised =
+        "No TV at %@ answered as an LG, Samsung or Android TV, so it was added as an LG TV. If it is an Android TV / Google TV, press Select under Android TV / Google TV below.";
+
+    private async void OnAddManual(object sender, RoutedEventArgs e) => await AddManualAsync();
+
+    private async void OnManualHostKey(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter) await AddManualAsync();
     }
 
     private async Task PairAsync(LgTv tv)

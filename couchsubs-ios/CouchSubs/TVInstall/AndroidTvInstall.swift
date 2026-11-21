@@ -3,6 +3,7 @@
 // Protokol: AOSP packages/modules/adb (protocol.txt, pairing_connection). Google'ın adb aracı dağıtılmaz.
 
 import CryptoKit
+import CouchSubsCore
 import Foundation
 
 enum AndroidInstallError: Equatable, Sendable {
@@ -250,7 +251,7 @@ final class AndroidTvInstaller {
     }
 
     static func hasPlayStore(_ output: String) -> Bool {
-        output.split(separator: "\n").contains { $0.trimmingCharacters(in: .whitespacesAndNewlines) == "package:com.android.vending" }
+        output.deviceLines.contains { $0.trimmingCharacters(in: .whitespacesAndNewlines) == "package:com.android.vending" }
     }
 
     let host: String
@@ -279,6 +280,33 @@ final class AndroidTvInstaller {
     }
 
     static func versionFromDumpsys(_ output: String) -> String? { match(#"versionName=(\S+)"#, output) }
+    /// dumpsys'teki kullanıcı satırları ("User 0: ceDataInode=… installed=true …"): kullanıcı numarası → kurulu mu.
+    private static func usersFromDumpsys(_ output: String) -> [String: Bool] {
+        guard let regex = try? NSRegularExpression(pattern: #"^\s*User (\d+):.*?\binstalled=(true|false)\b"#,
+                                                   options: .anchorsMatchLines) else { return [:] }
+        var users: [String: Bool] = [:]
+        for found in regex.matches(in: output, range: NSRange(output.startIndex..., in: output)) {
+            guard let user = Range(found.range(at: 1), in: output), let value = Range(found.range(at: 2), in: output) else { continue }
+            if users[String(output[user])] == nil { users[String(output[user])] = output[value] == "true" }
+        }
+        return users
+    }
+
+    /// dumpsys sürüm söylüyor ama uygulama TV'nin ana kullanıcısında (User 0) kurulu değil: kaydı kalmış (#352, #389) ya da
+    /// TV uygulamayı yalnız ana kullanıcıdan kaldırmış, çocuk/ikincil profilde bırakmış (#528). Kullanıcı satırı yoksa
+    /// (eski Android) kalıntı sayılmaz. Android'deki AndroidTvInstaller.isLeftover ile aynıdır.
+    static func isLeftover(_ output: String) -> Bool {
+        guard versionFromDumpsys(output) != nil else { return false }
+        let users = usersFromDumpsys(output)
+        guard !users.isEmpty else { return false }
+        return users["0"] == false || !users.values.contains(true)
+    }
+    /// Kalıntı ama APK başka bir profilde kurulu: `pm install-existing --user 0` ile APK göndermeden geri getirilir (#528).
+    static func canInstallExisting(_ output: String) -> Bool { isLeftover(output) && usersFromDumpsys(output).values.contains(true) }
+    static let installExistingCommand = "shell:pm install-existing --user 0 \(packageName)"
+    static func installExistingSucceeded(_ output: String) -> Bool { output.contains("installed for user") }
+    /// TV'de kurulu CouchSubs sürümü; yoksa ya da yalnız kaydı kalmışsa nil.
+    static func installedVersionFromDumpsys(_ output: String) -> String? { isLeftover(output) ? nil : versionFromDumpsys(output) }
     static func installedFromPlay(_ output: String) -> Bool { match(#"installerPackageName=(\S+)"#, output) == "com.android.vending" }
     static func looksFailed(_ output: String) -> Bool {
         ["Error", "Exception", "Unknown", "not allowed"].contains { output.range(of: $0, options: .caseInsensitive) != nil }
@@ -293,7 +321,8 @@ final class AndroidTvInstaller {
 
     /// "192.168.1.5:37123" → (adres, port); port yoksa `defaultPort`.
     static func parseAddress(_ text: String, defaultPort: UInt16 = AdbConnection.defaultPort) -> (String, UInt16)? {
-        let value = text.trimmingCharacters(in: .whitespaces)
+        // Türkçe klavyeyle yazılan virgüller ("192,168,1,20:41235") noktaya döner; port korunur.
+        let value = text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
         guard !value.isEmpty else { return nil }
         guard let colon = value.lastIndex(of: ":") else { return (value, defaultPort) }
         guard let port = UInt16(value[value.index(after: colon)...]), port > 0 else { return nil }
@@ -313,7 +342,7 @@ final class AndroidTvInstaller {
         let adb = try AdbConnection.connect(host: host, port: port, key: try adbKey(),
                                             onApprovalNeeded: { throw AndroidInstallFailure(error: .notApproved, detail: "onay gerekiyor") })
         defer { adb.close() }
-        return Self.versionFromDumpsys(try adb.run("shell:dumpsys package \(Self.packageName)"))
+        return Self.installedVersionFromDumpsys(try adb.run("shell:dumpsys package \(Self.packageName)"))
     }
 
     /// Uygulama eksikse ya da eskiyse kurar ve açar. `allowReplace`: TV'deki başka imzalı kopya kaldırılsın mı.
@@ -348,9 +377,16 @@ final class AndroidTvInstaller {
         defer { adb.close() }
         log.write("ADB bağlantısı kuruldu (\(adb.secure ? "TLS" : "düz"), en çok \(adb.maxData) bayt).")
         progress(.reading)
-        let dumpsys = try adb.run("shell:dumpsys package \(Self.packageName)")
-        let installed = Self.versionFromDumpsys(dumpsys)
+        var dumpsys = try adb.run("shell:dumpsys package \(Self.packageName)")
+        if Self.canInstallExisting(dumpsys) {
+            // TV uygulamayı yalnız ana kullanıcıdan kaldırmış, başka profilde duruyor: APK göndermeden geri getirilir (#528).
+            let existing = (try? adb.run(Self.installExistingCommand)) ?? ""
+            log.write("CouchSubs TV başka bir profilde kurulu; ana kullanıcıya geri getiriliyor: \(existing.trimmingCharacters(in: .whitespacesAndNewlines))")
+            if Self.installExistingSucceeded(existing) { dumpsys = try adb.run("shell:dumpsys package \(Self.packageName)") }
+        }
+        let installed = Self.installedVersionFromDumpsys(dumpsys)
         let fromPlay = Self.installedFromPlay(dumpsys)
+        if Self.isLeftover(dumpsys) { log.write("TV'de CouchSubs'ın kaydı kalmış ama uygulama kurulu değil; yeniden kuruluyor.") }
         log.write("TV'deki CouchSubs: \(installed ?? "yok")\(fromPlay ? " (Google Play'den)" : "")")
         if let installed, let version, !Versions.isNewer(version, than: installed) {
             grantOverlay(adb)
@@ -377,7 +413,7 @@ final class AndroidTvInstaller {
             throw AndroidInstallFailure(error: Self.isStorageProblem(output) ? .notEnoughSpace : .installFailed, detail: trimmed.isEmpty ? "TV yanıt vermedi" : trimmed)
         }
         grantOverlay(adb)
-        let after = Self.versionFromDumpsys((try? adb.run("shell:dumpsys package \(Self.packageName)")) ?? "")
+        let after = Self.installedVersionFromDumpsys((try? adb.run("shell:dumpsys package \(Self.packageName)")) ?? "")
         launch(adb)
         return Result(version: after ?? version ?? "", installed: true)
     }
@@ -396,7 +432,7 @@ final class AndroidTvInstaller {
         let deadline = Date().addingTimeInterval(playWait)
         while Date() < deadline {
             Thread.sleep(forTimeInterval: playPoll)
-            let now = Self.versionFromDumpsys(try adb.run("shell:dumpsys package \(Self.packageName)"))
+            let now = Self.installedVersionFromDumpsys(try adb.run("shell:dumpsys package \(Self.packageName)"))
             if let now, now != before {
                 log.write("Play'den kuruldu: \(now)")
                 grantOverlay(adb)
@@ -436,6 +472,176 @@ final class AndroidTvInstaller {
 
     private func launch(_ adb: AdbConnection) {
         progress(.launching)
-        log.write("Uygulama açılıyor: \(((try? adb.run("shell:am start -n \(Self.packageName)/.MainActivity")) ?? "açılamadı").trimmingCharacters(in: .whitespacesAndNewlines))")
+        log.write("Uygulama açılıyor: \(((try? adb.run(Self.startCommand(launchParams))) ?? "açılamadı").trimmingCharacters(in: .whitespacesAndNewlines))")
+    }
+
+    /// Uygulama açılırken verilecek başlatma parametreleri (`{"server":"http://…"}`); TV telefonu ağda aramadan bağlanır.
+    var launchParams: String?
+
+    /// Uygulamayı açan ADB komutu; `launchParams` varsa `--es params '…'` ile (Windows'taki StartCommand ile aynı kural).
+    static func startCommand(_ launchParams: String?) -> String {
+        let command = "shell:am start -n \(packageName)/.MainActivity"
+        // TV'de sh çalıştırır: değer tek tırnak içinde gider; tek tırnak ve satır sonu içeren değer hiç gönderilmez.
+        guard let launchParams, !launchParams.isEmpty,
+              !launchParams.contains(where: { $0 == "'" || $0.isNewline || $0 == "\0" }) else { return command }
+        return "\(command) --es params '\(launchParams)'"
+    }
+
+    /// TV'de çalışan CouchSubs'a adresi bildiren yayın (TV uygulamasındaki AddressReceiver): ekranı öne çekmez, görüntü
+    /// modunu değiştirmez. Parametre yoksa ya da kabukta güvenle gönderilemiyorsa nil (Windows'taki AddressCommand ile aynı).
+    static func addressCommand(_ launchParams: String?) -> String? {
+        guard let launchParams, !launchParams.isEmpty,
+              !launchParams.contains(where: { $0 == "'" || $0.isNewline || $0 == "\0" }) else { return nil }
+        return "shell:am broadcast -a \(packageName).action.ADDRESS -n \(packageName)/.AddressReceiver --es params '\(launchParams)'"
+    }
+
+    /// Yalnız sunucu adresi gider; erişim anahtarı gitmez (Android TV kullanıcı onaylı eşleştirmeyle bağlanır).
+    static func launchParams(server: String) -> String? {
+        guard let data = try? JSONSerialization.data(withJSONObject: ["server": server], options: [.withoutEscapingSlashes]) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// Kurulu uygulamayı telefonun adresiyle açar (kurmadan, sessizce): TV onay sorarsa vazgeçilir. Bloklar. Uygulama TV'de
+    /// zaten çalışıyorsa (ekranı önde ya da arkada, ya da katmanı) `am start` gönderilmez, `AndroidTVApp.alreadyRunning`
+    /// döner: `am start` çalışan uygulamayı öne çekiyor, TV uygulaması da parametreli açılışta katmana dönüp ekranı
+    /// kapatıyordu (X, Android TV 8, beta.74; Windows ve Android telefonla aynı).
+    func open(launchParams: String?, connectTimeout: TimeInterval = 3) throws -> String {
+        let adb = try AdbConnection.connect(host: host, port: port, key: try adbKey(),
+                                            onApprovalNeeded: { throw AndroidInstallFailure(error: .notApproved, detail: "onay gerekiyor") },
+                                            connectTimeout: connectTimeout)
+        defer { adb.close() }
+        if AndroidTVApp.isRunning((try? adb.run(AndroidTVApp.runningCommand)) ?? "") {
+            // Çalışan uygulama telefona bağlı değil (bekçi yalnız o zaman açar): kayıtlı eski bir adrese bağlı kalmış olabilir.
+            // Adres ekranı öne çekmeden bildirilir (TV 0.9.63+; eski TV uygulaması yok sayar). Windows/Mac ve Android'le aynı.
+            if let address = Self.addressCommand(launchParams) { _ = try? adb.run(address) }
+            return AndroidTVApp.alreadyRunning
+        }
+        return try adb.run(Self.startCommand(launchParams)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// Android TV'de CouchSubs TV'yi telefonun adresiyle açar (ADB açıksa). Ne zaman açılacağı `AndroidTVOpenRule`'dadır: bu
+/// çeviride bağlanmış uygulama bir daha açılmaz, hiç bağlanmadıysa en çok üç kez, 30 sn arayla; TV'de zaten çalışıyorsa
+/// `am start` gönderilmez (Mac, Windows ve Android telefonla aynı kural).
+///
+/// Eskiden telefon Android TV'ye hiç dokunmuyor, TV uygulaması telefonu ağı (yalnız 8787 portunu) tarayarak bulmak
+/// zorunda kalıyordu: TV başka alt ağdaysa, tarama telefonu kaçırırsa ya da telefonun portu değiştiyse "Ağda CouchSubs
+/// aranıyor…"da kalıyordu (TestFlight, 20 Kas). Adres verilince TV doğrudan bağlanır ve adresi saklar; ADB kapalıysa
+/// (Play'den kurulan TV) sessizce vazgeçilir, tarama yolu sürer.
+final class AndroidTVKeeper: KeeperControlling, @unchecked Sendable {
+    private let host: String
+    private let port: UInt16
+    private let launchParams: String?
+    private let appConnected: @Sendable () -> Bool
+    private let open: @Sendable (String, UInt16, String?) throws -> String
+    private let log: @Sendable (String) -> Void
+    /// Her açma denemesinin sonucu (ana ekrandaki satır): açıldıysa nil.
+    private let onOpenResult: @Sendable (TVOpenProblem?) -> Void
+    private let lock = NSLock()
+    private var loop: Task<Void, Never>?
+    private var rule: AndroidTVOpenRule
+    private var lastResult: String?
+
+    init(host: String, port: UInt16, server: String, appConnected: @escaping @Sendable () -> Bool,
+         relaunchInterval: TimeInterval = AndroidTVOpenRule.defaultInterval, maxOpens: Int = AndroidTVOpenRule.defaultMaxOpens,
+         open: @escaping @Sendable (String, UInt16, String?) throws -> String = { host, port, params in
+             try AndroidTvInstaller(host: host, port: port).open(launchParams: params)
+         }, log: @escaping @Sendable (String) -> Void = { InstallLog.shared.write($0) },
+         onOpenResult: @escaping @Sendable (TVOpenProblem?) -> Void = { _ in }) {
+        self.host = host
+        self.onOpenResult = onOpenResult
+        self.port = port
+        launchParams = AndroidTvInstaller.launchParams(server: server)
+        self.appConnected = appConnected
+        rule = AndroidTVOpenRule(maxOpens: maxOpens, interval: relaunchInterval)
+        self.open = open
+        self.log = log
+    }
+
+    /// Bir kontrol: `AndroidTVOpenRule` izin verirse açmayı dener. Bloklar.
+    func tick(now: Date = Date()) {
+        guard !host.isEmpty else { return }
+        let connected = appConnected()
+        lock.lock()
+        let due = rule.shouldTry(connected: connected, now: now.timeIntervalSinceReferenceDate)
+        lock.unlock()
+        guard due else { return }
+        let result: String
+        do {
+            let output = try open(host, port, launchParams)
+            // Uygulama TV'de çalışırken bulunduysa `am start` gönderilmedi: açılış sayılmaz.
+            if output != AndroidTVApp.alreadyRunning {
+                lock.lock()
+                rule.opened()
+                lock.unlock()
+            }
+            result = "açıldı: \(output)"
+            onOpenResult(nil)
+        } catch {
+            result = "açılamadı: \(error)"
+            onOpenResult(Self.problem(error))
+        }
+        // Aynı sonuç her denemede yeniden yazılmaz.
+        lock.lock()
+        let changed = lastResult != result
+        lastResult = result
+        lock.unlock()
+        if changed { log("Android TV (\(host):\(port)) telefonun adresiyle \(result)") }
+    }
+
+    /// Açılamamanın nedeni: TV hata ayıklama iznini onaylamadıysa (ADB eşleşmesi yok) ayrı, gerisi "ulaşılamıyor".
+    static func problem(_ error: Error) -> TVOpenProblem {
+        switch (error as? AndroidInstallFailure)?.error {
+        case .notApproved, .notPaired: .debugNotApproved
+        default: .debugOff
+        }
+    }
+
+    func start(interval: Duration) {
+        stop()
+        loop = Task.detached(priority: .utility) { [weak self] in
+            while !Task.isCancelled {
+                self?.tick()
+                try? await Task.sleep(for: interval)
+            }
+        }
+    }
+
+    func stop() {
+        loop?.cancel()
+        loop = nil
+    }
+
+    /// "Otomatik açmayı dene" ya da öne dönüş: sayaç sıfırlanır, sonraki kontrol beklemeden dener (uygulama bağlıysa ya da
+    /// TV'de çalışıyorsa yine açılmaz).
+    func reconnect() {
+        lock.lock()
+        rule.reset()
+        lock.unlock()
+    }
+
+    deinit { loop?.cancel() }
+}
+
+/// Android TV kurulumunda hangi bağlantı yolunun seçileceği (Android'deki AdbMode ile aynı kural, GitHub #478).
+///
+/// Yeni Android TV ve Google TV'lerde eski ADB portu 5555 kapalıdır; bunlara yalnız "Kablosuz hata ayıklama" (eşleme kodu ve
+/// her açılışta değişen port) ile bağlanılır. Eskiden ekran hep "USB/ağ hata ayıklama" sekmesinde açılıyor, 5555'e
+/// bağlanılamayınca yalnız küçük bir notta "kablosuz hata ayıklama ayrı port kullanır" yazıyordu; kullanıcılar fark etmiyordu.
+enum AdbMode {
+    /// Seçilen TV'de 5555 açık değilse kablosuz hata ayıklama sekmesi seçilir.
+    static func prefersWireless(legacyAdbReachable: Bool) -> Bool { !legacyAdbReachable }
+
+    /// Ağ hata ayıklamasıyla (5555) TV'ye bağlanılamadı: belirgin "Kablosuz hata ayıklamayla dene" düğmesi gösterilir.
+    static func offersWireless(wireless: Bool, error: AndroidInstallError?) -> Bool {
+        !wireless && error == .unreachable
+    }
+
+    /// Kablosuz sekmeye geçerken adresteki port bırakılır (kablosuz hata ayıklamanın portu farklıdır, TV'den yazılır).
+    static func hostOnly(_ address: String) -> String {
+        let trimmed = address.trimmingCharacters(in: .whitespaces)
+        let parts = trimmed.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty, parts[1].allSatisfy(\.isNumber) else { return trimmed }
+        return String(parts[0])
     }
 }

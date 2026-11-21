@@ -77,10 +77,18 @@ a trademark of Marvel and Sony Interactive Entertainment LLC.
 
 ## Windows app only
 
+The Turkish command glossary in `UiCommands.cs` and the controller-icon detection in
+`ButtonIcons.MarkFree` were adapted on 2026-11-20 from [GameTranslator's UiPrompts](https://gitlab.com/sefflex/GameTranslator/-/blob/2492049b8435962b05933075978dd52084c67bfc/windows/src/GameTranslator.Core/UiPrompts.cs)
+and [IconWords](https://gitlab.com/sefflex/GameTranslator/-/blob/2492049b8435962b05933075978dd52084c67bfc/windows/src/GameTranslator.Core/IconWords.cs), by emir-kaya (Sefflex).
+IconWords credits [Nino Game Translator's VisionReader](https://github.com/yunusdemirbag/nino-game-translator/blob/83c138fbf87292c800082270e4b33e771bae3df1/core/Sources/CouchSubsCore/Pipeline/VisionReader.swift)
+for the `withIcons` and `withEdgeIcons` rules by Yunus Demirbağ. Both projects are based on
+CouchSubs, Copyright (C) 2026 Sinan Yorulmaz. These adaptations are licensed under AGPL-3.0-only (see [LICENSE](LICENSE)).
+
 | Component | License | Source |
 |---|---|---|
 | FFmpeg 7.1.2 (`libavcodec` H.264 decoder, `libswscale`; statically linked) | LGPL-2.1-or-later | https://ffmpeg.org |
 | .NET runtime and WPF | MIT | https://github.com/dotnet |
+| Html Agility Pack (reads GitHub release notes as text and links) | MIT, ZZZ Projects | https://github.com/zzzprojects/html-agility-pack |
 | CTranslate2 4.9.0 (Windows CPU and NVIDIA CUDA inference) | MIT | https://github.com/OpenNMT/CTranslate2 |
 | Python 3.12 embedded runtime | Python Software Foundation License | https://www.python.org/downloads/release/python-31210/ |
 | NumPy (CTranslate2 wheel dependency) | BSD-3-Clause | https://github.com/numpy/numpy |
@@ -101,6 +109,7 @@ a trademark of Marvel and Sony Interactive Entertainment LLC.
 | SSH.NET (LG TV connection) | MIT | https://github.com/sshnet/SSH.NET |
 | BouncyCastle.Cryptography (used by SSH.NET) | MIT | https://github.com/bcgit/bc-csharp |
 | Microsoft.Extensions.Logging.Abstractions (used by SSH.NET) | MIT | https://github.com/dotnet/runtime |
+| QRCoder 1.6.0 (QR code of the "Show on another device" address) | MIT | https://github.com/codebude/QRCoder |
 | ONNX Runtime 1.24.4 (`onnxruntime.dll`, `Microsoft.ML.OnnxRuntime.DirectML`; advanced text recognition) | MIT | https://github.com/microsoft/onnxruntime |
 | DirectML 1.15.4 (`DirectML.dll`, from the `Microsoft.AI.DirectML` package; GPU for advanced text recognition) | Microsoft Software License Terms (Microsoft DirectX Machine Learning) | https://www.nuget.org/packages/Microsoft.AI.DirectML/1.15.4 |
 | Microsoft Visual C++ 2015–2022 runtime (`vcruntime140*.dll`, `msvcp140*.dll`, `concrt140.dll`; needed by CTranslate2) | Microsoft Visual Studio license terms, "Distributable Code" (redist.txt) | https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files |
@@ -146,16 +155,24 @@ synthetic and are not recordings of real people.
 
 Text recognition (Vision) and translation (Translation framework) are provided by macOS.
 
+## Android app
+
+| Component | License | Source |
+|---|---|---|
+| ZXing core 3.5.3 (`com.google.zxing:core`; QR code of the "Show on another device" address) | Apache-2.0 | https://github.com/zxing/zxing |
+
+The Mac and iPhone apps draw the same QR code with the system's Core Image (`CIQRCodeGenerator`).
+
 ## Phone apps: Xbox home streaming (Beta)
 
 | Component | License | Source |
 |---|---|---|
 | WebRTC for Android (`io.github.webrtc-sdk:android`, Google libwebrtc build) | BSD-3-Clause with WebRTC patent grant | https://github.com/webrtc-sdk/webrtc |
-| WebRTC for iOS (`stasel/WebRTC`, Google libwebrtc build) | BSD-3-Clause with WebRTC patent grant | https://github.com/stasel/WebRTC |
+| WebRTC for iOS and macOS (`stasel/WebRTC`, Google libwebrtc build) | BSD-3-Clause with WebRTC patent grant | https://github.com/stasel/WebRTC |
 | Protocol constants and sequence from xal-node, xbox-webapi, xbox-xcloud-player and Greenlight (ported to Kotlin and Swift) | MIT | https://github.com/unknownskl |
 
-The Android and iPhone apps do not bundle the Node.js helper or the JavaScript player. They send the same requests as
-the Windows helper and open WebRTC with the platform library; H.264 is decoded by the phone's hardware decoder. The MIT
+The Android, iPhone and Mac apps do not bundle the Node.js helper or the JavaScript player. They send the same requests
+as the Windows helper and open WebRTC with the platform library; H.264 is decoded by the device's hardware decoder. The MIT
 notices for the ported projects are in `windows/xbox-bridge/licenses/`.
 
 ## Trademarks

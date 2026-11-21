@@ -135,6 +135,20 @@ struct PSNScreen: View {
     @State private var redirected = false
     @State private var working = false
     @State private var error: String?
+    /// Giriş sayfası açılamadı ya da Sony hata kodu döndürdü; eskiden yok sayılıyor, sayfa beyaz kalıyordu (TestFlight).
+    @State private var pageProblem: String?
+    @State private var pageAttempt = 0
+    /// Uygulama içi giriş Sony'nin "Can't connect to the server" hatasında kalırsa giriş tarayıcıda yapılır, yönlendirme
+    /// adresi buraya yapıştırılır (Windows, Mac ve Android'deki "Tarayıcıda giriş yap" ile aynı akış).
+    @State private var showBrowser = false
+    /// Tarayıcıya uygulama içi sayfa sunucusuna bağlanamadığı için geçildi (nedeni de yazılır).
+    @State private var browserAutomatic = false
+    @State private var browserURL = ""
+    @State private var browserError: String?
+    /// Son denenen yönlendirme adresi: tek kullanımlık kod panodan ikinci kez denenmez.
+    @State private var lastBrowserRedirect: String?
+    @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         MobileScreen {
@@ -149,15 +163,34 @@ struct PSNScreen: View {
                     .bentoWide()
             }
             // Kol ikinci hesaba atanırsa ana hesapla açılan oyun onu kendi kolu saymaz (GitHub #231).
-            MobileNote(text: String(localized: "When you turn on the controller to play, choose your MAIN account on the PS5. Don't play with the second account CouchSubs signs in with, or the controller won't work in the game."))
+            MobileNote(text: String(localized: "When you turn on the controller to play, choose your MAIN account on the PS5. Don't play with the second account CouchSubs signs in with, or the controller will turn off by itself or won't work in the game."))
             if model.accountId != nil { MobilePill(text: String(localized: "Signed in"), dot: true) }
             if working { ProgressView().tint(Mobile.Palette.accent) }
             if let error { MobileNote(text: error) }
+            if showBrowser {
+                if browserAutomatic {
+                    MobileNote(text: String(localized: "Sony's sign-in page could not reach its server inside the app, so sign-in moved to your browser."))
+                }
+                MobileNote(text: String(localized: "Sign in with your second account in the browser that opened. When you finish, the browser stays on a remoteplay.dl.playstation.net page that only says redirect. Tap the address bar, copy the whole address and come back here. CouchSubs picks up the copied address by itself; if it does not, paste it below and tap Save."))
+                TextField("", text: $browserURL)
+                    .textFieldStyle(MobileFieldStyle())
+                    .keyboardType(.URL)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .onSubmit(submitBrowser)
+                if let browserError { MobileNote(text: browserError) }
+                Button("Save", action: submitBrowser).buttonStyle(.mobileSecondary).disabled(working)
+                Button("Open the browser again") { openURL(PSNAccount.authorizeURL) }.buttonStyle(.mobileGhost)
+            }
         } bottom: {
             Button("Why a second account?") { showWhy = true }.buttonStyle(.mobileGhost)
+            if !showBrowser {
+                Button("Sign in in the browser") { openBrowserLogin(automatic: false) }.buttonStyle(.mobileGhost).disabled(working)
+            }
             if model.accountId != nil {
                 Button("Sign in again") {
                     redirected = false
+                    pageProblem = nil
                     showLogin = true
                 }
                 .buttonStyle(.mobileSecondary)
@@ -165,6 +198,7 @@ struct PSNScreen: View {
             } else {
                 Button("Sign in with Sony") {
                     redirected = false
+                    pageProblem = nil
                     showLogin = true
                 }
                 .buttonStyle(.mobilePrimary)
@@ -172,15 +206,35 @@ struct PSNScreen: View {
             }
         }
         .sheet(isPresented: $showLogin, onDismiss: {
-            if !redirected { error = PhoneError.loginWindowClosed.localizedDescription }
+            guard !redirected else { return }
+            error = pageProblem.map { String(format: String(localized: "Sony's sign-in page could not be opened (%@). Check the phone's internet connection and try again."), $0) }
+                ?? PhoneError.loginWindowClosed.localizedDescription
         }) {
             NavigationStack {
-                LoginWebView(onRedirect: received, onProblem: { _ in })
-                    .navigationTitle(Text(verbatim: "PlayStation Network"))
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showLogin = false } } }
+                ZStack {
+                    LoginWebView(onRedirect: received, onProblem: { pageProblem = $0 }, reloadToken: pageAttempt, onUnreachable: {
+                        // Sony'nin sayfası uygulama içinde sunucusuna bağlanamadı; aynı giriş tarayıcıda çalışıyor.
+                        redirected = true
+                        showLogin = false
+                        openBrowserLogin(automatic: true)
+                    })
+                    if let pageProblem { loginProblem(pageProblem) }
+                }
+                .navigationTitle(Text(verbatim: "PlayStation Network"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showLogin = false } }
+                    // Sayfa boş kalırsa kullanıcı her zaman baştan yükleyebilir.
+                    ToolbarItem(placement: .primaryAction) {
+                        Button { retryLogin() } label: { Image(systemName: "arrow.clockwise") }
+                            .accessibilityLabel(Text("Reload"))
+                    }
+                }
             }
             .presentationDragIndicator(.visible)
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { takeRedirectFromPasteboard() }
         }
         .sheet(isPresented: $showWhy) {
             VStack(alignment: .leading, spacing: Mobile.Space.gap) {
@@ -192,6 +246,52 @@ struct PSNScreen: View {
             .fittedSheet()
             .sheetBackground(Mobile.Palette.surface)
         }
+    }
+
+    private func loginProblem(_ problem: String) -> some View {
+        VStack(alignment: .leading, spacing: Mobile.Space.gap) {
+            MobileNote(text: String(format: String(localized: "Sony's sign-in page could not be opened (%@). Check the phone's internet connection and try again."), problem))
+            Button("Try again") { retryLogin() }.buttonStyle(.mobilePrimary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(Mobile.Space.screen)
+        .background(Mobile.Palette.surface)
+    }
+
+    private func retryLogin() {
+        pageProblem = nil
+        pageAttempt += 1
+    }
+
+    /// Sony'nin giriş sayfası Safari'de açılır, adres yapıştırma alanı görünür.
+    private func openBrowserLogin(automatic: Bool) {
+        showBrowser = true
+        browserAutomatic = automatic
+        browserError = nil
+        error = nil
+        openURL(PSNAccount.authorizeURL)
+    }
+
+    /// Kullanıcı tarayıcıdan dönünce panoda adres varsa kendiliğinden alınır (iOS yapıştırma iznini kendisi sorar).
+    private func takeRedirectFromPasteboard() {
+        guard showBrowser, !working, UIPasteboard.general.hasStrings || UIPasteboard.general.hasURLs,
+              let redirect = PSNAccount.redirect(fromPastedText: UIPasteboard.general.string),
+              redirect.absoluteString != lastBrowserRedirect else { return }
+        browserURL = redirect.absoluteString
+        submitBrowser()
+    }
+
+    private func submitBrowser() {
+        guard !working else { return }
+        guard let redirect = PSNAccount.redirect(fromPastedText: browserURL) else {
+            browserError = String(localized: "This address has no sign-in code. It should start with https://remoteplay.dl.playstation.net/remoteplay/redirect?code=")
+            return
+        }
+        browserError = nil
+        lastBrowserRedirect = redirect.absoluteString
+        browserURL = ""
+        showBrowser = false
+        received(redirect)
     }
 
     private func received(_ url: URL) {
@@ -227,7 +327,8 @@ struct PS5PairScreen: View {
 
     private var host: String {
         let typed = manualHost.trimmingCharacters(in: .whitespaces)
-        return typed.isEmpty ? consoles.first?.host ?? "" : typed
+        // Virgüllü yazım ("192,168,1,20"), "http://…" ya da port temizlenir.
+        return typed.isEmpty ? consoles.first?.host ?? "" : ManualAddress.normalize(typed) ?? typed.replacingOccurrences(of: ",", with: ".")
     }
 
     var body: some View {
@@ -291,6 +392,9 @@ struct PS5PairScreen: View {
                         .font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
                 }
             }
+            // PS5 bağlıyken "Uzaktan Oynama bağlandı" yazısı kalıcıdır; bildirim ayarı değil, bu ayar gizler (GitHub #177).
+            Text("To hide the \"Remote Play connected\" message on the screen: on the PS5, go to Settings › System › Remote Play and turn on Hide Remote Play Connection Status Pop-Up. Do it for both your main account and the second account.")
+                .font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
             if working {
                 HStack(spacing: Mobile.Space.inline) {
                     ProgressView().tint(Mobile.Palette.accent)
@@ -310,7 +414,9 @@ struct PS5PairScreen: View {
                             message: "Make sure the PS5 is on (not in rest mode) and on the same Wi-Fi, and that CouchSubs is allowed in Settings › Privacy & Security › Local Network. You can also type the PS5's IP address (PS5: Settings › Network › Connection Status).")
                 TextField("IP address, e.g. 192.168.1.20", text: $manualHost)
                     .textFieldStyle(MobileFieldStyle())
-                    .keyboardType(.decimalPad)
+                    .keyboardType(.numbersAndPunctuation)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
                 Button("Search again") { Task { await search() } }.buttonStyle(.mobileSecondary)
                 Button("Done") { showManual = false }.buttonStyle(.mobilePrimary)
             }
@@ -366,7 +472,7 @@ struct TargetScreen: View {
         } content: {
             ScreenTitle(caption: setup ? "Setup · Step 3/3" : nil, title: "Where are the subtitles?",
                         message: "You can change this later on the home screen.")
-            Tile(emphasis: model.settings.output.showsOnTV && model.hasTV ? .selected : .none) {
+            Tile(emphasis: model.settings.output == .tv && model.hasTV ? .selected : .none) {
                 HStack(spacing: Mobile.Space.gap) {
                     MobileTileIcon(symbol: "tv")
                     Text("On the TV, over the game").font(Mobile.TypeScale.headline)
@@ -380,8 +486,10 @@ struct TargetScreen: View {
                     Button { Task { await pair(tv) } } label: { tvRow(tv) }.buttonStyle(.plain).disabled(working != nil)
                 }
                 if allTVs.isEmpty {
+                    // Bulunamayınca ne yapılacağı da söylenir: TV uygulaması kurulu değilse buradan kurulur; monitör ya da
+                    // akıllı olmayan TV'de altyazı bu telefonda gösterilir (kullanıcı monitörde "Ağda TV bulunamadı"da kalmıştı).
                     HStack(spacing: Mobile.Space.gap) {
-                        Text(searching ? "Looking for the TV on the network…" : "No TV found on the network.")
+                        Text(searching ? "Looking for the TV on the network…" : "No TV found on the network. If the CouchSubs app is not on the TV, install it from this phone below. Using a monitor or a non-smart TV? Choose On this phone.")
                             .font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
                         Spacer()
                         SearchAgainButton(searching: searching) { Task { await search() } }
@@ -392,6 +500,20 @@ struct TargetScreen: View {
                 Button { model.settings.output = .computer } label: {
                     InfoTile(symbol: "iphone", title: "On this phone", caption: "No TV, or the app is not installed",
                              emphasis: model.settings.output == .computer ? .selected : .none)
+                }
+                .buttonStyle(.plain)
+                // Mac ve Windows'taki "İkisi de": altyazı hem TV'de hem bu telefonda görünür (TV eşleşmişken seçilir).
+                Button { model.settings.output = .both } label: {
+                    InfoTile(symbol: "rectangle.on.rectangle", title: "Both", caption: "On the TV and on this phone",
+                             emphasis: model.settings.output == .both && model.hasTV ? .selected : .none)
+                }
+                .buttonStyle(.plain)
+                .disabled(!model.hasTV)
+                // Mac ve Windows'taki "Yalnız OBS (yayın)": TV aranmaz, bu telefonda altyazı ekranı açılmaz; altyazı yalnız aynı
+                // Wi-Fi'daki bilgisayarda OBS'in tarayıcı kaynağına gider (Android ile aynı).
+                Button { model.settings.output = .obs } label: {
+                    InfoTile(symbol: "dot.radiowaves.left.and.right", title: "OBS only (stream)", caption: "To OBS on a computer on the same Wi-Fi",
+                             emphasis: model.settings.output == .obs ? .selected : .none)
                 }
                 .buttonStyle(.plain)
                 Button { showManual = true } label: {
@@ -405,11 +527,19 @@ struct TargetScreen: View {
                          emphasis: model.tvAppMissing ? .selected : .none)
             }
             .buttonStyle(.plain)
+            if model.settings.output == .obs { OBSOnlyTile() }
+            // TV'si olmayan ya da monitörde oynayan için: hangi hedef seçilirse seçilsin altyazı ayrıca bir tarayıcıda da görünür.
+            SecondScreenTile()
             if let error { MobileNote(text: error) }
+            // TV kurulumu bitti: her çeviride TV uygulaması kendiliğinden açılmaya çalışılır; açılmazsa TV'den açılır.
+            if setup, model.hasTV, model.settings.output.showsOnTV {
+                Text(LocalizedStringKey(TVOpenText.wizardNote)).font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         } bottom: {
             Button(setup ? "Continue" : "Done", action: onDone)
                 .buttonStyle(.mobilePrimary)
-                .disabled(!(model.hasTV || model.settings.output == .computer))
+                .disabled(!(model.hasTV || !model.settings.output.showsOnTV))
         }
         .task { await search() }
         .sheet(isPresented: $showManual) { manualSheet }
@@ -442,8 +572,12 @@ struct TargetScreen: View {
             Spacer()
             if working == tv {
                 ProgressView().tint(Mobile.Palette.accent)
+            } else if selected, model.tvClients > 0 {
+                // "Bağlı" yalnız TV uygulaması gerçekten bağlıyken görünür. Eskiden uygulama kuruluysa "Hazır" yazıyordu;
+                // TV uygulaması telefona hiç bağlanmamışken de (TestFlight, #672) her şey yolunda sanılıyordu.
+                MobilePill(text: String(localized: "Connected"), dot: true)
             } else if ready == true {
-                MobilePill(text: String(localized: "Ready"), dot: true)
+                MobilePill(text: String(localized: "Installed"))
             } else if ready == false {
                 MobilePill(text: String(localized: "Not installed"))
             }
@@ -468,7 +602,9 @@ struct TargetScreen: View {
             if manualBrand != .androidTV {
                 TextField("IP address, e.g. 192.168.1.20", text: $manualHost)
                     .textFieldStyle(MobileFieldStyle())
-                    .keyboardType(.decimalPad)
+                    .keyboardType(.numbersAndPunctuation)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
             }
             if manualBrand != .androidTV, let manualError { MobileNote(text: manualError) }
             Link("Supported TVs", destination: AppIdentity.tvGuideURL).font(Mobile.TypeScale.caption).tint(Mobile.Palette.accent)
@@ -529,6 +665,36 @@ struct SearchAgainButton: View {
                 .frame(width: Mobile.Control.icon, height: Mobile.Control.icon)
         } else {
             IconButton(symbol: "arrow.clockwise", label: "Search again", tint: Mobile.Palette.accent, action: action)
+        }
+    }
+}
+
+/// "Yalnız OBS (yayın)" seçiliyken: OBS'in tarayıcı kaynağına yazılacak adres (bu telefonun ağ adresiyle) ve kopyala düğmesi.
+private struct OBSOnlyTile: View {
+    @EnvironmentObject private var model: PhoneModel
+    @State private var copied = false
+
+    var body: some View {
+        Tile {
+            Text("OBS overlay").font(Mobile.TypeScale.headline)
+            Text("Subtitles go only to OBS. The TV is not searched for and this phone shows no subtitle screen. In OBS on a computer on the same Wi-Fi, add a Browser source with this address (width 1920, height 1080).")
+                .font(Mobile.TypeScale.caption).foregroundStyle(Mobile.Palette.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(verbatim: model.subtitleViewerAddress)
+                .font(Mobile.TypeScale.caption.monospaced())
+                .textSelection(.enabled)
+                .padding(.horizontal, Mobile.Space.tile)
+                .frame(maxWidth: .infinity, minHeight: Mobile.Control.field, alignment: .leading)
+                .background(Mobile.Palette.surface2, in: RoundedRectangle(cornerRadius: Mobile.Radius.control))
+                .overlay(RoundedRectangle(cornerRadius: Mobile.Radius.control).strokeBorder(Mobile.Palette.border))
+            Button {
+                UIPasteboard.general.string = model.subtitleViewerAddress
+                copied = true
+            } label: {
+                Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+            }
+            .buttonStyle(MobileButtonStyle(kind: .secondary, compact: true))
+            .resetsAfterDelay($copied)
         }
     }
 }

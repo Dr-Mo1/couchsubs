@@ -3,6 +3,7 @@
 // Android'deki SamsungCsr.kt'nin Der'i ve java.security karşılıkları.
 
 import CryptoKit
+import CouchSubsCore
 import Foundation
 import Security
 
@@ -99,7 +100,7 @@ enum Der {
     /// PEM metninden DER (PEM değilse veri olduğu gibi döner).
     static func fromPem(_ data: Data) -> Data {
         guard let text = String(data: data, encoding: .utf8), text.contains("-----BEGIN") else { return data }
-        let body = text.split(separator: "\n").filter { !$0.hasPrefix("-----") }.joined()
+        let body = text.deviceLines.filter { !$0.hasPrefix("-----") }.joined()
         return Data(base64Encoded: body, options: .ignoreUnknownCharacters) ?? data
     }
 }
@@ -135,7 +136,12 @@ struct RsaKey {
 
     /// Dosyadan yükler; yoksa ya da okunamazsa yenisini üretip yazar.
     static func loadOrCreate(_ file: URL) throws -> RsaKey {
-        if let data = try? Data(contentsOf: file), let key = try? RsaKey(pkcs1: data) { return key }
+        // Dosya var ama okunamıyorsa (ör. telefon açılıştan beri kilitli) yenisi üretilmez: üzerine yazılan anahtarı TV
+        // tanımaz, "hata ayıklamaya izin verilsin mi?" yeniden sorulur. Yalnız bozuk dosyanın yerine yenisi yazılır.
+        if FileManager.default.fileExists(atPath: file.path) {
+            let data = try Data(contentsOf: file)
+            if let key = try? RsaKey(pkcs1: data) { return key }
+        }
         let key = try generate()
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try key.pkcs1().write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])

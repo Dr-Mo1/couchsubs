@@ -17,7 +17,7 @@ başlayınca listeye bakar.
 ## Havuzdan otomatik paketler
 
 `server/pool` Worker'ı her gece (03:07–04:57 UTC, on dakikada bir adım) ortak havuzda en az iki oyuncunun okuduğu
-satırlardan oyun başına `pool-<oyun kimliği>` paketini Workers AI ile üretip bu kovaya yazar ve `index.json`'u
+satırlardan oyun başına `pool-<oyun kimliği>` paketini Claude ile (secret yoksa Workers AI) üretip bu kovaya yazar ve `index.json`'u
 günceller (bkz. `server/pool/src/autopack.js`). Elle hazırlanmış paketlerin anahtarları `auto/known-keys.bin`'dedir;
 yeni elle paket yüklenince `cd server/pool && node scripts/build-known.mjs > known-keys.bin` ile yeniden üretilip
 `npx wrangler r2 object put couchsubs-packs/auto/known-keys.bin --file known-keys.bin --remote` ile yüklenir.
@@ -26,6 +26,12 @@ Elle paket `index.json`'a eklenirken var olan `pool-*` girdileri korunmalıdır 
 ## Kurulum (sahibin hesabıyla; 2026-11-15'te yapıldı)
 
 Yayın adresi: `https://couchsubs-packs.enmera.workers.dev` (R2 kovası `couchsubs-packs`, liste sürümü 1).
+
+Yedek adres: `https://couchsubs-packs.enmeraapps.com` (aynı Worker; `wrangler.toml` `routes` içinde Custom Domain, DNS
+kaydını ve sertifikayı Cloudflare açar; 2026-11-20). Bazı ağlar (DNS, reklam engelleyici, operatör) `*.workers.dev`'e
+ulaşamıyor (#583): uygulamalar önce workers.dev'i dener, ağ hatası, zaman aşımı ya da 5xx olursa yedeğe geçer ve çalışan
+adresi uygulama açıkken hatırlar; 4xx (404, 429) gerçek cevaptır, yedek denenmez. `couchsubs.enmeraapps.com` sitesi
+Plesk'tedir, bu adresle ilgisi yoktur.
 
 ```sh
 cd server/packs
@@ -47,7 +53,8 @@ gelmez. Uygulamalar indirdiği dosyayı listedeki (`index.json`) SHA-256 ile do�
 
 Uygulamalardaki adres: Android `couchsubs-android/secrets.properties` içindeki `packs.url`; iPhone/iPad
 `couchsubs-ios/Config/App.xcconfig` `PACKS_API_BASE_URL`; Mac `mac/project.yml` `PACKS_API_BASE_URL`; Windows yayın
-derlemesinde `-p:CouchSubsPacksUrl` (`.github/workflows/windows.yml`).
+derlemesinde `-p:CouchSubsPacksUrl` (`.github/workflows/windows.yml`). Yedek adres sırasıyla `packs.fallbackUrl`,
+`PACKS_API_FALLBACK_URL` (iPhone ve Mac) ve `-p:CouchSubsPacksFallbackUrl`.
 
 ## Test
 

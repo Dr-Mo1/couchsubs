@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { accepts } from "../src/filter.js";
-import worker, { gameName, titleId, unavailableFor, ownApp, QUOTA_BLOCK, SATURATED } from "../src/index.js";
+import worker, { key, resetStatsCache, STATS_KEY, gameName, titleId, unavailableFor, ownApp, QUOTA_BLOCK, SATURATED } from "../src/index.js";
 import { GENERAL, jobPackId, nameJobs, runAutopack } from "../src/autopack.js";
 import { gameKey, gameSlug } from "../src/games.js";
 
@@ -17,6 +17,11 @@ test("Türkçe arayüz, bozulmuş Türkçe, sistem yazısı ve yarım okumalar a
     "Please do not quit or turn off your console while the Rockstar cloud save icon is showing.",
     "GO to the", "Take out the trash and the", "it Auto V's Story Mode.", "FREE MONTH OF GTA+", "PHOTO MODE SELECT",
     "Main menu", "Hold on", "HP 100/100 MP 25/50", "Okay.",
+    // Kumanda ipuçları: tuş simgesi okunmamış ya da bozulmuş (GTA 6, RDR 2, Mafia havuz satırları).
+    "Press to threaten the teller", "Use to select your binoculars", "Hold to open your loadout", "Press @ to open the map",
+    "Press D to greet Joey", "Hold I LI to open your loadout", "Press RE to go back to your weapons and equipment",
+    "Press (9 0 to stop focusing", "Release 2 and R2 to breathe out", "Hold + to look at Joey", "Press [RB] to take cover",
+    "Use ⓁⓇ to steer the boat", "PRESS to VAULT over obstacles", "Press to heal.", "0 0 00 0 Press • to open the index",
   ]) assert.equal(accepts(line), false, line);
 });
 
@@ -25,6 +30,9 @@ test("İngilizce oyun satırları alınır", () => {
     "Herr Müller will see you now.", "This place was designed in a hurry.", "Tell Sam I signed the deal.",
     "I lie to you, you lie to me.", "DON TORRISI WANTS YOU!", "Get down!", "Who's there?", "Line number 7 here",
     "We need to move before the cops show up", "Give me 50 dollars, Enzo.",
+    "Press the button, Jason!", "Hold on to something.", "HOLD ON TO IT, LUCIA.", "Use it to open the door.",
+    "Hold up, Floyd. I'm coming down there.", "Use a rope to climb down.", "Hold to your course, men.",
+    "Jason: Press to the left", "Use me to get inside.", "Press on, we're almost there.",
   ]) assert.equal(accepts(line), true, line);
 });
 
@@ -115,6 +123,7 @@ function fakeDB() {
   return db;
 }
 
+const keyOf = (text) => key(text);
 const install = (n) => `00000000-0000-4000-8000-00000000000${n}`;
 const post = (env, who, texts) => worker.fetch(new Request("https://pool.test/v1/lines", {
   method: "POST",
@@ -125,7 +134,7 @@ test("gönderim süzer; tek kurulumun satırı havuza yazılmaz, ikinci kurulumd
   const DB = fakeDB();
   const env = { DB };
   const reply = await post(env, install(1), ["Oturum Açtı", "Get down!", "Get down!", "Who is that over there?"]);
-  assert.deepEqual(await reply.json(), { accepted: 2, recorded: 2 });
+  assert.deepEqual(await reply.json(), { accepted: 2, recorded: 2, saturated: [] });
   // İki görülme + iki koşullu UPSERT + bir kota rezervasyonu; ilk kurulumda lines'a kayıt girmez.
   assert.equal(DB.lines.size, 0);
 
@@ -158,7 +167,7 @@ test("yeterince kurulumun doğruladığı ya da çeviriye alınmış satırın y
 
   DB.writes = 0;
   const reply = await post(env, install(SATURATED + 1), ["Get down!"]);
-  assert.deepEqual(await reply.json(), { accepted: 1, recorded: 0 });
+  assert.deepEqual(await reply.json(), { accepted: 1, recorded: 0, saturated: [await keyOf("Get down!")] });
   assert.equal(DB.writes, 1, "yalnız yeni kurulumun günlük kota payı yazılır");
   assert.deepEqual([...DB.lines.values()].map((l) => l.installs), [SATURATED]);
 
@@ -242,7 +251,7 @@ test("eşzamanlı gönderimler günlük kota sınırını aşamaz", async () => 
 
   assert.deepEqual(replies.map((reply) => reply.status).sort(), [200, 429]);
   const accepted = replies.find((reply) => reply.status === 200);
-  assert.deepEqual(await accepted.json(), { accepted: 10, recorded: 10 });
+  assert.deepEqual(await accepted.json(), { accepted: 10, recorded: 10, saturated: [] });
   assert.equal(DB.quotas.get(`${who}\u001f${day}`), 5000);
   assert.equal(DB.lines.size, 0); // tek kurulumun gördüğü satırlar havuza girmez
 });
@@ -284,6 +293,9 @@ test("oyun kimliği ve adı doğrulanır", () => {
   assert.equal(gameName("x".repeat(300)).length, 120);
   assert.equal(gameName(""), null);
   assert.equal(gameName(42), null);
+  // Ek paketten tanınan oyun asıl adıyla toplanır.
+  assert.equal(gameName("Marvel's Spider-Man 2 (ek satırlar)"), "Marvel's Spider-Man 2");
+  assert.equal(gameName(" (ek satırlar)"), null);
 });
 
 test("satırın oyunu havuza giren (ikinci) kurulumdan alınır; ilk bilinen oyun kalır", async () => {
@@ -294,7 +306,7 @@ test("satırın oyunu havuza giren (ikinci) kurulumdan alınır; ilk bilinen oyu
     { text: "Who is that over there?" },
     { text: "Keep your head down.", titleId: "bogus", game: "" },
   ]);
-  assert.deepEqual(await reply.json(), { accepted: 3, recorded: 3 });
+  assert.deepEqual(await reply.json(), { accepted: 3, recorded: 3, saturated: [] });
   assert.equal(DB.lines.size, 0);
 
   await postLines(env, install(2), [{ text: "Get in the car, Lucia.", titleId: "PPSA12345", game: "GTA VI" }]);
@@ -621,7 +633,7 @@ test("anahtarlı uygulama aynı süzgeç ve eşikle kabul edilir, uygulama adıy
   try {
     const first = await postApp(env, install(1), [{ text: "Oturum Açtı" }, { text: "Get down!" }], { key: APP_KEY });
     assert.equal(first.status, 200);
-    assert.deepEqual(await first.json(), { accepted: 1, recorded: 1 });
+    assert.deepEqual(await first.json(), { accepted: 1, recorded: 1, saturated: [] });
     assert.equal(DB.lines.size, 0, "tek kurulum havuza girmez");
     await postApp(env, install(2), [{ text: "Get down!" }], { key: APP_KEY });
     assert.deepEqual([...DB.lines.values()].map((l) => l.installs), [2]);
@@ -637,9 +649,9 @@ test("uygulamanın günlük toplam sınırı kurulum sınırına ek olarak uygul
   const day = new Date().toISOString().slice(0, 10);
   const lines = (n, tag) => Array.from({ length: n }, (_, j) => ({ text: `Hold the line ${tag} ${j} please.` }));
   const a = await postApp(env, install(1), lines(10, "a"), { key: APP_KEY });
-  assert.deepEqual(await a.json(), { accepted: 10, recorded: 10 });
+  assert.deepEqual(await a.json(), { accepted: 10, recorded: 10, saturated: [] });
   const b = await postApp(env, install(2), lines(10, "b"), { key: APP_KEY });
-  assert.deepEqual(await b.json(), { accepted: 5, recorded: 5 });
+  assert.deepEqual(await b.json(), { accepted: 5, recorded: 5, saturated: [] });
   const c = await postApp(env, install(3), lines(10, "c"), { key: APP_KEY });
   assert.equal(c.status, 429);
   assert.deepEqual(await c.json(), { error: "app_quota" });
@@ -648,4 +660,42 @@ test("uygulamanın günlük toplam sınırı kurulum sınırına ek olarak uygul
   assert.equal(DB.quotaWrites, 3, "uygulama sayacı bir kez, iki kurulum birer kez");
   // Kendi istemcilerimiz uygulama sınırından etkilenmez.
   assert.equal((await postLines(env, install(4), lines(10, "d"))).status, 200);
+});
+
+
+test("GET /v1/stats reads the nightly R2 summary and never touches D1", async () => {
+  resetStatsCache();
+  let dbCalls = 0;
+  const env = {
+    DB: { prepare: () => { dbCalls++; throw new Error("D1 must not be used"); } },
+    PACKS: { get: async (name) => name === STATS_KEY
+      ? { text: async () => JSON.stringify({ lines: 10, confirmed: 4, installs: 3, updated: "2026-11-20T03:02:00.000Z" }) }
+      : null },
+  };
+  const res = await worker.fetch(new Request("https://pool.test/v1/stats"), env);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { lines: 10, confirmed: 4, installs: 3, updated: "2026-11-20T03:02:00.000Z" });
+  assert.equal(dbCalls, 0);
+});
+
+test("GET /v1/stats answers 200 with zeros before the first nightly summary and caches the miss briefly", async () => {
+  resetStatsCache();
+  let reads = 0;
+  const env = { DB: {}, PACKS: { get: async () => { reads++; return null; } } };
+  const first = await worker.fetch(new Request("https://pool.test/v1/stats"), env);
+  assert.equal(first.status, 200);
+  assert.deepEqual(await first.json(), { lines: 0, confirmed: 0, installs: 0, updated: null });
+  await worker.fetch(new Request("https://pool.test/v1/stats"), env);
+  assert.equal(reads, 1);
+});
+
+test("GET /v1/stats answers 200 with zeros when R2 fails", async () => {
+  resetStatsCache();
+  const ok = { DB: {}, PACKS: { get: async () => ({ text: async () => JSON.stringify({ lines: 5, confirmed: 2, installs: 1 }) }) } };
+  assert.equal((await (await worker.fetch(new Request("https://pool.test/v1/stats"), ok)).json()).lines, 5);
+  resetStatsCache();
+  const broken = { DB: {}, PACKS: { get: async () => { throw new Error("R2 down"); } } };
+  const res = await worker.fetch(new Request("https://pool.test/v1/stats"), broken);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).lines, 0);
 });

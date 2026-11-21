@@ -19,8 +19,8 @@ android {
         minSdk 24
         targetSdk 35
         // Masaüstü uygulamaları beklenen TV sürümünü buradan alır (scripts/bundle-android-apk.sh, APK adı).
-        versionCode 28
-        versionName '0.9.25'
+        versionCode 67
+        versionName '0.9.64'
     }
     buildFeatures { buildConfig true }
     signingConfigs {
@@ -47,6 +47,7 @@ android {
     productFlavors {
         sideload {
             dimension 'distribution'
+            minSdk 22
             buildConfigField 'boolean', 'OVERLAY_MODE', 'true'
             signingConfig releaseKeystore ? signingConfigs.release : signingConfigs.debug
         }

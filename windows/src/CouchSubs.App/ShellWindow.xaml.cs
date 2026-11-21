@@ -6,6 +6,7 @@ using System.Windows.Interop;
 using CouchSubs.App.Services;
 using CouchSubs.App.Views;
 using CouchSubs.Shell;
+using CouchSubs.Core;
 using Microsoft.Win32;
 
 namespace CouchSubs.App;
@@ -22,6 +23,7 @@ public partial class ShellWindow : Window
         this.controller = controller;
         InitializeComponent();
         controller.PropertyChanged += OnChanged;
+        controller.TvPairingRequested += OnTvPairing;
         // Bilgisayar uykudan uyanınca bağlantılar hemen yenilenir.
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
         // Kısayollar (varsayılan Num 0, 1, 2, 3, 5, 7, 8, 9 ve Ctrl+Shift+rakam; Ayarlar › Kısayollar'da değişir) yalnız
@@ -50,14 +52,44 @@ public partial class ShellWindow : Window
             overlay?.Detach();
             hotkeys?.Dispose();
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            controller.TvPairingRequested -= OnTvPairing;
             controller.Dispose();
         };
         ShowScreen(force: true);
     }
 
+    private bool pairingShown;
+
+    /// <summary>
+    /// "Bu TV eşleşsin mi?" penceresi. Pencere açıkken gelen yeni istek (TV'de Tamam ile yeniden denendi, TV uygulaması
+    /// yeniden açıldı) ikinci pencere açmaz; pencere kapanınca bekleyen istek yeni koduyla gösterilir. Eskiden eski koddan
+    /// verilen onay "süresi doldu" deyip bitiyordu, TV'nin bekleyen yeni isteği bilgisayarda hiç görünmüyordu (Mac ile aynı).
+    /// </summary>
+    private void OnTvPairing(SubtitlePairing.Ticket ticket)
+    {
+        if (pairingShown) return;
+        pairingShown = true;
+        try
+        {
+            var text = Localizer.Current;
+            for (var current = ticket; ;)
+            {
+                var message = text.Format("TV code: %@. You don't type this code anywhere: if your TV shows the same code, approve it here.", current.Code);
+                var approved = MessageBox.Show(this, message, text["Pair this TV?"], MessageBoxButton.YesNo,
+                    MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
+                var resolved = controller.ResolveTvPairing(current.Id, approved);
+                if (controller.PendingTvPairing is { } next && next.Id != current.Id) { current = next; continue; }
+                if (!resolved && approved)
+                    MessageBox.Show(this, text["The pairing request expired. Try again on the TV."], "CouchSubs");
+                break;
+            }
+        }
+        finally { pairingShown = false; }
+    }
+
     private void OnChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(AppController.Step)) ShowScreen();
+        if (e.PropertyName is nameof(AppController.Step) or nameof(AppController.DemoMode)) ShowScreen();
         if (e.PropertyName is nameof(AppController.IsRunning) or nameof(AppController.HotkeysPaused) or nameof(AppController.Settings))
             ApplyHotkeys();
     }
@@ -87,7 +119,8 @@ public partial class ShellWindow : Window
 
     private void ShowScreen(bool force = false)
     {
-        var main = controller.Step == OnboardingStep.Done;
+        // Deneme modunda kurulum bitmemiş olsa da ana ekran gösterilir; çıkınca kalınan adıma dönülür.
+        var main = controller.Step == OnboardingStep.Done || controller.DemoMode;
         if (!force && main == showingMain) return;
         showingMain = main;
         Host.Content = main ? new MainView(controller) : new OnboardingView(controller);

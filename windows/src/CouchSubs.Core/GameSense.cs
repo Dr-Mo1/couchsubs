@@ -17,7 +17,12 @@ namespace CouchSubs.Core;
 /// </summary>
 public sealed class GameSense
 {
-    public enum GameSource { Console, Pack, User }
+    /// <summary>
+    /// <c>Remembered</c>: kullanıcının önceki bir çeviri oturumunda seçtiği oyun (uygulama açık kaldıkça kalır). Kayıtlı
+    /// alanlar bu oyunda sessizce uygulanmaz, sorulur: kullanıcı başka oyuna geçip seçimi değiştirmediyse eski oyunun
+    /// profili uygulanıyor, yeni oyunda yapılan alan değişiklikleri de eski oyunun profiline kaydediliyordu.
+    /// </summary>
+    public enum GameSource { Console, Pack, User, Remembered }
 
     /// <summary>Bakılan son satır sayısı ve tanımak için aynı paketten gelmesi gereken satır sayısı.</summary>
     public const int Window = 20;
@@ -34,6 +39,11 @@ public sealed class GameSense
     private RunningGame? pack;
     private string? packId;
     private RunningGame? chosen;
+    /// <summary>Seçim bir çeviri oturumu sürerken yapıldı; sonraki oturumda <c>Remembered</c> sayılır.</summary>
+    private bool chosenWhileRunning;
+    /// <summary>Seçim önceki bir oturumdan kaldı.</summary>
+    private bool carried;
+    private bool running;
     private bool asked;
 
     /// <summary>Havuza giden oyun: PS5'in bildirdiği, yoksa kullanıcının seçtiği, yoksa paketten tanınan.</summary>
@@ -44,7 +54,9 @@ public sealed class GameSense
         get
         {
             lock (gate)
-                return console is not null ? GameSource.Console : chosen is not null ? GameSource.User : pack is not null ? GameSource.Pack : null;
+                return console is not null ? GameSource.Console
+                    : chosen is not null ? (carried ? GameSource.Remembered : GameSource.User)
+                    : pack is not null ? GameSource.Pack : null;
         }
     }
 
@@ -94,11 +106,17 @@ public sealed class GameSense
         lock (gate)
         {
             chosen = RunningGame.Named(name);
+            chosenWhileRunning = running;
+            carried = false;
             asked = true;
         }
     }
 
-    /// <summary>Yeni çeviri oturumu: paket penceresi ve soru sıfırlanır; kullanıcının seçimi uygulama açık kaldıkça kalır.</summary>
+    /// <summary>
+    /// Yeni çeviri oturumu: paket penceresi ve soru sıfırlanır; kullanıcının seçimi uygulama açık kaldıkça kalır. Önceki
+    /// oturumda yapılan seçim bu oturumda <c>Remembered</c> olur; çeviri dururken yapılan seçim (Ayarlar'da oyun profili
+    /// seçildi) bu oturum içindir, <c>User</c> kalır.
+    /// </summary>
     public void StartSession()
     {
         lock (gate)
@@ -108,7 +126,15 @@ public sealed class GameSense
             packId = null;
             console = null;
             asked = false;
+            carried = chosen is not null && chosenWhileRunning;
+            running = true;
         }
+    }
+
+    /// <summary>Çeviri oturumu bitti.</summary>
+    public void EndSession()
+    {
+        lock (gate) running = false;
     }
 
     /// <summary>Kart gösterilmeli mi: ayar açık, bu oturumda sorulmadı, oyun hiçbir yoldan bilinmiyor ve çeviri iki dakikadır sürüyor.</summary>
@@ -202,6 +228,10 @@ public static class GameCatalog
         "Black Myth: Wukong", "Baldur's Gate 3", "Horizon Forbidden West", "Alan Wake 2",
         "Indiana Jones and the Great Circle", "Dying Light: The Beast", "Ghost of Tsushima", "Star Wars Outlaws",
         "The Witcher 3: Wild Hunt", "Monster Hunter Wilds", "Split Fiction", "Hollow Knight: Silksong",
+        "Marvel's Wolverine", "Assassin's Creed Mirage", "Assassin's Creed Valhalla", "Assassin's Creed Odyssey",
+        "Assassin's Creed Origins", "Call of Duty: Modern Warfare III", "Call of Duty: Modern Warfare II",
+        "Call of Duty: Warzone", "Resident Evil 4", "Resident Evil Village", "Resident Evil 2", "Resident Evil 3",
+        "Resident Evil 7: Biohazard", "Silent Hill 2", "The Last of Us Part I", "God of War",
     ];
 
     /// <summary>
@@ -224,7 +254,48 @@ public static class GameCatalog
             .Concat(found.Where(n => !GameName.Key(n).StartsWith(wanted, StringComparison.Ordinal))).Take(limit)];
     }
 
-    /// <summary>Paket listesinden oyun adları (ortak havuz paketi bir oyun değildir).</summary>
+    /// <summary>Paket listesinden oyun adları (ortak havuz paketi ve asıl paketi olan oyunun "(ek satırlar)" paketi oyun değildir).</summary>
     public static IEnumerable<string> PackGames(IEnumerable<GamePackLibrary.Info> packs) =>
-        packs.Where(p => p.Id != GameSense.GeneralPack).Select(p => p.Title);
+        packs.Where(p => p.Id != GameSense.GeneralPack && !p.Title.EndsWith("(ek satırlar)", StringComparison.Ordinal))
+            .Select(p => p.Title);
+
+    /// <summary>Havuzdan her gece üretilen ek paketin adındaki ek (server/pool/src/games.js EXTRA_SUFFIX).</summary>
+    public const string ExtraSuffix = " (ek satırlar)";
+
+    /// <summary>
+    /// Paketler ekranındaki karolar: oyunun asıl paketi ve havuzdan gelen "(ek satırlar)" paketi tek karoda birleşir
+    /// (#353: RDR2 ve Spider-Man 2 iki kez görünüyordu). Asıl paketi olmayan ek paket kendi karosunda kalır. Sıra korunur.
+    /// Mac ve iPhone'da GameCatalog.packShelf, Android'de GameCatalog.packShelf ile aynı.
+    /// </summary>
+    public static IReadOnlyList<PackShelfItem> PackShelf(IEnumerable<GamePackLibrary.Info> packs)
+    {
+        var list = packs.ToList();
+        var items = new List<PackShelfItem>();
+        var index = new Dictionary<string, int>();
+        foreach (var pack in list.Where(p => !p.Title.EndsWith(ExtraSuffix, StringComparison.Ordinal)))
+        {
+            index.TryAdd(GameName.Key(pack.Title), items.Count);
+            items.Add(new PackShelfItem(pack.Id, pack.Title, pack.Entries, [pack.Id], [pack.Title]));
+        }
+        foreach (var pack in list.Where(p => p.Title.EndsWith(ExtraSuffix, StringComparison.Ordinal)))
+        {
+            var key = GameName.Key(pack.Title[..^ExtraSuffix.Length]);
+            if (index.TryGetValue(key, out var at))
+            {
+                var main = items[at];
+                items[at] = main with
+                {
+                    Entries = main.Entries + pack.Entries,
+                    PackIds = [.. main.PackIds, pack.Id], Titles = [.. main.Titles, pack.Title],
+                };
+            }
+            else items.Add(new PackShelfItem(pack.Id, pack.Title, pack.Entries, [pack.Id], [pack.Title]));
+        }
+        var order = new Dictionary<string, int>();
+        for (var i = 0; i < list.Count; i++) order.TryAdd(list[i].Id, i);
+        return [.. items.OrderBy(item => order.GetValueOrDefault(item.Id))];
+    }
 }
+
+/// <summary>Paketler ekranında bir oyun: kimliği ve adı asıl paketin; satır sayısı ve kimlikler ek paketle birlikte.</summary>
+public sealed record PackShelfItem(string Id, string Title, int Entries, IReadOnlyList<string> PackIds, IReadOnlyList<string> Titles);

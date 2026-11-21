@@ -12,10 +12,16 @@ public enum OcrNoise {
     private static let edgePunctuation = CharacterSet.punctuationCharacters.union(.symbols).subtracting(symbols)
         .union(CharacterSet(charactersIn: "\"'“”‘’«»()[]"))
 
-    public static func clean(_ line: String) -> String {
+    public static func clean(_ line: String, keepIdentifiers: Bool = false) -> String {
         var kept: [String] = []
         let tokens = line.split(whereSeparator: \.isWhitespace).map(String.init)
         for (index, token) in tokens.enumerated() {
+            // Kumanda simgesinin yeri (`ButtonIcons.marker`) çöp değildir.
+            if token.unicodeScalars.first == ButtonIcons.markerScalar || (keepIdentifiers &&
+                (GamePhoneText.containsIdentifier(token) || GamePhoneText.isWrittenChatWord(token))) {
+                kept.append(token)
+                continue
+            }
             let (lead, core, trail) = split(token)
             // Tek başına "l" ya da "|" çoğu zaman yanlış okunmuş "I"dır ("l don't know", "|'ll go"); ardından küçük
             // harfle başlayan sözcük yoksa ve token ?/! ile bitmiyorsa altyazı kutusunun kenarı olabilir.

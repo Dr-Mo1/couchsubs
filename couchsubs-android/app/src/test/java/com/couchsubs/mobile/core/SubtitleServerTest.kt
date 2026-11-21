@@ -3,6 +3,7 @@ package com.couchsubs.mobile.core
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -36,8 +37,8 @@ class SubtitleServerTest {
     fun clearAndStyleFrames() {
         assertEquals("event: clear\ndata: {}\n\n", SubtitleServer.clearFrame())
         assertEquals(
-            "event: style\ndata: {\"background\":72,\"backgroundShape\":\"fit\",\"bold\":false,\"bottomPercent\":7,\"displayMode\":\"inApp\",\"fontSize\":46," +
-                "\"placement\":\"cover\",\"stackPrevious\":true,\"textColor\":\"white\"}\n\n",
+            "event: style\ndata: {\"background\":90,\"backgroundShape\":\"fit\",\"bold\":false,\"bottomPercent\":7,\"displayMode\":\"inApp\",\"fontSize\":46," +
+                "\"placement\":\"cover\",\"setApart\":true,\"stackPrevious\":true,\"textColor\":\"white\"}\n\n",
             SubtitleServer.styleFrame(SubtitleStyle()),
         )
         assertTrue(SubtitleServer.styleFrame(SubtitleStyle(displayMode = TvDisplayMode.OVERLAY, textColor = SubtitleTextColor.YELLOW))
@@ -46,19 +47,24 @@ class SubtitleServerTest {
         assertTrue(band.contains("\"background\":100") && band.contains("\"backgroundShape\":\"band\""))
         // "Önceki satırları üstte tut" kapalıysa TV'ye false gider (Windows ve Mac ile aynı).
         assertTrue(SubtitleServer.styleFrame(SubtitleStyle(stackPrevious = false)).contains("\"stackPrevious\":false"))
+        // "Ekran yazılarını altyazıdan ayır" kapalıysa TV'ye false gider (yoksa açık sayılır).
+        assertTrue(SubtitleServer.styleFrame(SubtitleStyle(), setApart = false).contains("\"setApart\":false"))
     }
 
     @Test
     fun helloIdentifiesTheServer() {
-        val server = SubtitleServer(0)
+        val server = SubtitleServer(0, instanceId = "3f2a-b9")
         val port = server.start()
         try {
             Socket("127.0.0.1", port).use { socket ->
                 socket.getOutputStream().write("GET /hello HTTP/1.1\r\nHost: x\r\n\r\n".toByteArray())
                 val response = socket.getInputStream().readBytes().toString(Charsets.UTF_8)
                 assertTrue(response, response.startsWith("HTTP/1.1 200 OK"))
-                assertTrue(response.contains("Access-Control-Allow-Origin: *"))
-                assertTrue(response.endsWith("{\"app\":\"couchsubs\"}"))
+                assertTrue(!response.contains("Access-Control-Allow-Origin:"))
+                // Kurulum kimliği ve bağlı TV sayısı: aynı ağdaki iki CouchSubs'ı TV bununla ayırır (GitHub #425).
+                assertTrue(response, response.endsWith("{\"app\":\"couchsubs\",\"auth\":1,\"id\":\"3f2a-b9\",\"tvs\":0}"))
+                assertEquals("{\"app\":\"couchsubs\",\"auth\":1,\"id\":\"ab\",\"tvs\":2}", SubtitleServer.helloBody("a\"b", 2))
+                assertFalse(response.contains(server.accessKey))
             }
         } finally {
             server.stop()
@@ -110,5 +116,31 @@ class SubtitleServerTest {
         server.sendSubtitle("Merhaba", 1000, null)
         server.clear()
         assertEquals(listOf(SubtitleEvent.Subtitle("Merhaba", 1000), SubtitleEvent.Cleared), events)
+    }
+
+    /** Altyazının oyundaki yeri olayla da gider (Mac/Windows'taki pencere "Yazı kadar" kutuyu onu örtecek kadar büyütür). */
+    @Test
+    fun localListenerGetsTheSubtitleBox() {
+        val server = SubtitleServer(0)
+        server.sendsToTv = false
+        val events = mutableListOf<SubtitleEvent>()
+        server.onEvent = { events.add(it) }
+        val box = TextBox(0.25, 0.8, 0.75, 0.9)
+        server.sendSubtitle("Merhaba", 4000, box)
+        assertEquals(listOf(SubtitleEvent.Subtitle("Merhaba", 4000, box = box)), events)
+    }
+
+    /** Ekranın büyük kısmını kaplayan opak kutu TV'ye gitmez (LG'de "siyah ekran"; Windows/Mac ile aynı kural). */
+    @Test
+    fun dropsBoxesCoveringMostOfTheScreen() {
+        fun item(box: TextBox) = ScreenTranslation.Item("Hi", "Selam", box, 0.03)
+        val small = item(TextBox(0.5, 0.5, 0.6, 0.55))
+        val huge = item(TextBox(0.0, 0.0, 1.0, 0.9))
+        assertEquals("Selam" to listOf(small), SubtitleServer.guarded("Selam", TextBox(0.0, 0.0, 1.0, 0.9), listOf(small, huge)))
+        assertEquals("", SubtitleServer.guarded("Selam", TextBox(0.0, 0.0, 1.0, 1.0), null).first)
+        val many = (0 until 10).map { item(TextBox(0.0, it * 0.1, 0.5, it * 0.1 + 0.1)) }
+        assertEquals("", SubtitleServer.guarded("y", TextBox(0.0, 0.0, 0.5, 1.0), many).first)
+        assertEquals("Görev" to null, SubtitleServer.guarded("Görev", TextBox(0.7, 0.05, 0.95, 0.1), null))
+        assertFalse(SubtitleServer.regionFrame("auto-1", "Selam", TextBox(0.0, 0.0, 1.0, 1.0), 0.03).contains("Selam"))
     }
 }

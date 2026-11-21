@@ -112,8 +112,10 @@ Samsung, uygulamanın her TV için ayrı imzalanmasını ister. CouchSubs bunu s
    Bazı yeni modellerde (ör. 2025 QN90F) bu, **Uygulamalar › Uygulama Ayarları** ekranında çalışır.
 3. **Developer mode**'u **On** yapın.
 4. **Host PC IP** alanına bilgisayarınızın adresini yazıp **OK**'e basın. Adresi CouchSubs TV adımında gösterir.
-5. TV'yi yeniden başlatın: kumandanın güç tuşunu TV kapanana kadar yaklaşık 2 saniye basılı tutun, sonra açın. Kısa
-   basınca Samsung TV yalnız bekleme moduna geçer, tam kapanmaz. Uygulamalar ekranında **Develop Mode** yazısı görünür.
+5. TV'yi yeniden başlatın: kumandanın güç tuşunu TV kapanıp Samsung logosuyla yeniden açılana kadar (yaklaşık 5
+   saniye) bırakmadan basılı tutun. TV kapanınca bırakırsanız Samsung TV yalnız bekleme moduna geçer ve geliştirici
+   modu ayarı uygulanmaz (TV "geliştirici modu açık" der ama 26101 bağlantıyı reddeder, #524, #484). Logo görünmezse TV'nin
+   fişini 30 saniye çekin. Uygulamalar ekranında **Develop Mode** yazısı görünür.
 
 ### 2. CouchSubs kursun
 
@@ -123,7 +125,10 @@ Samsung, uygulamanın her TV için ayrı imzalanmasını ister. CouchSubs bunu s
 3. CouchSubs TV'nize özel sertifikayı alır, uygulamayı imzalar, kurar ve açar. Giriş yalnız ilk kurulumda istenir.
 
 **TV bilgisayarı kabul etmedi** uyarısı çıkarsa geliştirici modu penceresindeki **Host PC IP**'nin bilgisayarınızın
-şu anki adresi olduğunu kontrol edin ve TV'yi yeniden başlatın. Bilgisayarın adresi değişirse bu adım yinelenir.
+şu anki adresi olduğunu kontrol edin ve TV'yi yukarıdaki gibi tam yeniden başlatın. Bilgisayarın adresi değişirse bu
+adım yinelenir. Telefondan kurulumda uygulama hatadan sonra TV'ye geliştirici modunu yeniden sorar: ayar doğruysa TV'nin
+tam yeniden başlamadığını, Host PC IP başka bir cihazınsa hangi adresin yazılacağını, TV ile telefon farklı ağlardaysa
+(ör. 192.168.1.x ve 192.168.0.x: ikinci modem, mesh ya da misafir ağı) ikisini aynı Wi-Fi'ya bağlamayı söyler.
 
 **Sorun çıkarsa** (75" Neo QLED'de denendi):
 
@@ -170,6 +175,8 @@ denenmedi; sonucu [Issues](https://github.com/yorulmazsinan/couchsubs/issues) sa
 desteği netleştiririz.
 
 - İlk açılışta **bağlantı hatası** görünürse TV'yi güç tuşunu basılı tutarak yeniden başlatın; o kullanıcıda böyle düzeldi.
+- 2016 modellerinde (Tizen 2.4) kurulumu dört uygulama da (Mac, Windows, Android telefon, iPhone) dener; bu TV'lerde
+  paket, TV'nin tanımadığı iki satır çıkarılarak kurulur.
 - 2015 ve önceki Samsung TV'ler (Tizen 2.3 ve eskisi, Orsay) desteklenmez; CouchSubs bunu kurulumda söyler.
 
 ### TV kendiliğinden HDMI'ya geçiyorsa
@@ -191,6 +198,9 @@ klasöre açıp:
 tizen package -t wgt -s SERTIFIKA_PROFILI -- KLASOR
 tizen install -n KLASOR/CouchSubs.wgt -t TV_ADI
 ```
+
+2016 modellerde (Tizen 2.4) Samsung sertifikası `install failed[118]` alabilir; orada **Tizen** türünde sertifikayla
+kurulum için: [2016 modellerde elle kurulum](tv-samsung.md#2016-modellerde-elle-kurulum-tizen-studio).
 
 ## Android TV / Google TV
 
@@ -216,6 +226,72 @@ Menü adları markaya göre biraz değişebilir.
 4. Görüntü gelmezse Tamam ile paneli açıp sol ve sağ tuşlarıyla doğru HDMI girişini seçin.
 
 Kurulumdan sonra hata ayıklamayı kapatabilirsiniz; yeni sürümleri kurmak için CouchSubs onu yeniden açmanızı ister.
+
+### Görüntü modu değişiyor, oyun modu ya da HDR kayboluyorsa
+
+TV uygulaması PS5 görüntüsünü kendi içinde gösterir ("Uygulama içinde" modu). Bazı TV'ler (ör. Sony Bravia) bu
+görüntüyü HDMI girişi olarak değil uygulama olarak işler: uygulama açıkken görüntü modu değişebilir, oyun modu ya da
+HDR kapanabilir. Bu durumda bilgisayarda ya da telefonda Ayarlar'daki **Görüntü modu**'ndan **Katman**'ı seçin:
+TV, PS5'i kendi HDMI girişinde (kendi görüntü ayarları, oyun modu ve HDR ile) gösterir, altyazı görüntünün üstünde
+çıkar. Katman, bilgisayarın ya da telefonun kurduğu TV uygulamasında vardır; Google Play'den kurulan kopyada yoktur.
+
+LG (webOS) ve Samsung (Tizen) TV uygulamaları HDMI'yi her zaman kendi içinde gösterir, bu TV'lerde Katman modu yoktur;
+oyun modu ya da HDR'nin kapanması bu TV'lerin uygulamalara koyduğu bir sınırdır.
+
+### LG'de Oyun Yöneticisi (Game Dashboard) açılmıyorsa
+
+LG'ye göre Oyun Yöneticisi (Game Optimizer) için konsolun HDMI ile bağlı ve TV'nin **harici girişinin konsola ayarlı**
+olması gerekir. CouchSubs TV uygulaması açıkken TV'de önde olan uygulamadır, PS5 girişi değil; bu yüzden ayar tuşu Oyun
+Yöneticisi yerine TV'nin genel menüsünü açar. Oyun modu, VRR gibi ayarları yapmak için önce çeviriyi durdurun, TV'de
+PS5'in HDMI girişine geçin, ayarları yapın, sonra çeviriyi yeniden başlatın.
+Çeviri sürerken TV PS5 girişine geçerse CouchSubs uygulamayı birkaç saniye içinde geri getirir.
+
+### LG'de PS tuşuna basınca çeviri kayboluyorsa
+
+PS tuşu (HDMI-CEC, LG'de SimpLink) TV'yi PS5'in girişine geçirir; ekran bir an kararır ve CouchSubs arka plana düşer.
+Bilgisayar ya da telefon uygulamayı 1-2 saniye içinde geri getirir, altyazı bağlantısı hemen yeniden kurulur (TV
+uygulaması 0.9.49 ve sonrası). PS5'in girişine geçiş "kullanıcı başka girişe geçti" sayılmaz; başka bir HDMI numarasına
+ya da yayına geçerseniz CouchSubs üç denemeden sonra sizi zorlamaz.
+
+### LG'de altyazı var ama oyunun sesi yok
+
+Ses, TV'nin sesi soundbar ya da ev sinema sistemine (HDMI ARC/eARC, optik, Bluetooth) verdiği düzende kesilebiliyor;
+PS tuşuyla TV kendi HDMI girişine geçince ses geri geliyor ama TV uygulaması arkaya düştüğü için altyazı gidiyor.
+Şunları sırayla deneyin:
+
+1. TV'de **Ayarlar › Tüm Ayarlar › Ses › Gelişmiş Ayarlar › Dijital Ses Çıkışı**'nı **Otomatik** ya da **PCM** yapın (**Geçiş/Pass
+   Through** değil).
+2. PS5'te **Ayarlar › Ses › Ses Çıkışı › Ses Biçimi (Öncelik)**'yi **Linear PCM** yapın.
+3. Olmazsa TV'nin ses çıkışını **TV Hoparlörü** yapın.
+
+Altyazı hedefi "Bu telefonda" iken ses geliyor, TV uygulaması açılınca TV hoparlöründe de gidiyorsa önce 2. adımı
+deneyin: soundbar bağlıyken PS5 sesi sıkıştırılmış (Dolby/DTS) gönderebiliyor, TV uygulamasının içindeki görüntü yolunda
+bu sesin çalınmadığından şüpheleniyoruz (gerçek LG'de doğrulanmadı).
+
+Bilgi panelindeki ikinci tanı satırının `snd` bölümü TV'nin ses çıkışını (`out`), dijital ses çıkışını (`dig`), ses
+düzeyini (`tv`), ses odağını (`mf`) ve TV'nin kısılı sesinin açılıp açılmadığını (`tvmute`) gösterir; sorun sürerse bunun
+fotoğrafını paylaşın.
+
+#### Sesi PS5 mi kesiyor?
+
+Çeviri başlayınca iki şey aynı anda olur: CouchSubs ikinci hesapla PS5'e Uzaktan Oynatma ile bağlanır, TV uygulaması
+da PS5 görüntüsünü kendi içinde açar. Ses bu ikisinden hangisinde gidiyor, şu denemeyle ayrılır:
+
+1. Altyazı hedefi olarak TV'yi değil telefonu (**Bu telefonda**) ya da bilgisayar ekranını seçin; TV uygulaması
+   açılmasın.
+2. Çeviriyi başlatın, TV'yi kumandanın giriş tuşuyla PS5'in HDMI girişine alın.
+3. Ses geliyorsa PS5 sesi kesmiyor; sorun TV uygulamasının içindeki HDMI ses yolunda, yukarıdaki üç adım geçerli.
+   Ses burada da yoksa altyazı günlüğüyle, TV ve ses sistemi modeliyle GitHub'da bildirin.
+
+Bilinenler:
+
+- CouchSubs Uzaktan Oynatma'dan gelen sesi istemcide atar (`CHIAKI_AUDIO_DISABLED`); PS5'e ses için bir istek ya da
+  bayrak gönderilmez. libchiaki'de PS5'in TV sesini koruyan ya da kesen bir seçenek yok.
+- Sony'nin [Uzaktan Oynatma ayarları](https://www.playstation.com/en-us/support/games/remote-play-settings/)
+  sayfasında (Ayarlar › Sistem › Uzaktan Oynatma) ses ile ilgili bir seçenek yok.
+- Kullanıcı bildirimlerinde Uzaktan Oynatma sürerken TV'den ses geliyor: Android TV'de Katman modunda (#57) ve LG
+  QNED86T6A'da TV hoparlöründe (#373; aynı TV'de Bluetooth ses cihazında ses yoktu).
+- Xbox başka: uzaktan oynatma sürerken TV'nin sesini kendisi kapatır ve sesi yalnız bağlanan cihaza verir (#379).
 
 ### USB bellekle kurulum
 

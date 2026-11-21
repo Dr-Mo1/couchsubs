@@ -5,6 +5,7 @@ import CouchSubsCore
 import Foundation
 import Combine
 import RemotePlay
+import XboxStream
 
 /// Telefon uygulamasının bütün durumu: kurulum (PSN girişi, PS5 eşleştirme, altyazının yeri), çeviri (PS5 görüntüsü →
 /// yazı tanıma → çeviri → TV ya da telefon ekranı) ve ayarlar. Okuma hattı, çevirmenler, ayarlar ve TV denetimi Mac
@@ -48,6 +49,12 @@ final class PhoneModel: ObservableObject {
             if settings.output != oldValue.output { outputChanged() }
             if settings.gamePacks != oldValue.gamePacks, let pipeline { connectPacks(to: pipeline) }
             pipeline?.showSpeakerNames = settings.showSpeakerNames
+            if settings.autoScreenText != oldValue.autoScreenText { showsAutoScreenTextNotice = false }
+            server.speakerColors = settings.speakerColors
+            if settings.setTextApart != oldValue.setTextApart {
+                server.setApart = settings.setTextApart
+                server.sendStyle(settings.style)
+            }
             if settings.sharePool != oldValue.sharePool {
                 let (pool, enabled) = (pool, settings.sharePool)
                 Task { await pool.setEnabled(enabled) }
@@ -55,9 +62,16 @@ final class PhoneModel: ObservableObject {
             let translationChanged = settings.onlineTranslation != oldValue.onlineTranslation
                 || settings.onlineEngine != oldValue.onlineEngine || settings.geminiModel != oldValue.geminiModel
                 || settings.openAIModel != oldValue.openAIModel || settings.claudeModel != oldValue.claudeModel
+                || settings.localAIBaseURL != oldValue.localAIBaseURL || settings.localAIModel != oldValue.localAIModel
                 || settings.aiInstruction != oldValue.aiInstruction
             if translationChanged { Task { await refreshTranslatorStatus() } }
-            if isRunning, translationChanged || settings.fastSubtitleDetection != oldValue.fastSubtitleDetection {
+            if settings.readsGamePhone != oldValue.readsGamePhone { configureGamePhone() }
+            if settings.dubbing != oldValue.dubbing { dubbingSettingsChanged() }
+            if settings.misreadWaitMs != oldValue.misreadWaitMs || settings.partialWaitMs != oldValue.partialWaitMs {
+                pipeline?.applyWaits(from: settings)
+            }
+            if isRunning, translationChanged || settings.fastSubtitleDetection != oldValue.fastSubtitleDetection
+                || settings.watchSubtitleBackground != oldValue.watchSubtitleBackground {
                 makePipeline()
             }
         }
@@ -69,7 +83,20 @@ final class PhoneModel: ObservableObject {
     /// Deneme modu: konsol yerine uygulamadaki örnek kareler okunur (`DemoFrameSource`); kurulum gerekmez.
     @Published private(set) var demoMode = false
     @Published private(set) var sessionState: SessionState = .disconnected(.stopped)
+    /// Bağlantının ne zamandan beri gittiği: "Yeniden bağlan" düğmesi için (bkz. `offersReconnect`).
+    @Published private(set) var reconnectOffer = ReconnectOffer()
     @Published private(set) var tvClients = 0
+    /// Çeviri bir süredir sürüyor ama TV uygulaması bağlanmadı: TV kartının altında ne yapılacağı söylenir.
+    @Published private(set) var tvWaitingLong = false
+    /// TV uygulamasını kendiliğinden açmanın son denemesi neden olmadı (TV kartının altında tek satır); açıldıysa nil.
+    @Published private(set) var tvOpenProblem: TVOpenProblem?
+    private var tvWaitTask: Task<Void, Never>?
+    static let tvWaitLimit: Duration = .seconds(30)
+    /// "Test on TV"da TV uygulaması bağlı değil (ya da beklemeden sonra da bağlanmadı): eşleştirme yönergesi gösterilir.
+    @Published private(set) var testTVNotConnected = false
+    /// "Test on TV"da TV'nin bağlanması (gerekirse eşleştirme onayı) en çok bu kadar beklenir (Mac ile aynı).
+    var testPairWait: Duration = .seconds(30)
+    private var testWaitTask: Task<Void, Never>?
     @Published private(set) var lastSource = ""
     @Published private(set) var lastTranslation = ""
     /// Bu ve önceki oturumlarda çevrilen son 200 altyazı (history.json; "Geçmiş" ekranı).
@@ -82,11 +109,22 @@ final class PhoneModel: ObservableObject {
     private var historyFile: URL?
     private let historyQueue = DispatchQueue(label: "history.json", qos: .utility)
     @Published private(set) var translatorStatus: TranslatorStatus = .ready
+    /// Yazı tanıma (Vision) takıldı (#679); takılan okuma bitince kendiliğinden düzelir. iPhone'da ayrı süreçte yedek
+    /// okuyucu açılamaz; takılıyken yeni okuma verilmez, ana ekranda not görünür. Takılma `abandonStallAfterMs`'i aşarsa
+    /// ya da çeviri yeniden başlatılırsa takılan okuma bırakılır (`abandonStalledRead`).
+    @Published private(set) var readingStuck = false
     @Published private(set) var onlineIssue: OnlineKeyState?
     /// Son altyazı oyun paketinden mi geldi (ana ekrandaki "paket kullanılıyor" göstergesi).
     @Published private(set) var lastFromPack = false
     /// Bu oturumda çevrilen satırlar (en yenisi başta), nereden geldikleriyle.
     @Published private(set) var recentLines: [RecentLine] = []
+    /// Görüntü bir dakikadır geliyor ama bu çeviride tek altyazı satırı gösterilmedi: "oyunun kendi altyazısını açın"
+    /// ipucu (CouchSubsCore SubtitleOffTip; GitHub #503, #566, #572).
+    @Published private(set) var showsSubtitleOffTip = false
+    /// Otomatik ekran yazısı göçle kapatıldı (beta.63'te açıktı): bu oturumda bir kez "deneysel; Ayarlar'dan
+    /// açabilirsiniz" bilgisi görünür. Kullanıcı ayarı değiştirince kalkar.
+    @Published private(set) var showsAutoScreenTextNotice = false
+    private var subtitleOffTip = SubtitleOffTip()
     /// Bu oturumdaki satır sayısı ve paketten gelenler ("Hazır çeviriden 47 / 50").
     @Published private(set) var sessionLines = 0
     @Published private(set) var sessionPackLines = 0
@@ -116,6 +154,8 @@ final class PhoneModel: ObservableObject {
     @Published private(set) var screenState: ScreenState = .idle
 
     enum ScreenState: Equatable { case idle, working, shown }
+    /// Ekrandaki sonuçların okunduğu karenin yazı izi (`ScreenTranslation.fingerprint`).
+    private var screenFingerprint = ""
 
     struct PhoneRegion: Identifiable, Equatable {
         let id: String
@@ -133,6 +173,11 @@ final class PhoneModel: ObservableObject {
     static let disabledPacksKey = "disabledPacks"
     /// Profil'deki "PS5 bağlantısı koptuğunda bildir" tercihi (varsayılan açık, Android ile aynı).
     static let notifyDisconnectKey = "notifyDisconnect"
+    /// "Arka planda sürdür (Resim içinde resim)" (varsayılan açık, Android ile aynı ad ve açıklama; bkz. BackgroundPiP).
+    static let backgroundPiPKey = "backgroundPiP"
+    @Published var backgroundPiP: Bool {
+        didSet { defaults.set(backgroundPiP, forKey: Self.backgroundPiPKey) }
+    }
 
     /// Çeviri sürerken ekran kararmasın (iOS uygulamayı askıya alınca bağlantı da durur). Uygulama UIKit'e bağlar.
     var keepScreenAwake: (Bool) -> Void = { _ in }
@@ -141,31 +186,70 @@ final class PhoneModel: ObservableObject {
     /// PS5 bağlantısı kendiliğinden koptu (kullanıcı durdurmadı). Uygulama, etkin değilken yerel bildirim gösterir;
     /// testlerde boş.
     var onConnectionLost: () -> Void = {}
+    /// Çeviri sürerken uygulama arka plana geçti ya da ekran kilitlendi: Resim içinde resim penceresi açılmazsa iOS
+    /// uygulamayı kısa süre sonra askıya alır ve altyazı durur. Uygulama gecikmeli bir yerel bildirim kurar; pencere
+    /// açılınca ya da `onResumedFromBackground` onu geri alır. Testlerde boş.
+    var onPausedInBackground: () -> Void = {}
+    /// Uygulama yeniden öne geldi: arka planda kurulan bildirim (henüz gösterilmediyse) iptal edilir, gösterildiyse silinir.
+    var onResumedFromBackground: () -> Void = {}
     /// PS5'te yeni bir oyun tanındı (paket sunucusuna o oyun için bakılır).
     var onGameStarted: () -> Void = {}
     /// Çeviri başlarken bildirim izni istenir (tercih açıksa; iOS yalnız ilk seferde sorar). Testlerde boş.
     var requestNotificationPermission: () -> Void = {}
+    /// Uzun oturum tanısı (SessionHealth): satır çökme raporunun izine de yazılır (Crashlytics). Testlerde boş.
+    var onDiagnostic: (String) -> Void = { _ in }
     private var startedAt: Date?
+    /// On dakikada bir sağlık satırı yazan iş; çeviri sürerken var.
+    private var healthTask: Task<Void, Never>?
+    /// Bu oturumda iOS'un gönderdiği bellek uyarıları.
+    private var memoryWarnings = 0
 
     private let services: PhoneServices
     private let store: AppStore
     private let defaults: UserDefaults
     private var server = SubtitleServer(port: AppIdentity.serverPort)
+    /// Oturumun konuşan renkleri (TV'ye gidenle aynı; telefondaki altyazı ekranı buradan boyar).
+    var speakerBook: SpeakerColorBook { server.speakerBook }
     private var serverStarted = false
+    private var serverRestarting = false
     @Published private(set) var serverPort: UInt16 = AppIdentity.serverPort
     private var session: StreamControlling?
     private var keeper: KeeperControlling?
     private var pipeline: SubtitlePipeline?
     /// Ek alanları (görev, telefon, bildirim) okuyup çeviren; çeviri sürerken ve ek alan varken var (Mac ile aynı).
     private var regionWatcher: RegionWatcher?
+    /// GTA 6'daki oyun telefonunun pozu ("GTA 6'daki telefonu otomatik çevir" açıkken ve oyun GTA 6 iken; Mac ile aynı).
+    private var gamePhoneTracker: GamePhoneTracker?
+    /// Ekran yazılarını kendiliğinden bulan (ayar açık ve çeviri sürerken var); örnek arka planda, tek uçuşta alınır.
+    private var screenTextDetector: ScreenTextDetector?
+    private var screenTextBusy = false
+    /// Altyazı hattının altyazıdan ayırdığı görev satırının bölgesi (bkz. `MissionLine`); yoksa nil.
+    private var missionRegion: CropRegion?
+    /// Altyazı hattının altyazıdan ayırdığı kenar bildirimlerinin alanları (bkz. `ScreenNotices`); yoksa boş.
+    private var noticeAreas: [ExtraArea] = []
     /// Hatta aynı anda tek kare girer. Durdurma ve yeni hat kapıyı sıfırlar; takılan okuma hattı yeniden kurdurur (Mac ile aynı).
     private var frameGate = FrameGate()
+    /// Çözücüden gelen son kare (ana iş parçacığında bekleyen en çok bir kare); çeviri sürerken var.
+    private var frameMailbox: FrameMailbox<(frame: CGImage, capturedAt: Int)>?
+    /// Takılan okuma bu kadar sürdüyse bırakılır, okuma yeni kuyrukta sürer (bkz. `ReadQueue.abandonStall`). Takılan okuma
+    /// çoğu zaman bir iki dakikada kendiliğinden biter (model hazırlanıyor); bu yüzden hemen bırakılmaz.
+    static let abandonStallAfterMs = 45_000
     private var savedKeys: Set<TranslationEngine> = []
     private var stack = SubtitleStack()
     private var stackTimer: Task<Void, Never>?
     /// Süren "ekranı çevir" işi ve sonuçların kalkma zamanlayıcısı.
     private var screenTask: Task<Void, Never>?
     private var screenExpiry: Task<Void, Never>?
+    /// Ekrandaki son sonuçlar ve kalkacakları an (sonuçlar bilgisayar çıkışında değilse de); telefon kartı izlenirken
+    /// süre bunlarla uzatılır.
+    private var screenShown: [ScreenTranslation.Item] = []
+    private var screenShownUntil = Date.distantPast
+    /// Telefon kartı ekrandayken sohbeti izleyen yoklama (`ScreenPhoneFollow`); kart yoksa nil.
+    private var screenFollow: ScreenPhoneFollow?
+    private var screenFollowTask: Task<Void, Never>?
+    /// "Ekranı çevir" çevirilerinin hafızası (telefon mesajları sohbet başlığıyla); dil ya da motor değişince yenilenir.
+    private var screenMemory = PhoneChatMemory()
+    private var screenMemoryKey = ""
     /// Yığının saati (saniye); testlerde ileri sarılır.
     var clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
 
@@ -188,6 +272,7 @@ final class PhoneModel: ObservableObject {
         self.store = store
         self.defaults = defaults
         self.packs = packs
+        backgroundPiP = defaults.object(forKey: Self.backgroundPiPKey) as? Bool ?? true
         let accountId = store.load(Data.self, for: StoreKey.accountId)
         let console = store.load(RegisteredConsole.self, for: StoreKey.console)
         let tv = store.load(LGTV.self, for: StoreKey.tv)
@@ -209,8 +294,16 @@ final class PhoneModel: ObservableObject {
         xboxAuth = XboxAuth(userToken: xboxToken, onUserToken: { token in tokenSink.handler?(token) })
         let loaded = defaults.data(forKey: StoreKey.settings).flatMap { try? JSONDecoder().decode(UserSettings.self, from: $0) }
         // Uygulama oturum sürerken kapandıysa oyunun profili açık kalmış olabilir: genel alanlar geri gelir.
-        let curated = GameAreas.restored((loaded ?? UserSettings()).withCuratedModels())
+        var curated = GameAreas.restored((loaded ?? UserSettings()).withCuratedModels())
+        // beta.63'te varsayılan açık gelen otomatik ekran yazısı bir kez kapatılır; açık olanlara bir kez söylenir.
+        let autoScreenTextNotice = curated.migratingAutoScreenText()
+        // Otomatik ekran yazısı kapalıyken hazır alanlar ve GTA 6 telefonu da bir kez kapatılır (altyazı dışında çeviri yok).
+        curated.migratingScreenTextExtras()
         settings = curated
+        showsAutoScreenTextNotice = autoScreenTextNotice
+        if loaded?.autoScreenTextReset != true || loaded?.screenTextExtrasReset != true, let data = try? JSONEncoder().encode(curated) {
+            defaults.set(data, forKey: StoreKey.settings)
+        }
         // "Şimdilik geç" ile PSN ve PS5 atlandıysa PS5'siz ana ekrana gidilir; altyazı hedefi seçilmediyse oradan sürer.
         let skipped = defaults.bool(forKey: Self.setupSkippedKey)
         let done = (skipped || accountId != nil && console != nil) && store.load(Bool.self, for: StoreKey.setupComplete) == true
@@ -232,15 +325,24 @@ final class PhoneModel: ObservableObject {
             engine.storeKey.flatMap { store.load(String.self, for: $0) }?.isEmpty == false
         })
         installedTVApp = defaults.data(forKey: StoreKey.tvAppInstalled).flatMap { try? JSONDecoder().decode(InstalledTVApp.self, from: $0) }
+        let storedKey = store.load(String.self, for: StoreKey.subtitleAccessKey)
+        let accessKey = storedKey?.isEmpty == false ? storedKey! : SubtitleAccess.createKey()
+        store.save(accessKey, for: StoreKey.subtitleAccessKey)
+        server.rotateKey(accessKey)
+        subtitleAccessKey = accessKey
         attachServer()
         reloadPackList()
         let pool = self.pool
         gameChoice.onChange = { [weak self] game in
+            self?.regionWatcher?.reset()
+            self?.configureGamePhone()
             Task { await pool.setGame(game) }
             // Bu oyunun (havuzdan otomatik) paketi sunucuda yeni çıkmış olabilir.
             if game != nil { self?.onGameStarted() }
         }
         gameChoice.onPublish = { [weak self] game, source in self?.gameAreas.follow(game: game, source: source) }
+        // Ayarlar'da oyun profili seçilince ya da yeni profil açılınca oynanan oyun o olur.
+        gameAreas.onChoose = { [weak self] name in self?.gameChoice.choose(name) }
         gameChoice.packTitles = { [weak self] in GameCatalog.packGames(self?.installedPacks ?? []) }
         // Elle seçilen oyunda satırlar yalnız o oyunun paketinde aranır, paketi yoksa hiç aranmaz (#218).
         gameChoice.packs = packs
@@ -269,6 +371,17 @@ final class PhoneModel: ObservableObject {
         xboxSignedIn = false
     }
 
+    /// PSN'den çıkış: ikinci hesabın kimliği ve PS5 eşleşmesi (PS5 o hesaba bağlıdır) bu telefondan silinir. Eskiden
+    /// yanlış hesapla girenin kurulumu baştan almaktan başka yolu yoktu (TestFlight). TV ve çeviri ayarları kalır.
+    func signOutPSN() {
+        stop()
+        [StoreKey.accountId, StoreKey.console, StoreKey.loginPasscode].forEach(store.remove)
+        accountId = nil
+        console = nil
+        hasLoginPasscode = false
+        RemotePlayLog.write("PSN hesabından çıkıldı; PS5 eşleşmesi silindi")
+    }
+
     var isXbox: Bool { platform == .xbox }
 
     /// Ayarlardaki paket listesi; paketler güncellenince yeniden okunur.
@@ -280,19 +393,105 @@ final class PhoneModel: ObservableObject {
         }
     }
 
+    @Published private(set) var subtitleAccessKey = ""
+    @Published private(set) var legacyTVWarning = false
+    /// TV'nin onay bekleyen eşleştirme isteği. Onay penceresi ve her ekranın üstündeki "TV eşleşmek istiyor" satırı
+    /// bunu gösterir; sunucudaki istekle `syncTVPairing` eşitler (süresi dolan ya da yerini yenisi alan istek kalkar).
+    @Published var tvPairingRequest: SubtitlePairing.Ticket?
+    /// "TV eşleştir"e basıldı: TV'de ne yapılacağı Ayarlar'da yazılır (eskiden düğme hiçbir şey göstermiyordu).
+    @Published private(set) var tvPairingOpened = false
+    private var tvPairingWatch: Task<Void, Never>?
+    func resolveTVPairing(_ ticket: SubtitlePairing.Ticket, accept: Bool) {
+        let resolved = server.pairing.resolve(ticket.id, accept: accept)
+        SubtitleLog.write("TV eşleştirme isteği \(accept ? "onaylandı" : "reddedildi")\(resolved ? "" : " (istek artık geçerli değil)")")
+        if resolved, accept { tvPairingOpened = false }
+        tvPairingRequest = nil
+        // Onaylanan istek geçersizdiyse (süresi doldu, TV yeniden denedi) bekleyen yeni istek hemen gösterilir.
+        syncTVPairing()
+    }
+
+    /// Arayüzdeki isteği sunucudaki bekleyen istekle eşitler. İstek geldiğinde, uygulama öne geldiğinde ve istek
+    /// beklerken saniyede bir çağrılır: gösterilemeyen istek kaybolmaz, geçersiz istek ekranda kalmaz.
+    func syncTVPairing() {
+        let pending = server.pairing.pending
+        if tvPairingRequest != pending { tvPairingRequest = pending }
+        guard pending != nil, tvPairingWatch == nil else { return }
+        tvPairingWatch = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard let self, !Task.isCancelled else { return }
+                let pending = self.server.pairing.pending
+                if self.tvPairingRequest != pending { self.tvPairingRequest = pending }
+                if pending == nil { self.tvPairingWatch = nil; return }
+            }
+        }
+    }
+    var subtitleViewerAddress: String { "http://\(NetworkAddress.near(nil) ?? "127.0.0.1"):\(serverPort)/obs?k=\(subtitleAccessKey)" }
+    /// "Başka bir cihazda göster" adresi (QR kodu da bundan); telefon ağa bağlı değilse nil.
+    var secondScreenAddress: String? {
+        NetworkAddress.near(nil).map { SecondScreen.address(host: $0, port: Int(serverPort), key: subtitleAccessKey) }
+    }
+    /// Ayarlar'daki "TV eşleştir": çeviri sürse de sürmese de eşleştirmeyi iki dakika açar, yanıt vermeyen sunucuyu
+    /// yeniden açar ve bekleyen istek varsa onay penceresini yeniden gösterir (kurtarma yolu).
+    func openTVPairing() async {
+        if serverStarted { await reviveServerIfSilent() } else { await ensureServer() }
+        guard serverStarted else { SubtitleLog.write("TV eşleştirme sunucusu açılamadı."); return }
+        server.pairing.open()
+        tvPairingOpened = true
+        SubtitleLog.write("TV eşleştirme elle açıldı (2 dk); port=\(serverPort)")
+        syncTVPairing()
+    }
+
+    func rotateSubtitleKey() {
+        let key = SubtitleAccess.createKey()
+        store.save(key, for: StoreKey.subtitleAccessKey)
+        keeper?.stop()
+        keeper = nil
+        server.rotateKey(key)
+        tvPairingRequest = nil
+        tvPairingOpened = false
+        subtitleAccessKey = key
+        startKeeper()
+    }
+
     private func attachServer() {
+        server.onPairingRequest = { [weak self] ticket in
+            Task { @MainActor [weak self] in
+                SubtitleLog.write("TV eşleştirme istedi; onay bekleniyor")
+                self?.syncTVPairing()
+            }
+        }
+        server.onLegacyClient = { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.legacyTVWarning = true
+                SubtitleLog.write("TV bağlantısı geçiş izniyle anahtarsız açıldı; TV uygulamasını güncelleyin.")
+            }
+        }
+
         server.onClientsChanged = { [weak self] count in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     let connected = self.tvClients == 0 && count > 0
                     self.tvClients = count
+                    if count > 0 {
+                        self.tvWaitingLong = false
+                        self.tvOpenProblem = nil
+                    }
+                    // TV uygulaması bağlandı: bu Samsung TV'de kurulu olduğu artık biliniyor (bekçi listeye bakmadan açar).
+                    if count > 0, let tv = self.tv, tv.brand == .samsung { SamsungAppKnowledge.shared.mark(host: tv.host) }
                     // TV uygulaması her bağlandığında sürümüne bakılır (eskiyse ana ekranda güncelleme önerilir).
                     if connected { Task { await self.checkTVApp() } }
                 }
             }
         }
+        server.onListenerFailed = { [weak self] reason in
+            Task { @MainActor [weak self] in self?.serverDropped(reason) }
+        }
         server.sendsToTV = settings.output.showsOnTV
+        server.speakerColors = settings.speakerColors
+        server.setApart = settings.setTextApart
         server.onEvent = { [weak self] event in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.phoneReceive(event) } }
         }
@@ -305,7 +504,7 @@ final class PhoneModel: ObservableObject {
         case .welcome: true
         case .psnLogin: isXbox ? xboxSignedIn : accountId != nil
         case .console: isXbox ? xboxConsole != nil : console != nil
-        case .output: hasTV || settings.output == .computer
+        case .output: hasTV || !settings.output.showsOnTV
         case .done: false
         }
     }
@@ -369,14 +568,15 @@ final class PhoneModel: ObservableObject {
     func pair(_ tv: LGTV) async throws {
         try await startServer()
         let savedKey = store.load(String.self, for: StoreKey.tvKey)
-        let pairing = try await services.pairTV(tv, key: savedKey, server: serverAddress(for: tv))
+        let pairing = try await services.pairTV(tv, key: savedKey, server: serverAddress(for: tv), accessKey: server.accessKey)
         self.tv = tv
         store.save(tv, for: StoreKey.tv)
         // Samsung jetonla gelen bağlantıda jetonu yeniden göndermeyebilir; boş jeton saklı olanı silmez (#40).
         store.save(SamsungTokenHolder.keptToken(stored: savedKey, received: pairing.key), for: StoreKey.tvKey)
         tvKeySaved = true
         tvAppMissing = !pairing.launched
-        if settings.output == .computer { settings.output = .tv }
+        // "Yalnız OBS (yayın)" seçiliyken TV eşlenirse de altyazı TV'ye gider (Android'de TV seçilince olduğu gibi).
+        if !settings.output.showsOnTV { settings.output = .tv }
         onAnalytics(.tvConnected(brand: tv.brand.rawValue))
     }
 
@@ -411,7 +611,7 @@ final class PhoneModel: ObservableObject {
 
     var canStart: Bool {
         let paired = isXbox ? xboxConsole != nil && xboxSignedIn : console != nil && accountId != nil
-        return paired && (settings.output.showsOnComputer || hasTV)
+        return paired && settings.output.hasDestination(hasTV: hasTV)
     }
 
     /// Deneme modunu açar: konsol, hesap ve TV olmadan örnek karelerle çeviri başlar (altyazı bu ekranda görünür; TV
@@ -437,35 +637,19 @@ final class PhoneModel: ObservableObject {
         isStarting = true
         defer { isStarting = false }
         await refreshTranslatorStatus()
-        try? await startServer()
+        // Eskiden hata try? ile yutuluyordu: sunucu açılamazsa çeviri "sürüyor" görünüp TV hiç bağlanamıyordu.
+        await ensureServer()
         server.sendStyle(settings.style)
+        // Konuşan renkleri oturum başına: yeni oturumda kişiler yeniden sıralanır.
+        server.speakerBook.reset()
         makePipeline()
-        let session: StreamControlling
-        let consoleName: String
-        if demoMode {
-            RemotePlayLog.write("Deneme modu başladı (örnek kareler)")
-            session = DemoStream()
-            consoleName = ""
-        } else if let xbox {
-            RemotePlayLog.write("Çeviri başladı; Xbox'a bağlanılıyor (Beta): \(xbox.name)")
-            session = XboxStreamSession(auth: xboxAuth, console: xbox, playAudio: settings.xboxAudioOnDevice,
-                                        describe: XboxText.session)
-            consoleName = xbox.name.isEmpty ? "Xbox" : xbox.name
-        } else if let console, let accountId {
-            RemotePlayLog.write("Çeviri başladı; PS5'e bağlanılıyor: \(console.name) \(console.host)")
-            session = services.makeStream(console: console, accountId: accountId,
-                                          loginPasscode: store.load(String.self, for: StoreKey.loginPasscode))
-            consoleName = console.name.isEmpty ? console.host : console.name
-        } else { return }
-        session.onState = { [weak self] state in Task { @MainActor in self?.sessionStateChanged(state) } }
-        session.onConsoleMoved = { [weak self] moved in Task { @MainActor in self?.consoleMoved(moved) } }
-        session.onFrame = { [weak self] frame in
-            // Karenin geldiği an: gecikme buradan TV'ye gidene kadar ölçülür.
-            let capturedAt = SubtitleStabilizer.uptimeMs()
-            Task { @MainActor in await self?.handle(frame, capturedAt: capturedAt) }
-        }
+        guard let (session, consoleName) = makeSession(xbox: xbox) else { return }
+        // "Durdur / Başlat" takılı okumayı da bırakır: eskiden iPhone'da takılan okuma bitmezse yalnız uygulamayı kapatıp
+        // açmak düzeltiyordu.
+        abandonStalledRead(olderThanMs: 0)
         session.start()
         self.session = session
+        reconnectOffer.reset(now: Date())
         startKeeper()
         // Deneme karelerinde oyun yoktur: oyun sorulmaz, oyuna göre alan uygulanmaz.
         if !demoMode {
@@ -475,17 +659,106 @@ final class PhoneModel: ObservableObject {
                 return self.settings.askGame && self.settings.sharePool
             }
         }
+        server.pairing.setSession(true)
         isRunning = true
         startedAt = Date()
         runningSince = startedAt
         recentLines = []
+        subtitleOffTip.reset()
+        updateSubtitleOffTip()
         lastMetrics = nil
         sessionLines = 0
         sessionPackLines = 0
         packInUse = nil
         keepScreenAwake(true)
+        startHealth()
+        watchTVConnection()
         if notifiesDisconnect { requestNotificationPermission() }
         onAnalytics(.sessionStart(output: settings.output.rawValue))
+    }
+
+    /// Konsol oturumunu kurar ve olaylarını modele bağlar (başlatmaz). "Çeviriyi başlat" ve "Yeniden bağlan" kullanır.
+    private func makeSession(xbox: XboxConsole?) -> (StreamControlling, String)? {
+        let session: StreamControlling
+        let consoleName: String
+        if demoMode {
+            RemotePlayLog.write("Deneme modu başladı (örnek kareler)")
+            session = DemoStream()
+            consoleName = ""
+        } else if let xbox {
+            RemotePlayLog.write("Çeviri başladı; Xbox'a bağlanılıyor (Beta): \(xbox.name)")
+            session = XboxStreamSession(auth: xboxAuth, console: xbox, playAudio: settings.xboxAudioOnDevice,
+                                        describe: XboxText.session, stopped: XboxText.stopped)
+            consoleName = xbox.name.isEmpty ? "Xbox" : xbox.name
+        } else if let console, let accountId {
+            RemotePlayLog.write("Çeviri başladı; PS5'e bağlanılıyor: \(console.name) \(console.host)")
+            session = services.makeStream(console: console, accountId: accountId,
+                                          loginPasscode: store.load(String.self, for: StoreKey.loginPasscode))
+            consoleName = console.name.isEmpty ? console.host : console.name
+        } else { return nil }
+        // Yeniden bağlanırken kapatılan eski oturumun geç gelen olayı (Xbox'ta "durdu") yeni oturumun durumunu ezmez.
+        session.onState = { [weak self, weak session] state in
+            Task { @MainActor in
+                guard let self, let session, self.session === session else { return }
+                self.sessionStateChanged(state)
+            }
+        }
+        session.onConsoleMoved = { [weak self] moved in Task { @MainActor in self?.consoleMoved(moved) } }
+        // Kareler ana iş parçacığına tek gözlü kutudan gider: eskiden her kare (saniyede 20) ayrı bir ana iş parçacığı işi
+        // kuruyordu; ana iş parçacığı yavaşlayınca işler 8 MB'lık kareleriyle birikiyor, dokunuşlar ("Çeviriyi durdur")
+        // ve ekran dönüşü gecikiyordu (TestFlight, X). Yetişilemeyen kare atlanır (bkz. FrameMailbox).
+        let mailbox = FrameMailbox<(frame: CGImage, capturedAt: Int)>()
+        session.onFrame = { [weak self] frame in
+            // Karenin geldiği an: gecikme buradan TV'ye gidene kadar ölçülür.
+            guard mailbox.put((frame, SubtitleStabilizer.uptimeMs())) else { return }
+            Task { @MainActor in
+                while let next = mailbox.take() {
+                    self?.handle(next.frame, capturedAt: next.capturedAt)
+                    await Task.yield()
+                }
+            }
+        }
+        frameMailbox = mailbox
+        return (session, consoleName)
+    }
+
+    /// "Yeniden bağlan" (ve oturumun bıraktığı bağlantıda öne dönüş): konsol oturumu kapatılıp yenisi açılır, TV bağlantısı
+    /// ve altyazı sunucusu yoklanır. Çeviri sürer (geçmiş, oyun seçimi, süre korunur). Eskiden oturum yeniden denemeyi
+    /// bırakınca (görüntü gelmiyor, PS5'te Uzaktan Oynatma çöktü, Xbox denemeleri bitti) ya da uzun süre bağlanamayınca
+    /// tek çare uygulamayı kapatıp açmaktı (TestFlight, iPhone).
+    func reconnect(reason: String = "kullanıcı") {
+        guard isRunning, !isStarting else { return }
+        let xbox = isXbox && !demoMode ? xboxConsole : nil
+        RemotePlayLog.write("Yeniden bağlanılıyor (\(reason)); son durum: \(sessionState)")
+        SubtitleLog.write("bağlantı yeniden kuruluyor (\(reason))")
+        session?.stop()
+        session = nil
+        frameMailbox?.clear()
+        frameGate.reset()
+        abandonStalledRead(olderThanMs: 0)
+        guard let (session, _) = makeSession(xbox: xbox) else { return }
+        sessionState = .connecting
+        session.start()
+        self.session = session
+        reconnectOffer.reset(now: Date())
+        if keeper == nil { startKeeper() } else { keeper?.reconnect() }
+        Task { await reviveServerIfSilent() }
+    }
+
+    /// Ana ekrandaki "Yeniden bağlan" düğmesi görünsün mü (bkz. `ReconnectOffer`).
+    func offersReconnect(now: Date = Date()) -> Bool {
+        guard isRunning, !demoMode else { return false }
+        return reconnectOffer.shows(gaveUp: session?.hasGivenUp ?? false, now: now)
+    }
+
+    /// Oturum yeniden denemeyi bıraktıysa uygulama öne dönünce kendiliğinden yeniden bağlanılır mı. Kayıt ya da giriş
+    /// şifresi sorununda hayır: aynı yere çıkar (yanlış şifre yeniden gönderilmez); kullanıcı düzeltip düğmeye basar.
+    static func reconnectsOnReturn(after state: SessionState) -> Bool {
+        guard case .disconnected(let reason) = state else { return true }
+        switch reason {
+        case .registrationInvalid, .loginPasscode, .loginPasscodeIncorrect, .stopped: return false
+        default: return true
+        }
     }
 
     func stop() {
@@ -495,6 +768,14 @@ final class PhoneModel: ObservableObject {
             defaults.set(seconds, forKey: "lastSessionSeconds")
             self.startedAt = nil
         }
+        healthTask?.cancel()
+        healthTask = nil
+        dubber?.stop()
+        tvWaitTask?.cancel()
+        tvWaitTask = nil
+        tvWaitingLong = false
+        tvOpenProblem = nil
+        SessionHealth.saveMark(nil, defaults)
         runningSince = nil
         packInUse = nil
         gameChoice.stop()
@@ -508,11 +789,21 @@ final class PhoneModel: ObservableObject {
         pipeline = nil
         regionWatcher?.reset()
         regionWatcher = nil
+        screenTextDetector?.reset()
+        gamePhoneTracker = nil
+        frameMailbox?.clear()
+        frameMailbox = nil
         // Yeni "Başlat" eski oturumdan kalan (belki takılmış) okumayı beklemeden temiz başlar.
         frameGate.reset()
+        server.pairing.setSession(false)
+        tvPairingRequest = nil
+        tvPairingOpened = false
         isRunning = false
         onlineIssue = nil
         sessionState = .disconnected(.stopped)
+        reconnectOffer.reset()
+        subtitleOffTip.reset()
+        updateSubtitleOffTip()
         phoneHide()
         keepScreenAwake(false)
     }
@@ -521,9 +812,86 @@ final class PhoneModel: ObservableObject {
     /// Arka plana gitmeden yalnız etkin olmaktan çıkıp dönünce (Denetim Merkezi, bildirim, izin penceresi) çalışan PS5
     /// oturumu kapatılıp açılmaz: eskiden her dönüşte kapatılıyor, PS5'te ikinci hesap girip çıkıyordu.
     func becameActive(afterBackground: Bool = true) {
+        if afterBackground { onResumedFromBackground() }
+        // iOS askıdayken altyazı sunucusunun dinleyicisini kapatabiliyor; dönüşte açık değilse yeniden açılır.
+        // Dinleyici "açık" görünse de askıdan sonra bağlantı kabul etmeyebilir: kendi adresinden sorulur, yanıt yoksa
+        // yeniden açılır (TV uygulaması telefonu bulamıyor, telefon "TV uygulaması bekleniyor"da kalıyordu).
+        if afterBackground, isRunning || serverStarted { Task { await reviveServerIfSilent() } }
+        // Uygulama öndeyken gösterilemeyen (ya da arka plandayken gelen) eşleştirme isteği yeniden gösterilir.
+        syncTVPairing()
         guard isRunning else { return }
-        if afterBackground || !Self.isLive(sessionState) { session?.reconnectNow() }
+        if afterBackground { markBackground(false) }
+        if session?.hasGivenUp == true {
+            // Oturum yeniden denemeyi bırakmıştı: `reconnectNow` bir şey yapmaz, kullanıcı uygulamayı kapatıp açmak zorunda
+            // kalıyordu. Arka planda (PiP) görüntü çözülemeyince "görüntü gelmiyor" diye bırakılabiliyor; dönüşte yeni
+            // oturum açılır. Kayıt ya da giriş şifresi sorununda açılmaz (aynı yere çıkar; düğme görünür).
+            if Self.reconnectsOnReturn(after: sessionState) { return reconnect(reason: "öne dönüş; oturum yeniden denemeyi bırakmıştı") }
+        } else if afterBackground || !Self.isLive(sessionState) {
+            session?.reconnectNow()
+        }
         keeper?.reconnect()
+    }
+
+    /// Uygulama arka plana geçti (ana ekran, başka uygulama ya da kilit tuşu). Çeviri sürüyorsa ve bildirim tercihi açıksa
+    /// gecikmeli uyarı kurulur: Resim içinde resim penceresi açılmazsa iOS yerel ağ bağlantısını ve görüntü okumayı durdurur
+    /// (pencere açılınca uyarı kalkar). Deneme modunda PS5 yok, uyarı da yok.
+    func enteredBackground() {
+        if isRunning { markBackground(true) }
+        guard isRunning, !demoMode, notifiesDisconnect else { return }
+        onPausedInBackground()
+    }
+
+    // MARK: - Uzun oturum tanısı
+
+    /// Telefon uygulaması uzun oyunda (40-45 dk) kendiliğinden kapanıyordu, iz kalmıyordu: belleği yetmeyen uygulamayı
+    /// iOS çökme raporu bırakmadan kapatır. Çeviri sürerken on dakikada bir bellek, ısı ve süre remoteplay.log'a ve
+    /// Crashlytics izine yazılır; oturum durdurulmadan biterse bir sonraki açılışta raporlanır (Android ile aynı).
+    private func startHealth() {
+        guard let startedAt else { return }
+        memoryWarnings = 0
+        SessionHealth.saveMark(SessionHealth.Mark(startedAt: startedAt), defaults)
+        healthTask?.cancel()
+        healthTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(SessionHealth.interval * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                self?.writeHealth()
+            }
+        }
+    }
+
+    private func writeHealth(note: String? = nil) {
+        guard let startedAt else { return }
+        let line = SessionHealth.line(minutes: Int(Date().timeIntervalSince(startedAt) / 60), memoryMB: SessionHealth.footprintMB(),
+                                      availableMB: SessionHealth.availableMB(), memoryWarnings: memoryWarnings,
+                                      thermal: ProcessInfo.processInfo.thermalState.rawValue)
+        let text = note.map { "\($0); \(line)" } ?? line
+        RemotePlayLog.write("Sağlık: \(text)")
+        onDiagnostic(text)
+        var mark = SessionHealth.loadMark(defaults) ?? SessionHealth.Mark(startedAt: startedAt)
+        mark.lastLine = text
+        SessionHealth.saveMark(mark, defaults)
+    }
+
+    private func markBackground(_ background: Bool) {
+        guard var mark = SessionHealth.loadMark(defaults) else { return }
+        mark.background = background
+        SessionHealth.saveMark(mark, defaults)
+    }
+
+    /// iOS bellek uyarısı gönderdi (UIApplication.didReceiveMemoryWarningNotification): çeviri sürüyorsa hemen yazılır.
+    func receivedMemoryWarning() {
+        guard isRunning else { return }
+        memoryWarnings += 1
+        writeHealth(note: "iOS bellek uyarısı")
+    }
+
+    /// Açılışta: önceki oturum durdurulmadan bittiyse rapor satırı (bir kez; iz silinir).
+    func takeUnexpectedEnd() -> String? {
+        let message = SessionHealth.unexpectedEnd(SessionHealth.loadMark(defaults))
+        SessionHealth.saveMark(nil, defaults)
+        if let message { RemotePlayLog.write(message) }
+        return message
     }
 
     /// Bağlı ya da bağlanıyor; yeniden bağlanmaya gerek yok.
@@ -535,14 +903,28 @@ final class PhoneModel: ObservableObject {
     private func startKeeper() {
         guard keeper == nil, settings.output.showsOnTV, hasTV, let tv else { return }
         let server = self.server
-        let keeper = services.makeKeeper(tv: tv, key: store.load(String.self, for: StoreKey.tvKey), params: ["server": serverAddress(for: tv)],
+        let keeper = services.makeKeeper(tv: tv, key: store.load(String.self, for: StoreKey.tvKey), params: ["server": serverAddress(for: tv), "key": server.accessKey],
                                          appConnected: { server.connectedClients > 0 }, onMoved: { [weak self] moved in
             Task { @MainActor in self?.tvMoved(to: moved) }
         }, onKey: { [weak self] key in
             Task { @MainActor in self?.store.save(key, for: StoreKey.tvKey) }
+        }, consolePort: { server.consolePort }, onOpenResult: { [weak self] problem in
+            Task { @MainActor in self?.openResult(problem, brand: tv.brand) }
         })
         keeper.start(interval: .seconds(5))
         self.keeper = keeper
+    }
+
+    private func openResult(_ problem: TVOpenProblem?, brand: TVBrand) {
+        guard isRunning, tvClients == 0 else { tvOpenProblem = nil; return }
+        tvOpenProblem = TVOpenProblem.shown(problem, brand: brand, hasKey: store.load(String.self, for: StoreKey.tvKey) != nil)
+    }
+
+    /// Ana ekrandaki "Otomatik açmayı dene": TV uygulaması hemen yeniden açılmaya çalışılır (bekçi beklemeden dener).
+    func retryTVOpen() {
+        tvOpenProblem = nil
+        guard isRunning else { return }
+        if keeper == nil { startKeeper() } else { keeper?.reconnect() }
     }
 
     private func outputChanged() {
@@ -558,6 +940,7 @@ final class PhoneModel: ObservableObject {
     }
 
     private func tvMoved(to moved: LGTV) {
+        if moved.brand == .samsung { SamsungAppKnowledge.shared.carry(from: tv?.host, to: moved.host) }
         tv = moved
         store.save(moved, for: StoreKey.tv)
     }
@@ -593,7 +976,14 @@ final class PhoneModel: ObservableObject {
 
     private func sessionStateChanged(_ state: SessionState) {
         let wasStreaming = sessionState == .streaming
+        // PS5'in kendi tarafındaki çökme altyazı günlüğüne de yazılır: kullanıcının günlüğünde nedeni görünsün (GitHub #519).
+        if state == .disconnected(.consoleRemotePlayCrashed), state != sessionState {
+            SubtitleLog.write("PS5: Uzaktan Oynatma PS5'te çöktü (Remote Play on Console has crashed); PS5 tamamen kapatılıp açılmalı")
+        }
         sessionState = state
+        reconnectOffer.update(live: state == .streaming)
+        subtitleOffTip.connectionChanged(streaming: state == .streaming)
+        updateSubtitleOffTip()
         // Akış sürerken kendiliğinden koptu (kullanıcı durdurmadı): tercih açıksa bildirim (uygulama etkin değilse).
         if wasStreaming, isRunning, case .disconnected(let reason) = state, reason != .stopped, notifiesDisconnect {
             onConnectionLost()
@@ -602,6 +992,8 @@ final class PhoneModel: ObservableObject {
         if case .disconnected = state {
             pipeline?.reset()
             regionWatcher?.reset()
+            gamePhoneTracker?.reset()
+            screenTextDetector?.reset()
             server.clear()
         }
     }
@@ -615,7 +1007,19 @@ final class PhoneModel: ObservableObject {
         let pipeline = SubtitlePipeline(reader: VisionReader(language: settings.sourceLanguage), translator: makeTranslator(),
                                         server: server, scheduler: scheduler)
         pipeline.showSpeakerNames = settings.showSpeakerNames
+        pipeline.applyWaits(from: settings)
+        pipeline.echo = .shared
+        // Görev satırı altyazıya girmez; otomatik ekran yazısı açıksa "auto-mission" ek alanı olarak kendi yerinde ve özgün
+        // stilinde gösterilir (Windows ile aynı). Kapalıysa ayrıca gösterilmez.
+        missionRegion = nil
+        pipeline.onMissionChanged = { [weak self] region in self?.missionRegion = region }
+        // "Tam ekran" alanda ekranın kenarındaki bildirim kartı (sağ altta mesaj önizlemesi, solda kayan bildirim) altyazıya
+        // girmez; kendi yerinde ve özgün stilinde gösterilir, ekranın ortasına çizilmez (Windows ve Android ile aynı).
+        noticeAreas = []
+        pipeline.onNoticesChanged = { [weak self] areas in self?.noticeAreas = areas }
         pipeline.skipsTurkish = settings.targetLanguage == "tr"
+        pipeline.watchSubtitleBackground = settings.watchSubtitleBackground
+        wireSpeech(pipeline)
         pipeline.onPair = { [weak self, weak pipeline] source, translation in
             self?.lastSource = source
             self?.lastTranslation = translation
@@ -626,6 +1030,27 @@ final class PhoneModel: ObservableObject {
             self?.noteLine(source: source, translation: translation, fromPack: fromPack)
         }
         pipeline.onMetrics = { [weak self] metrics in self?.lastMetrics = metrics }
+        pipeline.onReadResult = { [weak self] error in
+            // Takılıyken her kare beklemeden `stuck` alır; takılma uzadıysa okuma bırakılır, altyazı yeni kuyrukta sürer.
+            if case ReadQueueError.stuck? = error { self?.abandonStalledRead(olderThanMs: Self.abandonStallAfterMs) }
+            let stuck = ReadQueue.shared.stalledMs != nil
+            if self?.readingStuck != stuck { self?.readingStuck = stuck }
+        }
+        ReadQueue.shared.onEvent = { [weak self] event in
+            switch event {
+            case .stalled(let stall, _): SubtitleLog.write("okuma takıldı: \(stall.logText); takılan okuma bekleniyor")
+            case .recovered(let ms): SubtitleLog.write("okuma düzeldi: takılan okuma \(ms) ms sonra bitti")
+            case .rescueFailed: break
+            case .abandonedFinished(let still):
+                SubtitleLog.write("bırakılan takılı okuma sonunda bitti (bitmeyen bırakılmış okuma: \(still))")
+            case .degraded(let stalls):
+                SubtitleLog.write("okuma \(stalls) kez takıldı; bu oturumda hızlı düzeyde okunacak (Neural Engine yolu bırakıldı)")
+            }
+            Task { @MainActor in
+                let stuck = ReadQueue.shared.stalledMs != nil
+                if self?.readingStuck != stuck { self?.readingStuck = stuck }
+            }
+        }
         pipeline.onTranslationResult = { [weak self] error in
             let status: TranslatorStatus = switch error {
             case nil: .ready
@@ -637,28 +1062,97 @@ final class PhoneModel: ObservableObject {
         // Ek alan okuyucusu yeni dil ve motorla, ilk ek alan karesinde yeniden kurulur.
         regionWatcher?.reset()
         regionWatcher = nil
+        screenTextDetector?.reset()
         connectPacks(to: pipeline)
         onlineIssue = nil
         pipeline.warmUp()
         self.pipeline = pipeline
+        configureGamePhone()
+    }
+
+    /// iPhone'da bağımsız yedek okuyucu yok: takılan okuma bırakılır, sonraki okumalar yeni kuyrukta hızlı düzeyde verilir
+    /// (Android'de takılan tanıyıcı da bırakılıp yenisi kuruluyor).
+    private func abandonStalledRead(olderThanMs: Int) {
+        guard let ms = ReadQueue.shared.abandonStall(olderThanMs: olderThanMs) else { return }
+        SubtitleLog.write("okuma \(ms) ms'dir takılı; takılan okuma bırakıldı, okuma yeni kuyrukta hızlı düzeyde sürüyor")
+        if readingStuck { readingStuck = false }
+    }
+
+    /// Oyun telefonu yalnız ayar açıkken ve oynanan oyun GTA 6 iken izlenir (Mac'teki `configureGamePhone` ile aynı).
+    private func configureGamePhone() {
+        regionWatcher?.closePhone()
+        gamePhoneTracker = Self.tracksGamePhone(running: pipeline != nil, enabled: settings.readsGamePhone,
+                                                game: gameChoice.game?.name) ? GamePhoneTracker() : nil
+    }
+
+    static func tracksGamePhone(running: Bool, enabled: Bool, game: String?) -> Bool {
+        guard running, enabled, let game else { return false }
+        return GameName.key(game) == "gta 6"
     }
 
     /// Ek alanlar aynı dil, motor ve paketlerle okunur; ayrı bir okuyucu ve çevirmenle (altyazının sırasını beklemez).
     private func makeRegionWatcher(packLookup: ((String) -> PackMatch?)?) -> RegionWatcher {
         let watcher = RegionWatcher(reader: VisionReader(language: settings.sourceLanguage), translator: makeTranslator(), server: server)
         watcher.packLookup = packLookup
+        watcher.subtitleEcho = .shared
+        // Ayarlar'daki ekran yazısı türleri (telefon, görev, yardım/eylemler, menüler, diğer).
+        watcher.allows = { [weak self] kind in self?.settings.screenTextAllows(kind) ?? true }
         watcher.skipsTurkish = settings.targetLanguage == "tr"
+        watcher.translatesUiCommands = settings.sourceLanguage == "en" && settings.targetLanguage == "tr"
         watcher.onLog = { SubtitleLog.write($0) }
+        // Okunup yazısız ya da gürültülü çıkan otomatik alan dedektöre bildirilir (o görüntüde yeniden önerilmez).
+        watcher.onAutoRejected = { [weak self] id in self?.screenTextDetector?.reject(id) }
         return watcher
     }
 
-    private func handle(_ frame: CGImage, capturedAt: Int) async {
+    /// Kendiliğinden bulunan ekran yazıları (ayar açıkken, Tam ekran dışında; Mac ile aynı). Karo örneği arka planda
+    /// tek uçuşta alınır; altyazı alanı ve okunan ek alanlar dışlanır.
+    private func screenTextAreas(_ frame: CGImage, capturedAt: Int, watched: [ExtraArea], phoneOpen: Bool) -> [ExtraArea] {
+        guard settings.autoScreenText, !settings.extraAreasPausedByFullScreen, !phoneOpen else {
+            screenTextDetector = nil
+            return []
+        }
+        let detector = screenTextDetector ?? ScreenTextDetector()
+        screenTextDetector = detector
+        if !screenTextBusy, detector.due(capturedAt) {
+            screenTextBusy = true
+            let excluded = [settings.region] + watched.map(\.region)
+            Task.detached(priority: .utility) { [weak self] in
+                detector.sample(frame, now: capturedAt, excluded: excluded)
+                await MainActor.run { self?.screenTextBusy = false }
+            }
+        }
+        return detector.areas
+    }
+
+    /// Kare geldi, satır gösterildi ya da bağlantı değişti: ipucu yeniden değerlendirilir (deneme modunda görünmez).
+    private func updateSubtitleOffTip() {
+        let visible = isRunning && !demoMode && subtitleOffTip.visible(now: Date(), streaming: sessionState == .streaming)
+        if visible != showsSubtitleOffTip { showsSubtitleOffTip = visible }
+    }
+
+    /// Kare ana iş parçacığında kısa iş görür (önizleme, ek alanlar) ve hemen döner; altyazı okuması kapıdan geçerse kendi
+    /// işinde beklenir. Eskiden kare işi okumayı bekliyordu; sonraki kareler de ayrı işlerde birikiyordu.
+    private func handle(_ frame: CGImage, capturedAt: Int) {
         framePreview.image = frame
+        subtitleOffTip.frameArrived(at: Date(), streaming: sessionState == .streaming)
+        updateSubtitleOffTip()
         guard let current = pipeline else { return }
-        // Ek alanlar ayrı ve seyrek okunur (saniyede bir); altyazı okumasını beklemez, onu bekletmez.
-        let areas = settings.activeExtraAreas
-        if regionWatcher == nil, !areas.isEmpty { regionWatcher = makeRegionWatcher(packLookup: current.packLookup) }
-        regionWatcher?.offer(frame, areas: areas)
+        // Ek alanlar altyazıyla aynı OCR kuyruğunu kullanır; saniyede bir tur yeterlidir.
+        // Kullanıcının ek alanı yoksa bilinen oyunun hazır alanları (GameAreaPresets; ör. GTA 6 yardım kutusu ve mesajlar).
+        // Oyun telefonu açıkken ekranı ayrıca okunur; hazır alanlardaki telefon mesajı ve otomatik ekran yazısı o sırada okunmaz.
+        let pose = gamePhoneTracker?.sample(frame, now: capturedAt).pose
+        var areas = settings.watchedExtraAreas(game: gameChoice.game?.name, phoneOpen: pose != nil)
+        if settings.autoScreenText, let missionRegion {
+            areas.append(ExtraArea(id: MissionLine.areaId, name: "Mission", region: missionRegion, auto: true))
+        }
+        // Oyun telefonu açıkken telefonun yazıları telefon okuyucusundadır; kenar bildirimi sayılmaz.
+        if pose == nil { areas += noticeAreas }
+        areas += screenTextAreas(frame, capturedAt: capturedAt, watched: areas, phoneOpen: pose != nil)
+        if regionWatcher == nil, !areas.isEmpty || pose != nil { regionWatcher = makeRegionWatcher(packLookup: current.packLookup) }
+        regionWatcher?.offer(frame, areas: areas, phone: pose)
+        // Ekranda menü açık (otomatik ekran yazısı menü durumunda): menü satırları altyazıya karışmasın, altyazı okunmaz.
+        if screenTextDetector?.inMenu == true { return }
         // Önceki kare hâlâ işleniyorsa bu kare atlanır. Tek okuma bitmezse çeviri tamamen duruyor, "Durdur / Başlat"
         // düzeltmiyordu (Mac'te görüldü, 2026-11-13); takılan okuma hattı yeniden kurdurur.
         var entry = frameGate.enter(now: SubtitleStabilizer.uptimeMs())
@@ -668,8 +1162,11 @@ final class PhoneModel: ObservableObject {
             entry = frameGate.enter(now: SubtitleStabilizer.uptimeMs())
         }
         guard case .enter(let token) = entry, let pipeline else { return }
-        await pipeline.process(frame, region: settings.region, capturedAt: capturedAt)
-        frameGate.leave(token)
+        let region = settings.region
+        Task { [weak self] in
+            await pipeline.process(frame, region: region, capturedAt: capturedAt)
+            self?.frameGate.leave(token)
+        }
     }
 
     // MARK: - Geçmiş
@@ -706,6 +1203,8 @@ final class PhoneModel: ObservableObject {
         }
         recentLines.insert(RecentLine(id: sessionLines, source: source, translation: translation, fromPack: fromPack), at: 0)
         if recentLines.count > 30 { recentLines.removeLast() }
+        subtitleOffTip.lineShown()
+        updateSubtitleOffTip()
     }
 
     /// Okuma hattı oyun paketlerine bakıyor mu: ayar açık ve İngilizce→Türkçe (paketler herkese ücretsiz).
@@ -713,9 +1212,10 @@ final class PhoneModel: ObservableObject {
         settings.gamePacks && settings.sourceLanguage == "en" && settings.targetLanguage == "tr"
     }
 
-    /// Paketler ekranında karoya dokunma: paket açılır ya da kapanır (okuma hattı hemen yeni listeyle eşleşir).
-    func togglePack(_ id: String) {
-        if disabledPacks.contains(id) { disabledPacks.remove(id) } else { disabledPacks.insert(id) }
+    /// Paketler ekranında karoya dokunma: oyunun asıl paketi ve "(ek satırlar)" paketi birlikte açılır ya da kapanır
+    /// (okuma hattı hemen yeni listeyle eşleşir).
+    func setPacks(_ ids: [String], on: Bool) {
+        if on { disabledPacks.subtract(ids) } else { disabledPacks.formUnion(ids) }
         defaults.set(disabledPacks.sorted(), forKey: Self.disabledPacksKey)
         if let pipeline { connectPacks(to: pipeline) }
     }
@@ -780,9 +1280,17 @@ final class PhoneModel: ObservableObject {
         let local = Translator(source: source, target: target,
                                cache: Self.translationCache(engine: Translator.engineID, source: source, target: target))
         let engine = settings.onlineEngine
-        guard onlineTranslationActive, let storeKey = engine.storeKey, let key = store.load(String.self, for: storeKey) else { return local }
+        guard onlineTranslationActive, let storeKey = engine.storeKey else { return local }
         let online: TextTranslator & OnlineTranslating
-        if let provider = engine.aiProvider {
+        if engine == .local, let server = settings.localAIServer {
+            // Yerel model (aynı ağdaki bilgisayarda Ollama, LM Studio): anahtar isteğe bağlıdır; önbellekte sunucu ve
+            // model ayrı tutulur (Mac ile aynı).
+            let sense = gameChoice.sense
+            online = AITranslator(provider: .local, key: store.load(String.self, for: storeKey) ?? "", model: server.model,
+                                  server: server, fallback: local,
+                                  cache: Self.translationCache(engine: server.engineID, source: source, target: target),
+                                  game: { sense.current?.name }, instruction: settings.aiInstruction)
+        } else if let key = store.load(String.self, for: storeKey), let provider = engine.aiProvider {
             let model = provider.model(settings.model(for: provider)).id
             // Oynanan oyunun adı modele bağlam olarak gider; önbellek de oyuna göre ayrılır (Mac ile aynı). Ad kararlı
             // oyundur (`GameSense.current`), son eşleşen paket değil: tek bir ortak satır adı başka oyuna geçirmez (#27).
@@ -790,9 +1298,11 @@ final class PhoneModel: ObservableObject {
             online = AITranslator(provider: provider, key: key, model: model, fallback: local,
                                   cache: Self.translationCache(engine: provider.engineID(model: model), source: source, target: target),
                                   game: { sense.current?.name }, instruction: settings.aiInstruction)
-        } else {
+        } else if let key = store.load(String.self, for: storeKey) {
             online = DeepLTranslator(key: key, fallback: local,
                                      cache: Self.translationCache(engine: DeepLTranslator.engineID, source: source, target: target))
+        } else {
+            return local
         }
         online.onFailureChanged = { [weak self] state in Task { @MainActor in self?.onlineIssue = state } }
         return online
@@ -807,7 +1317,39 @@ final class PhoneModel: ObservableObject {
     // MARK: - Çevrimiçi çeviri anahtarları (Anahtarlık)
 
     var onlineTranslationActive: Bool {
-        settings.onlineTranslation && settings.sourceLanguage == "en" && settings.targetLanguage == "tr" && hasKey(settings.onlineEngine)
+        settings.onlineTranslation && settings.sourceLanguage == "en" && settings.targetLanguage == "tr" && isReady(settings.onlineEngine)
+    }
+
+    /// Motor kullanılabilir mi: bulut motorlarında anahtar kayıtlıdır; yerel modelde anahtar gerekmez, adres ve model adı
+    /// geçerli olmalıdır (Mac ile aynı). Sunucuya ulaşılamazsa satırlar ücretsiz çeviriyle gelir, ana ekranda uyarı çıkar.
+    func isReady(_ engine: TranslationEngine) -> Bool {
+        engine == .local ? settings.localAIServer != nil : hasKey(engine)
+    }
+
+    /// Ayarlardaki "Bağlantıyı dene": yerel model sunucusuna örnek satırı gönderir. `key` yazıldıysa o, yoksa kayıtlı
+    /// anahtar kullanılır; yazılan anahtar sunucu kabul ettiyse Anahtarlık'a yazılır (Mac `testLocalAI` ile aynı).
+    func testLocalAI(key typed: String = "") async -> Result<String, AIFailure> {
+        guard let server = settings.localAIServer else { return .failure(.unreachable) }
+        let typed = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = typed.isEmpty ? store.load(String.self, for: StoreKey.localAIKey) ?? "" : typed
+        SubtitleLog.write("Yerel model testi başladı: \(server.address) \(server.model)")
+        let result = await services.testLocalAI(server: server, key: key)
+        if case .failure(let error) = result { SubtitleLog.write("Yerel model testi sonucu: \(error)") }
+        if !typed.isEmpty {
+            switch result {
+            case .success, .failure(.quotaExceeded), .failure(.modelRejected), .failure(.busy):
+                store.save(typed, for: StoreKey.localAIKey)
+                guard store.load(String.self, for: StoreKey.localAIKey) == typed else { return .failure(.keychainWriteFailed) }
+                savedKeys.insert(.local)
+            case .failure: break
+            }
+        }
+        if case .success = result {
+            settings.translationEngine = .local
+            if isRunning { makePipeline() }
+            await refreshTranslatorStatus()
+        }
+        return result
     }
 
     func hasKey(_ engine: TranslationEngine) -> Bool { savedKeys.contains(engine) }
@@ -826,22 +1368,34 @@ final class PhoneModel: ObservableObject {
         hasLoginPasscode = false
     }
 
-    /// Anahtar denenir; kabul edildiyse Anahtarlık'a yazılır ve motor seçilir. Dönen metin kullanıcıya gösterilir.
-    func saveKey(_ key: String, for engine: TranslationEngine) async -> Bool {
+    /// Anahtar kaydının sonucu: hizmet kabul etmediyse `rejected`, Anahtarlık'a yazılamadıysa (geri okunamadı) `notStored`.
+    enum KeySaveResult: Equatable { case saved, rejected, notStored }
+
+    /// Anahtar denenir; kabul edildiyse Anahtarlık'a yazılır ve motor seçilir. Anahtarlık'tan geri okunamazsa kayıt
+    /// başarılı sayılmaz (Mac'teki `saveKey` ile aynı kural).
+    func saveKey(_ key: String, for engine: TranslationEngine) async -> KeySaveResult {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty, let storeKey = engine.storeKey else { return false }
+        guard !key.isEmpty, let storeKey = engine.storeKey else { return .rejected }
         let accepted: Bool
+        SubtitleLog.write("API anahtarı testi başladı: \(engine.rawValue)")
         if let provider = engine.aiProvider {
-            switch await services.testAIKey(provider: provider, key: key, model: settings.model(for: provider)) {
+            let result = await services.testAIKey(provider: provider, key: key, model: settings.model(for: provider))
+            if case .failure(let error) = result { SubtitleLog.write("API anahtarı testi sonucu: \(provider.rawValue) \(error)") }
+            switch result {
             case .success, .failure(.quotaExceeded), .failure(.modelRejected), .failure(.busy): accepted = true
             case .failure: accepted = false
             }
         } else {
             let state = await services.checkDeepLKey(key).state
+            if state != .valid { SubtitleLog.write("API anahtarı testi sonucu: \(engine.rawValue) \(state)") }
             accepted = state == .valid || state == .quotaExceeded
         }
-        guard accepted else { return false }
+        guard accepted else { return .rejected }
         store.save(key, for: storeKey)
+        guard store.load(String.self, for: storeKey) == key else {
+            SubtitleLog.write("API anahtarı Anahtarlık'a kaydedilemedi: \(engine.rawValue)")
+            return .notStored
+        }
         savedKeys.insert(engine)
         if settings.translationEngine == engine {
             if isRunning { makePipeline() }
@@ -849,13 +1403,25 @@ final class PhoneModel: ObservableObject {
         } else {
             settings.translationEngine = engine
         }
-        return true
+        return .saved
+    }
+
+    /// Kayıtlı DeepL anahtarının bu ayki kullanımı (Mac'teki `deepLUsage` ile aynı sorgu; karakter kotasından yemez).
+    /// Anahtar yoksa nil.
+    func deepLUsage() async -> OnlineKeyCheck? {
+        guard let storeKey = TranslationEngine.deepL.storeKey, let key = store.load(String.self, for: storeKey), !key.isEmpty else { return nil }
+        return await services.checkDeepLKey(key)
     }
 
     func removeKey(_ engine: TranslationEngine) {
         guard let storeKey = engine.storeKey else { return }
         store.remove(storeKey)
         savedKeys.remove(engine)
+        // Yerel modelin anahtarı isteğe bağlıdır: anahtarsız çeviri sürer, hat anahtarsız yeniden kurulur.
+        if engine == .local {
+            if settings.translationEngine == .local, isRunning { makePipeline() }
+            return
+        }
         if settings.translationEngine == engine { settings.onlineTranslation = false }
     }
 
@@ -863,11 +1429,12 @@ final class PhoneModel: ObservableObject {
 
     /// Sunucunun TV'ye gönderdiği olayların aynısı telefon ekranına da gelir (TV kurulu olmasa da).
     func phoneReceive(_ event: SubtitleEvent) {
-        // Deneme modunda altyazı TV seçili olsa da bu ekranda görünür (TV'si olmayan da görsün).
-        guard settings.output.showsOnComputer || demoMode else { return }
+        // Deneme modunda altyazı TV seçili olsa da bu ekranda görünür (TV'si olmayan da görsün). "Arka planda sürdür"
+        // açıkken satırlar Resim içinde resim penceresine de gider (TV seçiliyken de).
+        guard settings.output.showsOnComputer || demoMode || backgroundPiP else { return }
         let now = clock()
         switch event {
-        case .subtitle(let text, let durationMs, let paragraphs, let replaces):
+        case .subtitle(let text, let durationMs, let paragraphs, let replaces, _):
             // Aynı cümlenin uzamış ya da düzelmiş okuması öncekinin yerine geçer (Mac'teki pencere ve TV gibi).
             stack.stackPrevious = settings.style.stackPrevious
             stack.show(text, durationMs: durationMs, paragraphs: paragraphs, replaces: replaces, now: now)
@@ -876,10 +1443,23 @@ final class PhoneModel: ObservableObject {
         // "Ekranı çevir" sonuçları yazının yerinde gösterilir (`screenItems`); satır yığınına girmez.
         case .screen, .screenClear:
             return
+        // Oyun telefonunun çevirisi telefon ekranında ek alan kutusu gibi tek kutuda görünür (TV'de satırlar kendi yerinde;
+        // boş liste kutuyu kaldırır).
+        case .gamePhone(let items):
+            phoneRegions = Self.phoneRegions(phoneRegions, gamePhone: items)
+            return
         // Ek alanın çevirisi telefon ekranında da kendi yerinde küçük kutuda görünür (boş metin kutuyu kaldırır).
         case .region(let id, let text, let box):
             var regions = phoneRegions.filter { $0.id != id }
             if !text.isEmpty { regions.append(PhoneRegion(id: id, text: text, box: box)) }
+            if regions != phoneRegions { phoneRegions = regions }
+            return
+        // Kendiliğinden bulunan ekran yazısı telefonda da ek alan kutusu gibi görünür (TV'de özgün stilinde).
+        case .screenText(let id, let items):
+            let boxes = items.map(\.box)
+            let box = boxes.dropFirst().reduce(boxes.first) { $0?.union($1) }
+            var regions = phoneRegions.filter { $0.id != id }
+            regions.append(PhoneRegion(id: id, text: items.map(\.translation).joined(separator: "\n"), box: box))
             if regions != phoneRegions { phoneRegions = regions }
             return
         case .regionClear:
@@ -888,6 +1468,19 @@ final class PhoneModel: ObservableObject {
         }
         phoneRefresh()
     }
+
+    /// Oyun telefonunun kutusu (`game-phone`) eklenmiş ya da kaldırılmış ek alan kutuları.
+    static func phoneRegions(_ regions: [PhoneRegion], gamePhone items: [ScreenTranslation.Item]) -> [PhoneRegion] {
+        var regions = regions.filter { $0.id != gamePhoneRegionId }
+        let boxes = items.map(\.box)
+        if let first = boxes.first {
+            regions.append(PhoneRegion(id: gamePhoneRegionId, text: items.map(\.translation).joined(separator: "\n"),
+                                       box: boxes.dropFirst().reduce(first) { $0.union($1) }))
+        }
+        return regions
+    }
+
+    static let gamePhoneRegionId = "game-phone"
 
     private func phoneRefresh() {
         let now = clock()
@@ -916,49 +1509,139 @@ final class PhoneModel: ObservableObject {
     // MARK: - Ekranı çevir
 
     /// "Ekranı çevir": PS5'in şu anki karesinin tamamı bir kez okunur, yazı grupları (menü, görev paneli, bilgi kutusu...)
-    /// tek istekte çevrilir; sonuçlar telefonda ve TV'de yazının kendi yerinde görünür. Çeviri sürerken ya da sonuçlar
-    /// ekrandayken yeniden dokunmak onları kaldırır (Mac ⌥⌘T ile aynı).
-    func translateScreen() {
+    /// tek istekte çevrilir; sonuçlar telefonda ve TV'de yazının kendi yerinde, özgün stilinde görünür (GTA 6 telefonu
+    /// yanında mesaj kartında). Çeviri sürerken yeniden dokunmak onu durdurur; sonuçlar ekrandayken dokununca kare yine
+    /// okunur: ekran değiştiyse (telefonda başka sohbet) yenisi çevrilir, değişmediyse sonuçlar kalkar (Mac'in ekranı çevir kısayoluyla aynı).
+    /// Karede GTA 6 telefonu varsa kart ekrandayken telefon izlenir (`followPhone`): sohbet değişince kart kendiliğinden
+    /// yenilenir, telefon kapanınca kalkar. `refresh`: bu izlemenin yenilemesi (dokunulmadı).
+    func translateScreen(refresh: Bool = false) {
         guard isRunning else { return }
-        if screenState != .idle {
-            hideScreen()
+        if screenState == .working || (refresh && screenTask != nil) {
+            if !refresh { hideScreen() }
             return
         }
+        let wasShown = !refresh && screenState == .shown
+        let previous = screenFingerprint
         guard let frame = framePreview.image else {
-            server.sendSubtitle(String(localized: "Couldn't capture the screen: no picture from the PS5 yet."), durationMs: 4000)
+            if !refresh { server.sendSubtitle(String(localized: "Couldn't capture the screen: no picture from the PS5 yet."), durationMs: 4000) }
             return
         }
-        screenState = .working
+        if !refresh {
+            // Yeniden okunurken önceki sonuçların süresi dolup yeni çeviriyi iptal etmesin.
+            screenExpiry?.cancel()
+            screenExpiry = nil
+            screenState = .working
+        }
         server.sendStyle(settings.style)
-        server.sendSubtitle(String(localized: "Translating the screen…"), durationMs: 2500)
+        if !wasShown && !refresh { server.sendSubtitle(String(localized: "Translating the screen…"), durationMs: 2500) }
         let reader = VisionReader(language: settings.sourceLanguage)
         let translator = makeTranslator()
+        let memoryKey = "\(settings.sourceLanguage)|\(settings.targetLanguage)|\(onlineTranslationActive)|\(settings.onlineEngine)"
+        if memoryKey != screenMemoryKey {
+            screenMemoryKey = memoryKey
+            screenMemory = PhoneChatMemory()
+        }
+        let memory = screenMemory
         let server = self.server
         screenTask = Task { [weak self] in
             do {
-                let reading = try await Task.detached(priority: .userInitiated) { try reader.readLines(frame, deep: false) }.value
-                let items = try await ScreenTranslation.translate(reading, using: translator) { shown in
+                let read = try await ReadQueue.shared.run(priority: .background, detail: ReadQueue.detail("ekranı çevir", frame)) {
+                    try reader.readLines(frame, deep: false)
+                }
+                // Altyazı zaten kendi yerinde çevriliyor: ekran çevirisinde ikinci kez çizilmez (bkz. SubtitleEcho).
+                let echo = SubtitleEcho.shared
+                let reading = echo.filter(read, geometry: echo.hasRecent)
+                let fingerprint = ScreenTranslation.fingerprint(reading)
+                if wasShown {
                     guard !Task.isCancelled else { return }
+                    if ScreenTranslation.isSameScreen(fingerprint, previous) {
+                        self?.screenTask = nil
+                        self?.hideScreen()
+                        return
+                    }
+                    server.sendSubtitle(String(localized: "Translating the screen…"), durationMs: 2500)
+                }
+                self?.screenFingerprint = fingerprint
+                let items = try await ScreenTranslation.translate(reading, using: translator, frame: frame, memory: memory) { shown in
+                    // İzlemenin yenilemesinde aynı çeviriler yeniden gönderilmez (TV'de kart yeniden çizilmesin).
+                    guard !Task.isCancelled, !(refresh && self?.screenShown == shown) else { return }
                     let milliseconds = ScreenTranslation.displayMilliseconds(shown)
                     server.sendScreen(shown, durationMs: milliseconds)
                     self?.showScreen(shown, milliseconds: milliseconds)
                 }
                 guard !Task.isCancelled else { return }
-                server.clear()
+                if !refresh { server.clear() }
                 if items.isEmpty {
+                    if wasShown || refresh { self?.hideScreen() }
                     self?.screenState = .idle
-                    server.sendSubtitle(String(localized: "No text found on the screen."), durationMs: 2500)
+                    if !refresh { server.sendSubtitle(String(localized: "No text found on the screen."), durationMs: 2500) }
+                } else {
+                    self?.followPhone(in: frame)
                 }
             } catch is CancellationError {
                 return
             } catch {
-                self?.showScreenFailure(error, translator: translator)
+                // İzlemenin yenilemesi başarısızsa eski kart kalır; aynı görüntü yeniden denenmez.
+                if refresh { self?.followPhone(in: frame) } else { self?.showScreenFailure(error, translator: translator) }
             }
             self?.screenTask = nil
         }
     }
 
+    /// Ekran bu kareyle çevrildi: karede telefon varsa kart ekrandayken telefon izlenir (`ScreenPhoneFollow`). Sohbet
+    /// değişip durulunca ekran yeniden çevrilir (hafızadaki mesajlar hemen gelir), telefon aynıyken kartın süresi uzar,
+    /// telefon kapanınca kart kalkar (Mac ile aynı).
+    private func followPhone(in frame: CGImage) {
+        let follow = screenFollow ?? ScreenPhoneFollow()
+        Task { [weak self] in
+            guard let look = await Task.detached(priority: .utility, operation: { ScreenPhoneFollow.look(frame) }).value else {
+                if self?.screenFollow === follow { self?.stopFollowing() }
+                return
+            }
+            follow.settled(look.box, signature: look.signature)
+            guard let self, self.screenFollow !== follow else { return }
+            self.stopFollowing()
+            self.screenFollow = follow
+            self.screenFollowTask = Task { [weak self] in
+                // İzleme bitince (kart kalktı) sonraki kart yeni bir izlemeyle başlar.
+                defer { if let self, self.screenFollow === follow { self.stopFollowing() } }
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(ScreenPhoneFollow.interval))
+                    guard let self, !Task.isCancelled, self.screenFollow === follow, self.isRunning,
+                          self.screenState != .idle else { return }
+                    guard self.screenTask == nil, let current = self.framePreview.image else { continue }
+                    let look = await Task.detached(priority: .utility, operation: { ScreenPhoneFollow.look(current) }).value
+                    guard !Task.isCancelled, self.screenFollow === follow else { return }
+                    switch follow.step(look?.box, signature: look?.signature) {
+                    case .wait: continue
+                    case .keep: self.keepScreen()
+                    case .refresh: self.translateScreen(refresh: true)
+                    case .stop:
+                        self.hideScreen()
+                        return
+                    }
+                }
+            }
+        }
+    }
+
+    private func stopFollowing() {
+        screenFollowTask?.cancel()
+        screenFollowTask = nil
+        screenFollow = nil
+    }
+
+    /// Telefon kartı izlenirken telefon aynı: sonuçlar yeniden gönderilip süresi uzatılır (süresi dolmak üzereyse).
+    private func keepScreen() {
+        guard !screenShown.isEmpty, screenShownUntil.timeIntervalSinceNow < 5 else { return }
+        let milliseconds = ScreenTranslation.displayMilliseconds(screenShown)
+        server.sendScreen(screenShown, durationMs: milliseconds)
+        showScreen(screenShown, milliseconds: milliseconds)
+    }
+
     private func showScreen(_ items: [ScreenTranslation.Item], milliseconds: Int) {
+        screenShown = items
+        screenShownUntil = Date().addingTimeInterval(Double(milliseconds) / 1000)
         if settings.output.showsOnComputer { screenItems = items }
         screenState = .shown
         screenExpiry?.cancel()
@@ -971,13 +1654,17 @@ final class PhoneModel: ObservableObject {
 
     /// Çeviriyi durdurur, sonuçları telefondan ve TV'den kaldırır.
     func hideScreen() {
+        stopFollowing()
         guard screenState != .idle || !screenItems.isEmpty else { return }
         screenTask?.cancel()
         screenTask = nil
         screenExpiry?.cancel()
         screenExpiry = nil
         screenItems = []
+        screenShown = []
+        screenShownUntil = .distantPast
         screenState = .idle
+        screenFingerprint = ""
         server.clearScreen()
         server.clear()
     }
@@ -1004,8 +1691,31 @@ final class PhoneModel: ObservableObject {
     func sendTestSubtitle() {
         Task {
             try? await startServer()
+            // Çeviri sürmüyorken TV'nin eşleştirme isteği (TV 0.9.34+) reddediliyordu; TV'de yalnız "Eşleştirme
+            // tamamlanmadı" çıkıyordu. Deneme, Profil'deki "TV eşleştir" gibi iki dakikalık onay penceresi açar.
+            if !isRunning { server.pairing.open() }
             server.sendStyle(settings.style)
             server.sendSubtitle(String(localized: "This is a test subtitle. Can you see it on top of the game?"), durationMs: 8000)
+            // TV bağlı değilse yazı TV'ye gitmiyordu ve TV'deki 6 haneli kodun nereye yazılacağı aranıyordu (kod yazılmaz,
+            // bu telefonda açılan pencerede onaylanır). Yönerge gösterilir; TV onaylanıp bağlanınca yazı bir kez daha gider.
+            testWaitTask?.cancel()
+            guard settings.output.showsOnTV, server.connectedClients == 0 else {
+                testTVNotConnected = false
+                return
+            }
+            testTVNotConnected = true
+            testWaitTask = Task { [weak self] in
+                guard let self else { return }
+                let deadline = ContinuousClock.now + self.testPairWait
+                while self.server.connectedClients == 0, ContinuousClock.now < deadline {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    if Task.isCancelled { return }
+                }
+                guard self.server.connectedClients > 0 else { return }
+                self.testTVNotConnected = false
+                self.server.sendStyle(self.settings.style)
+                self.server.sendSubtitle(String(localized: "This is a test subtitle. Can you see it on top of the game?"), durationMs: 8000)
+            }
         }
     }
 
@@ -1020,7 +1730,7 @@ final class PhoneModel: ObservableObject {
             switch reason {
             case .consoleAsleep: return String(localized: "Turn on your PS5")
             case .inUse: return String(localized: "Remote Play is in use on another device")
-            case .refused: return String(localized: "The PS5 refused the connection. Set up the PS5 again.")
+            case .refused: return String(localized: "The PS5 did not accept the connection yet. It may still be starting up, or its network address may have changed. Reconnecting and searching for the PS5… If this keeps happening, make sure the PS5 is on and on the same network.")
             case .loginPasscode:
                 return String(localized: "The PS5 asks for this account's login passcode. Enter it in Settings, or turn off this account's login passcode on the PS5.")
             case .loginPasscodeIncorrect:
@@ -1029,11 +1739,21 @@ final class PhoneModel: ObservableObject {
             case .noPicture: return String(localized: "No picture from the PS5. Is Remote Play turned off, or is the PS5 in rest mode? Check, then start again.")
             case .notFound(let host):
                 return String(format: String(localized: "PS5 not found at %@. Make sure it is on and on the same network. Reconnecting…"), host)
-            case .network: return String(localized: "Can't reach the PS5. Reconnecting…")
+            // Kablosuz ağda akış sık kopuyordu (GitHub #388, #401): yeniden bağlanılır, kalıcı çözüm kablodur.
+            case .network:
+                return String(localized: "Lost the connection to the PS5. Reconnecting… If this keeps happening, connect the PS5 to the router with a cable.")
+            // 0x80108b12: PS5'te Uzaktan Oynatma kapalı (GitHub #9). Ayar açılınca yeniden denemede bağlanılır.
+            case .rejected(.some(DisconnectReason.remotePlayDisabled)):
+                return String(format: String(localized: "Remote Play is turned off on the PS5 (code %@). On the PS5, go to Settings › System › Remote Play and turn on Enable Remote Play."),
+                              String(format: "0x%08x", DisconnectReason.remotePlayDisabled))
             // Eskiden "Yeniden bağlanılıyor…" ile anlamsız libchiaki metni (Unknown Session Request Error) vardı.
             case .rejected(let code?):
                 return String(format: String(localized: "The PS5 rejected the connection (code %@). Another Remote Play app (PS Remote Play) may be open, or the PS5 may be in another session. Close PS Remote Play, restart the PS5, then try again."), String(format: "0x%08x", code))
             case .rejected(nil): return String(localized: "The PS5 didn't start the session. Another Remote Play app (PS Remote Play) may be open, or the PS5 may be in another session. Close PS Remote Play, restart the PS5, then try again.")
+            // Eskiden İngilizce "Remote Play on Console has crashed" ile sonsuza kadar "Yeniden bağlanılıyor…" (GitHub #519).
+            // PS5 akışı kendisi kapattı (ör. oyun sırasında PS5'te kullanıcı değişti): eskiden "kabloyla bağlayın" deniyordu.
+            case .consoleClosed: return String(localized: "The PS5 ended Remote Play. This usually happens when the user is switched on the PS5 during the game. Reconnecting…")
+            case .consoleRemotePlayCrashed: return String(localized: "Remote Play on the PS5 has crashed. Turn the PS5 off completely (not rest mode) and back on, then connect again.")
             case .other(let detail) where isXbox: return detail
             case .other, .stopped: return String(localized: "Reconnecting…")
             }
@@ -1053,6 +1773,8 @@ final class PhoneModel: ObservableObject {
         if !force, let last = tvAppCheckedAt, Date().timeIntervalSince(last) < 60 { return }
         let target: (TVBrand, String, UInt16?)
         if let installed = installedTVApp {
+            // Bu telefonun daha önce kurduğu Samsung uygulaması kurulu bilinir (bekçi listeye bakmadan açar).
+            if installed.brand == .samsung { SamsungAppKnowledge.shared.mark(host: installed.host) }
             target = (installed.brand, installed.host, installed.port)
         } else if let tv, !tv.host.isEmpty {
             target = (tv.brand, tv.host, nil)
@@ -1094,27 +1816,177 @@ final class PhoneModel: ObservableObject {
 
     private func saveInstalledTVApp(_ value: InstalledTVApp) {
         installedTVApp = value
+        // Bu telefonun kurduğu ya da sürümünü TV'den okuduğu Samsung uygulaması kurulu bilinir.
+        if value.brand == .samsung { SamsungAppKnowledge.shared.mark(host: value.host) }
         if let data = try? JSONEncoder().encode(value) { defaults.set(data, forKey: StoreKey.tvAppInstalled) }
     }
 
     // MARK: - Sunucu
+
+    /// Sunucu açık değilse açar (ilk kez ya da iOS dinleyiciyi kapattıktan sonra); port değiştiyse TV'yi açık tutan
+    /// görev yeni adresle yeniden kurulur. Hata günlüklere yazılır.
+    private func ensureServer(force: Bool = false) async {
+        if !force, serverStarted, server.isListening { return }
+        // Düşme bildirimi ve öne gelme aynı anda yeniden açmaya kalkmasın.
+        guard !serverRestarting else { return }
+        serverRestarting = true
+        defer { serverRestarting = false }
+        let previousPort = serverPort
+        if serverStarted {
+            serverStarted = false
+            // Eşleştirme durumu korunur: onay bekleyen istek ve "TV eşleştir" süresi yeniden açılışta silinmez.
+            server.stop(keepPairing: true)
+        }
+        // Önceki açılışta 8787 alınamayıp rastgele porta düşüldüyse yeniden 8787 denenir: TV uygulaması ağı o portta tarar.
+        if serverPort != AppIdentity.serverPort {
+            server = SubtitleServer(port: AppIdentity.serverPort, key: server.accessKey, pairing: server.pairing)
+            attachServer()
+        }
+        do {
+            try await startServer()
+        } catch {
+            RemotePlayLog.write("Altyazı sunucusu açılamadı: \(error)")
+            SubtitleLog.write("Altyazı sunucusu açılamadı; TV bağlanamaz: \(error)")
+            return
+        }
+        syncTVPairing()
+        guard isRunning else { return }
+        server.pairing.setSession(true)
+        if serverPort != previousPort, keeper != nil {
+            keeper?.stop()
+            keeper = nil
+            startKeeper()
+        }
+    }
+
+    /// Testler için: sağlık yoklamasının yanıt alamadığı durumdaki gibi sunucuyu yeniden açar.
+    func restartServer() async { await ensureServer(force: true) }
+
+    /// Sunucu kendi adresinden `/hello` isteğine yanıt veriyor mu (dinleyici gerçekten bağlantı kabul ediyor mu).
+    func serverAnswers() async -> Bool {
+        guard serverStarted, server.isListening, let url = URL(string: "http://127.0.0.1:\(serverPort)/hello") else { return false }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 2
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        guard let (data, response) = try? await URLSession.shared.data(for: request) else { return false }
+        return (response as? HTTPURLResponse)?.statusCode == 200 && String(decoding: data, as: UTF8.self).contains("couchsubs")
+    }
+
+    /// Sunucu yanıt vermiyorsa yeniden açar; yanıt verip vermediğini döner (yeniden açmadan önceki durum).
+    @discardableResult
+    private func reviveServerIfSilent() async -> Bool {
+        // TV bağlıyken sunucuya dokunulmaz (yeniden açmak bağlı TV'yi düşürür).
+        if serverStarted, server.isListening, tvClients > 0 { return true }
+        if await serverAnswers() { return true }
+        // Tek bir yanıtsız yoklama (askıdan yeni dönen uygulama) sunucuyu kapatmasın: TV o sırada kod bekliyor olabilir.
+        try? await Task.sleep(for: .milliseconds(500))
+        if await serverAnswers() { return true }
+        RemotePlayLog.write("Altyazı sunucusu yanıt vermiyor; yeniden açılıyor")
+        SubtitleLog.write("Altyazı sunucusu yanıt vermiyor; yeniden açılıyor")
+        await ensureServer(force: true)
+        return false
+    }
+
+    private func serverDropped(_ reason: String) {
+        RemotePlayLog.write("Altyazı sunucusu kapandı (\(reason)); yeniden açılıyor")
+        SubtitleLog.write("Altyazı sunucusu kapandı (\(reason)); yeniden açılıyor")
+        Task { await ensureServer() }
+    }
+
+    /// Çeviri başladıktan bir süre sonra TV uygulaması hâlâ bağlanmadıysa tanı satırı yazılır ve TV kartı ne yapılacağını
+    /// söyler. TestFlight'ta "Hazır" görünen telefonda TV kartı "TV uygulaması bekleniyor"da kalıyordu, iz yoktu.
+    private func watchTVConnection() {
+        tvWaitTask?.cancel()
+        tvWaitingLong = false
+        guard settings.output.showsOnTV, !demoMode else { return }
+        tvWaitTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.tvWaitLimit)
+            guard !Task.isCancelled, let self, self.isRunning, self.tvClients == 0 else { return }
+            self.tvWaitingLong = true
+            // Sunucu yanıt vermiyorsa yeniden açılır; TV uygulaması bir sonraki denemesinde bağlanır.
+            let answered = await self.reviveServerIfSilent()
+            let line = self.tvConnectionDiagnostic() + " yanıt=\(answered ? 1 : 0) port=\(self.serverPort)"
+            RemotePlayLog.write(line)
+            SubtitleLog.write(line)
+            InstallLog.shared.write(line)
+        }
+    }
+
+    /// TV bağlanmadığında neye bakılacağı: sunucu dinliyor mu, hangi adresi veriyor, TV kayıtlı mı, TV'yi açık tutan
+    /// görev var mı, TV uygulaması eski mi (anahtarsız istemci).
+    func tvConnectionDiagnostic() -> String {
+        // Günlük satırı (ekran metni değil): 1 = evet, 0 = hayır.
+        func flag(_ value: Bool) -> String { value ? "1" : "0" }
+        let tvText = tv.map { "\($0.brand.rawValue) \($0.host)" } ?? "-"
+        let address = tv.map { serverAddress(for: $0) } ?? "http://\(NetworkAddress.near(nil) ?? "?"):\(serverPort)"
+        return "TV bağlanmadı (\(Int(Self.tvWaitLimit.components.seconds)) sn): sunucu dinliyor=\(flag(server.isListening)) "
+            + "adres=\(address) TV=\(tvText) eşli=\(flag(hasTV)) TV görevi=\(flag(keeper != nil)) "
+            + "eski TV uygulaması=\(flag(server.hasLegacyClient)) çıkış=\(settings.output.rawValue)"
+    }
 
     private func startServer() async throws {
         guard !serverStarted else { return }
         do {
             serverPort = try await server.start()
         } catch {
-            server = SubtitleServer(port: 0)
+            RemotePlayLog.write("Altyazı sunucusu \(AppIdentity.serverPort) portunu alamadı (\(error)); rastgele port deneniyor")
+            server = SubtitleServer(port: 0, key: server.accessKey, pairing: server.pairing)
             attachServer()
             serverPort = try await server.start()
         }
         serverStarted = true
     }
 
+    /// Android TV kurulumunda uygulama açılırken verilecek başlatma parametreleri (sunucu açılamazsa nil).
+    func androidLaunchParams(host: String) async -> String? {
+        try? await startServer()
+        guard serverStarted else { return nil }
+        return AndroidTvInstaller.launchParams(server: serverAddress(for: LGTV(name: "", host: host, brand: .androidTV)))
+    }
+
     /// TV ile aynı ağdaki telefon adresi.
     func serverAddress(for tv: LGTV) -> String {
         "http://\(NetworkAddress.near(tv.host.isEmpty ? "192.168.1.1" : tv.host) ?? "127.0.0.1"):\(serverPort)"
     }
+
+    // MARK: - Türkçe dublaj (telefonun kendi sesi; masaüstündeki "Hızlı" dublajla aynı)
+
+    private var dubber: PhoneDubber?
+
+    private func makeDubber() -> PhoneDubber {
+        if let dubber { return dubber }
+        let dubber = PhoneDubber(server: { [unowned self] in self.server }, settings: settings.dubbing)
+        dubber.onCastChanged = { [weak self] cast in self?.settings.dubbing.cast = cast }
+        self.dubber = dubber
+        return dubber
+    }
+
+    private func speak(_ lines: [SpokenLine]) {
+        guard settings.dubbing.enabled else { return }
+        makeDubber().speak(lines)
+    }
+
+    /// Okuma hattı seslendirme cümlelerini yalnız dublaj açıkken çıkarır: kapalıyken her satırda çevirmenin seslendirme
+    /// hafızasına gidilmez (dublaj kapalı kullanıcıda bu iş hiç yapılmasın; Android'de de dublaj kapalıyken yapılmıyor).
+    private func wireSpeech(_ pipeline: SubtitlePipeline) {
+        pipeline.onSpeech = settings.dubbing.enabled ? { [weak self] lines in self?.speak(lines) } : nil
+    }
+
+    private func dubbingSettingsChanged() {
+        if let pipeline { wireSpeech(pipeline) }
+        guard let dubber else { return }
+        dubber.cast = settings.dubbing.cast
+        if dubber.output != settings.dubbing.output {
+            dubber.stop()
+            dubber.output = settings.dubbing.output
+        }
+        if !settings.dubbing.enabled { dubber.stop() }
+    }
+
+    /// Ayarlardaki "Dinle".
+    func previewVoice(_ voice: DubbingVoice) { makeDubber().preview(voice) }
+
+    func assignVoice(_ voice: DubbingVoice, to name: String) { settings.dubbing.cast.assign(voice, to: name) }
 }
 
 /// Son PS5 karesi; yalnız bölge önizlemesi izler (her karede bütün ekranlar yeniden çizilmesin).

@@ -27,6 +27,46 @@ final class DisplayMode {
         IN_APP_OVERLAY_FAILED
     }
 
+    /** Katman çalışırken CouchSubs yeniden açıldı: ne yapılacağı. */
+    enum Relaunch {
+        /** Bilgisayar ya da telefon yeni adresle açtı: katman sürer, adres ona iletilir, ekran açılmaz. */
+        FORWARD_TO_OVERLAY,
+        /** Kullanıcı kumandadan açtı: katman kapanır ve CouchSubs ekranı (panel) açılır. */
+        OPEN_APP
+    }
+
+    /**
+     * Eskiden kumandadan açılınca katman kapanıp uygulama da kapanıyordu: kullanıcı ekranı hiç göremiyor, "uygulamaya
+     * giremiyorum, PlayStation ekranına atıyor" diyordu. Artık kullanıcı açtıysa CouchSubs ekranı gelir.
+     */
+    static Relaunch whileOverlay(String launchParams) {
+        return launchParams == null || launchParams.isEmpty() ? Relaunch.OPEN_APP : Relaunch.FORWARD_TO_OVERLAY;
+    }
+
+    /**
+     * Kullanıcı katmanı kapatıp uygulamayı açtıysa bu açılışta kayıtlı tercih katman olsa da uygulama içinde kalınır;
+     * yoksa ekran açılır açılmaz yeniden katmana geçerdi.
+     */
+    static Start atLaunch(String preference, boolean canDrawOverlays, String overlayFailure, boolean leftOverlay) {
+        Start start = atLaunch(preference, canDrawOverlays, overlayFailure);
+        return leftOverlay && start == Start.OVERLAY ? Start.IN_APP : start;
+    }
+
+    /**
+     * CouchSubs ekranı açıkken yeniden açıldı (onNewIntent): kayıtlı tercih katmansa katmana geçilsin mi.
+     *
+     * Bilgisayarın ya da telefonun adresiyle gelen açılış (launchParams dolu) ekranı hiç değiştirmez, yalnız adres sayfaya
+     * iletilir. X'te bildirildi (Android TV 8, 0.9.54, Mac beta.74): Mac TV uygulamasını bağlı görmediği birkaç saniyede
+     * adresiyle yeniden açıyordu; kullanıcı katmanı kapatıp CouchSubs'ı kumandadan açmışken bu açılış onu yeniden katmana
+     * atıyor, ekran kapanıyordu ("çevirili ekran gelip hemen başka bir ekrana geçiyor, HDMI seçemiyorum"). Kullanıcı
+     * katmandan çıktıysa (leftOverlay) kumandadan yeniden açılış da katmana atmaz.
+     */
+    static boolean switchOnNewIntent(String launchParams, boolean leftOverlay, String preference, boolean canDrawOverlays) {
+        if (launchParams != null && !launchParams.isEmpty()) return false;
+        if (leftOverlay) return false;
+        return OVERLAY.equals(normalize(preference)) && canDrawOverlays;
+    }
+
     /** Katman servisinin uygulamayı geri açarken bildirdiği neden (bkz. OverlayService). */
     static final String FAILED_PERMISSION = "permission";
     static final String FAILED_WINDOW = "window";

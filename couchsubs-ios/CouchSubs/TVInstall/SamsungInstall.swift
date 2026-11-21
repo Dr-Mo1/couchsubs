@@ -3,6 +3,7 @@
 // SamsungDiagnostics.kt, SamsungTvInfo.kt) Swift karşılığı. Sertifika uç noktaları, giriş akışı ve hata kodlarının
 // anlamları Apps2Samsung'dan (MIT, Patrick Stel); masaüstündeki windows/src/CouchSubs.TvInstall/Samsung ile aynı mantık.
 
+import CouchSubsCore
 import Foundation
 
 // MARK: - Ortak
@@ -101,6 +102,9 @@ enum SamsungDiagnostics {
 
     static func removingOldCopyMayHelp(_ problem: Problem) -> Bool { [.certificateMismatch, .packageBlocked, .other].contains(problem) }
 
+    /// İki deneme de sebepsiz (yalın `[118]`) başarısızsa başka biçimde hazırlanmış paket denenir (Tizen 2.x, #638).
+    static func alternativeMayHelp(_ first: Problem, _ retry: Problem) -> Bool { first == .other && retry == .other }
+
     static func toError(_ problem: Problem) -> SamsungInstallError {
         switch problem {
         case .connectionLost: .connectionLost
@@ -114,7 +118,7 @@ enum SamsungDiagnostics {
     }
 
     static func summary(_ log: String) -> String {
-        let lines = log.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let lines = log.deviceLines.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         if lines.isEmpty { return "TV yanıt vermedi" }
         var key: [String] = []
         for line in lines where ["fail", "error", "reason", "not match", "space"].contains(where: { line.localizedCaseInsensitiveContains($0) }) {
@@ -565,6 +569,8 @@ final class SamsungInstaller {
     private let signIn: (() throws -> SamsungAccount)?
     private let progress: (InstallStep) -> Void
     private let log: InstallLog
+    /// Son `vd_applist` okunabildi mi ("CouchSubs yok" ile "bilinmiyor" ayrılsın).
+    private var lastListRead = false
 
     init(host: String, profiles: URL = TVPaths.directory("samsung"), adbKey: @escaping () throws -> AdbKey = { try AdbKey.loadOrCreate(TVPaths.directory("sdb").appendingPathComponent("adbkey")) },
          signIn: (() throws -> SamsungAccount)?, progress: @escaping (InstallStep) -> Void = { _ in }, log: InstallLog = .shared) {
@@ -580,6 +586,13 @@ final class SamsungInstaller {
     static func needsDeviceProfile(_ platform: String) -> Bool {
         !platform.isEmpty && !isTooOld(platform) && !Versions.isNewer(platform, than: deviceProfileUpTo)
     }
+    /// `0 getduid` yanıtının ilk dolu satırı geçerli DUID ise onu verir. TV satırı CRLF ile bitirebilir
+    /// (ör. "XTCK7KNUEHTUM\r\nXTCK7KNUEHTUM"); `split(separator: "\n")` bunu bölmediği için `deviceLines`.
+    static func duid(fromGetduid output: String) -> String? {
+        let first = output.deviceLines.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty } ?? ""
+        return isDuid(first) ? first : nil
+    }
+
     static func isDuid(_ text: String) -> Bool { text.range(of: #"^[A-Za-z0-9_\-+=/]{8,}$"#, options: .regularExpression) != nil }
     static func safeName(_ duid: String) -> String { duid.replacingOccurrences(of: #"[^A-Za-z0-9_\-]"#, with: "_", options: .regularExpression) }
 
@@ -590,6 +603,23 @@ final class SamsungInstaller {
         let device = try connect()
         defer { device.close() }
         return readInstalledVersion(device)
+    }
+
+    /// Kurulu TV uygulamasını geliştirici bağlantısıyla (sdb, `was_execute`) açar; arka plandaysa öne getirir (bekçi, bkz.
+    /// `SamsungLauncher`; Mac ve Windows'taki samsung-open ile aynı). sdb izin sormaz, TV'de bildirim çıkarmaz.
+    /// Geliştirici modu kapalıysa ya da Host PC IP başka cihazınsa false.
+    func openApp() -> Bool {
+        log.write("--- Samsung: TV uygulaması bağlı değil, açılıyor (TV \(host))")
+        do {
+            let device = try connect()
+            defer { device.close() }
+            let reply = try device.shell("0 was_execute \(Self.appId)")
+            log.write("Uygulama açılıyor: \(reply.trimmingCharacters(in: .whitespacesAndNewlines))")
+            return SamsungLauncher.sdbLaunched(reply)
+        } catch {
+            log.write("Uygulama açılamadı: \(error)")
+            return false
+        }
     }
 
     /// TV'deki CouchSubs yoksa ya da `version`'dan eskiyse imzalayıp kurar, sonra açar.
@@ -621,8 +651,11 @@ final class SamsungInstaller {
         let toolPath = capabilities["sdk_toolpath"]?.trimmingCharacters(in: .whitespaces).nonEmpty ?? "/opt/usr/apps/tmp"
         log.write("TV: Tizen \(platform.isEmpty ? "?" : platform), sdk_toolpath \(toolPath)")
         if Self.isTooOld(platform) { throw SamsungInstallFailure(error: .tooOld, detail: "Tizen \(platform)") }
+        if !platform.isEmpty, Versions.isNewer("5.0", than: platform) { log.write("Tizen \(platform): 2016–2018 TV si, destek deneysel.") }
 
         let onTv = readInstalledVersion(device)
+        // "CouchSubs yok" ile "liste okunamadı" ayrılsın (Tizen 2.x'te okunamayan listede kopya kaldırılmaz).
+        let listRead = lastListRead
         if let version, let onTv, !Versions.isNewer(version, than: onTv) {
             launch(device)
             return Result(version: onTv, installed: false)
@@ -648,19 +681,41 @@ final class SamsungInstaller {
 
         progress(.signing)
         let key = try profile.privateKey()
-        let signed = try WgtSigner.sign(try wgt(),
-                                        author: WgtSigner.Signer(key: key, chain: SamsungCertificates.chain(try profile.author())),
-                                        distributor: WgtSigner.Signer(key: key, chain: SamsungCertificates.chain(try profile.distributor())))
+        // Tizen 2.x (2016): #71'de çalışan config.xml ve SHA-256 imza; TV yine yalın [118] derse yalın paket (#638).
+        let legacy = LegacyTizenPackage.applies(platform)
+        let author = WgtSigner.Signer(key: key, chain: SamsungCertificates.chain(try profile.author()))
+        let distributor = WgtSigner.Signer(key: key, chain: SamsungCertificates.chain(try profile.distributor()))
+        let original = try wgt()
+        func sign(_ unsigned: [UInt8]) throws -> [UInt8] {
+            try WgtSigner.sign(unsigned, author: author, distributor: distributor, digest: legacy ? .sha256 : .sha512)
+        }
+        let signed = try sign(legacy ? LegacyTizenPackage.adapt(original) : original)
+        if legacy {
+            log.write("Tizen \(platform): paketten network.public izni ve ultra geniş ekran ayarı çıkarıldı (#621).")
+            log.write("Tizen \(platform): imza SHA-256 ile üretildi (rsa-sha256, sha256 özet; yeni TV'lerde SHA-512).")
+        }
         log.write("Paket imzalandı (\(signed.count) bayt).")
         progress(.installing)
         do {
-            try installWithRecovery(device, signed, toolPath)
+            var lean = false
+            try installWithRecovery(device, signed, toolPath, alternative: !legacy ? nil : {
+                let package = try sign(LegacyTizenPackage.adapt(original, lean: true))
+                lean = true
+                self.log.write("Tizen \(platform): yalın paket hazırlandı (\(LegacyTizenPackage.leanRemovedNames) de çıkarıldı), imza SHA-256.")
+                return ("yalın paket", package)
+            }, keepExisting: legacy && (onTv != nil || !listRead))
+            if legacy { log.write("Tizen \(platform): \(lean ? "yalın paket" : "tam paket") SHA-256 imzayla kuruldu.") }
         } catch let failure as SamsungInstallFailure {
             if failure.error == .certificateRejected {
                 profile.discard()
                 log.write("Kayıtlı sertifika bırakıldı; bir sonraki denemede yenisi alınacak.")
             }
-            throw failure
+            guard legacy, let onTv else { throw failure }
+            // Tizen 2.x: TV'deki kopya (ör. Tizen Studio ile elle kurulmuş) yerinde; yeni paket kurulamadı diye
+            // çalışan uygulama "kurulamadı" gösterilmez, o açılır (#638).
+            log.write("Tizen \(platform): yeni paket kurulamadı (\(failure.error)); TV'deki CouchSubs \(onTv) korunuyor ve açılıyor.")
+            launch(device)
+            return Result(version: onTv, installed: false)
         }
         let after = readInstalledVersion(device)
         if let version, let after, Versions.isNewer(version, than: after) {
@@ -683,33 +738,67 @@ final class SamsungInstaller {
         return output
     }
 
-    private func installWithRecovery(_ device: SdbConnection, _ signed: [UInt8], _ toolPath: String) throws {
+    /// - Parameter alternative: İki deneme de sebepsiz (yalın `[118]`) başarısız olursa çağrılır: başka biçimde hazırlanmış
+    ///   paketi adıyla döner; o paketle üçüncü kez denenir.
+    /// - Parameter keepExisting: TV'deki kopyaya dokunulmaz (`vd_appuninstall` yok): Tizen 2.x'te TV'de CouchSubs varsa
+    ///   ya da liste okunamadıysa. 2016 TV'de Tizen Studio ile elle kurulmuş, çalışan kopya kurtarma adımında silinmesin
+    ///   (docs/tv-samsung.md, #638). Sebepsiz `[118]`'de `alternative` yine bir kez denenir.
+    private func installWithRecovery(_ device: SdbConnection, _ signed: [UInt8], _ toolPath: String,
+                                     alternative: (() throws -> (label: String, package: [UInt8]))? = nil,
+                                     keepExisting: Bool = false) throws {
         let output = install(device, signed, toolPath)
         log.write("vd_appinstall çıktısı:\n\(output.trimmingCharacters(in: .whitespacesAndNewlines))")
         let problem = SamsungDiagnostics.classify(output)
         if problem == .none { return }
         log.write("Kurulum başarısız: \(problem)")
+        if keepExisting, SamsungDiagnostics.removingOldCopyMayHelp(problem) {
+            log.write("TV'de CouchSubs var ya da liste okunamadı (elle kurulmuş olabilir); eski kopya kaldırılmıyor.")
+            if problem == .other, let alternative {
+                let (label, package) = try alternative()
+                let second = install(device, package, toolPath)
+                log.write("İkinci deneme (\(label)) vd_appinstall çıktısı:\n\(second.trimmingCharacters(in: .whitespacesAndNewlines))")
+                let secondProblem = SamsungDiagnostics.classify(second)
+                if secondProblem == .none { return }
+                throw SamsungInstallFailure(error: SamsungDiagnostics.toError(secondProblem), detail: SamsungDiagnostics.summary(second))
+            }
+            throw SamsungInstallFailure(error: SamsungDiagnostics.toError(problem), detail: SamsungDiagnostics.summary(output))
+        }
         guard SamsungDiagnostics.removingOldCopyMayHelp(problem) else {
             throw SamsungInstallFailure(error: SamsungDiagnostics.toError(problem), detail: SamsungDiagnostics.summary(output))
         }
         progress(.uninstalling)
-        var removal = ""
-        for id in [Self.packageId, Self.appId] {
-            removal += "\(id): " + ((try? device.shell("0 vd_appuninstall \(id)").trimmingCharacters(in: .whitespacesAndNewlines)) ?? "?") + "\n"
+        func remove() -> String {
+            var removal = ""
+            for id in [Self.packageId, Self.appId] {
+                removal += "\(id): " + ((try? device.shell("0 vd_appuninstall \(id)").trimmingCharacters(in: .whitespacesAndNewlines)) ?? "?") + "\n"
+            }
+            return removal
         }
-        log.write("Eski kopya kaldırıldı mı:\n\(removal)")
+        log.write("Eski kopya kaldırıldı mı:\n\(remove())")
         let retry = install(device, signed, toolPath)
         log.write("İkinci deneme vd_appinstall çıktısı:\n\(retry.trimmingCharacters(in: .whitespacesAndNewlines))")
         let retryProblem = SamsungDiagnostics.classify(retry)
         if retryProblem == .none { return }
+        // TV iki kez de sebep söylemediyse (yalın [118]) ve başka biçimde hazırlanabilen paket varsa onunla bir kez daha.
+        if SamsungDiagnostics.alternativeMayHelp(problem, retryProblem), let alternative {
+            let (label, package) = try alternative()
+            log.write("Eski kopya kaldırıldı mı:\n\(remove())")
+            let last = install(device, package, toolPath)
+            log.write("Üçüncü deneme (\(label)) vd_appinstall çıktısı:\n\(last.trimmingCharacters(in: .whitespacesAndNewlines))")
+            let lastProblem = SamsungDiagnostics.classify(last)
+            if lastProblem == .none { return }
+            throw SamsungInstallFailure(error: SamsungDiagnostics.toError(lastProblem), detail: SamsungDiagnostics.summary(last))
+        }
         throw SamsungInstallFailure(error: SamsungDiagnostics.toError(retryProblem), detail: SamsungDiagnostics.summary(retry))
     }
 
     private func readInstalledVersion(_ device: SdbConnection) -> String? {
+        lastListRead = false
         guard let listing = try? device.shell("0 vd_applist") else {
             log.write("vd_applist okunamadı")
             return nil
         }
+        lastListRead = true
         let version = SamsungDiagnostics.installedVersion(listing)
         log.write("vd_applist: \(version.map { "CouchSubs \($0)" } ?? "CouchSubs yok") (\(listing.count) karakter)")
         return version
@@ -751,8 +840,7 @@ final class SamsungInstaller {
         var last = ""
         for _ in 0..<3 {
             last = (try? device.shell("0 getduid")) ?? ""
-            let duid = last.split(separator: "\n", omittingEmptySubsequences: false).first.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
-            if Self.isDuid(duid) { return duid }
+            if let duid = Self.duid(fromGetduid: last) { return duid }
             Thread.sleep(forTimeInterval: 0.5)
         }
         throw SamsungInstallFailure(error: .unreachable, detail: "TV kimliği (DUID) okunamadı; TV'nin yanıtı: \(last.isEmpty ? "boş" : last)")

@@ -8,12 +8,17 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URL
 import java.net.URLEncoder
 import java.security.MessageDigest
 import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 /** Çevrimiçi anahtarın durumu (ayarlardaki "Dene" ve ana ekrandaki uyarı için). */
 /**
@@ -21,7 +26,9 @@ import java.util.Locale
  * gelmedi ya da dakikalık sınıra takıldı; anahtar reddedilmedi, internet de çalışıyor (Windows/Mac ile aynı).
  */
 enum class OnlineKeyState {
-    VALID, INVALID, QUOTA_EXCEEDED, MODEL_REJECTED, UNREACHABLE, BUSY;
+    VALID, INVALID, QUOTA_EXCEEDED, MODEL_REJECTED, UNREACHABLE, BUSY,
+    /** Hizmet anahtarı kabul etti ama gizli depoya (Keystore) yazılamadı; kayıt başarılı sayılmaz (Mac ile aynı). */
+    KEY_NOT_STORED;
 
     companion object {
         /** İstek hatasının türü: zaman aşımı yoğunluktur (hizmete ulaşıldı, yanıt gelmedi), diğer ağ hataları ulaşılamadır. */
@@ -47,7 +54,9 @@ class AiRateLimitedException(val limit: AiRateLimit) : IOException("rate limited
 
 /** Yapay zekâ hizmetleri (Windows: AiProvider, Mac: AIProvider). */
 enum class AiProvider(val id: String, val displayName: String) {
-    GEMINI("gemini", "Gemini"), OPENAI("openai", "OpenAI"), CLAUDE("claude", "Claude");
+    GEMINI("gemini", "Gemini"), OPENAI("openai", "OpenAI"), CLAUDE("claude", "Claude"),
+    /** Aynı ağdaki bilgisayarda Ollama, LM Studio ya da başka OpenAI uyumlu sunucu (bkz. [LocalAiServer]). */
+    LOCAL("local", "Local model");
 }
 
 /** Çevrimiçi motorun yapay zekâ hizmeti (DeepL ve ücretsiz motorda null). */
@@ -56,6 +65,7 @@ val com.couchsubs.mobile.settings.EngineChoice.aiProvider: AiProvider?
         com.couchsubs.mobile.settings.EngineChoice.GEMINI -> AiProvider.GEMINI
         com.couchsubs.mobile.settings.EngineChoice.OPENAI -> AiProvider.OPENAI
         com.couchsubs.mobile.settings.EngineChoice.CLAUDE -> AiProvider.CLAUDE
+        com.couchsubs.mobile.settings.EngineChoice.LOCAL -> AiProvider.LOCAL
         else -> null
     }
 
@@ -113,39 +123,60 @@ object KeyCheck {
         state == OnlineKeyState.VALID || state == OnlineKeyState.QUOTA_EXCEEDED || state == OnlineKeyState.MODEL_REJECTED ||
             state == OnlineKeyState.BUSY
 
+    /** DeepL anahtarının bu ayki kullanımı (Mac/iPhone: OnlineKeyCheck): durum ve kullanılan / toplam karakter. */
+    data class DeepLUsage(val state: OnlineKeyState, val used: Long = 0, val limit: Long = 0)
+
     /** DeepL: /usage; bu ay kota dolduysa QUOTA_EXCEEDED. Bloklar. */
-    fun deepL(key: String, http: Http = Http.Default): OnlineKeyState {
+    fun deepL(key: String, http: Http = Http.Default): OnlineKeyState = deepLUsage(key, http).state
+
+    /** DeepL: /usage (karakter kotasından yemez); Ayarlar'daki "Bu ay: …" satırı bunu gösterir. Bloklar. */
+    fun deepLUsage(key: String, http: Http = Http.Default): DeepLUsage {
         val trimmed = key.trim()
-        if (trimmed.isEmpty()) return OnlineKeyState.INVALID
+        if (trimmed.isEmpty()) return DeepLUsage(OnlineKeyState.INVALID)
         return try {
             val (status, body) = http.send("GET", DeepLTranslator.baseUrl(trimmed) + "usage",
                 mapOf("Authorization" to "DeepL-Auth-Key $trimmed"), null, 6000)
-            if (status !in 200..299) return DeepLTranslator.failure(status)
+            if (status !in 200..299) return DeepLUsage(DeepLTranslator.failure(status))
             val usage = JSONObject(body)
             val count = usage.optLong("character_count", 0)
             val limit = usage.optLong("character_limit", 0)
-            if (limit > 0 && count >= limit) OnlineKeyState.QUOTA_EXCEEDED else OnlineKeyState.VALID
+            DeepLUsage(if (limit > 0 && count >= limit) OnlineKeyState.QUOTA_EXCEEDED else OnlineKeyState.VALID, count, limit)
         } catch (error: IOException) {
-            OnlineKeyState.UNREACHABLE
+            DeepLUsage(OnlineKeyState.UNREACHABLE)
         } catch (error: JSONException) {
-            OnlineKeyState.UNREACHABLE
+            DeepLUsage(OnlineKeyState.UNREACHABLE)
         }
     }
 
     /** Yapay zekâ hizmeti: örnek satır seçilen modelle çevrilir. Bloklar. */
-    fun ai(provider: AiProvider, key: String, model: AiModel, http: Http = Http.Default): OnlineKeyState {
-        if (key.isBlank()) return OnlineKeyState.INVALID
+    fun ai(provider: AiProvider, key: String, model: AiModel, http: Http = Http.Default, server: LocalAiServer? = null): OnlineKeyState =
+        aiSample(provider, key, model, http, server).first
+
+    /**
+     * Örnek satırın çevirisi ve durum ("Bağlantıyı dene" çeviriyi de gösterir). Yerel modelde anahtar isteğe bağlıdır;
+     * sunucu adresi [server]'dan gelir.
+     */
+    fun aiSample(provider: AiProvider, key: String, model: AiModel, http: Http = Http.Default, server: LocalAiServer? = null): Pair<OnlineKeyState, String?> {
+        if (provider != AiProvider.LOCAL && key.isBlank()) return OnlineKeyState.INVALID to null
+        if (provider == AiProvider.LOCAL && server == null) return OnlineKeyState.UNREACHABLE to null
         return try {
-            val request = AiRequest.build(provider, key, model, listOf(SAMPLE), emptyList())
-            val (status, body) = http.send("POST", request.url, request.headers, request.body, 15000)
+            var request = AiRequest.build(provider, key, model, listOf(SAMPLE), emptyList(), server = server)
+            val timeout = if (provider == AiProvider.LOCAL) LocalAiServer.TIMEOUT_MS else 15000
+            var (status, body) = http.send("POST", request.url, request.headers, request.body, timeout)
+            // Düşünmeyi kapatan alanları tanımayan eski Ollama 400 verir; alanlarsız yeniden denenir.
+            if (status == 400 && server?.disablesThinking == true) {
+                request = AiRequest.build(provider, key, model, listOf(SAMPLE), emptyList(), server = server, thinkingOff = false)
+                val retry = http.send("POST", request.url, request.headers, request.body, timeout)
+                status = retry.first
+                body = retry.second
+            }
             // Dakikalık sınıra takıldıysa anahtar geçerlidir, hizmet şu an yoğundur (bakiye bitmedi).
-            if (status !in 200..299) return if (AiRequest.rateLimit(status, body) != null) OnlineKeyState.BUSY else AiRequest.failure(status, body)
-            AiRequest.translations(AiRequest.text(provider, body), 1)
-            OnlineKeyState.VALID
+            if (status !in 200..299) return (if (AiRequest.rateLimit(status, body) != null) OnlineKeyState.BUSY else AiRequest.failure(status, body)) to null
+            OnlineKeyState.VALID to AiRequest.translations(AiRequest.text(provider, body), 1).first()
         } catch (error: IOException) {
-            OnlineKeyState.of(error)
+            OnlineKeyState.of(error) to null
         } catch (error: JSONException) {
-            OnlineKeyState.UNREACHABLE
+            OnlineKeyState.UNREACHABLE to null
         }
     }
 }
@@ -189,10 +220,23 @@ abstract class SentenceTranslator<C>(
     private val budget: RequestBudget? = null,
 ) : TextTranslator {
     companion object {
-        /** Hata sonrası bu süre hizmet denenmez. */
+        /** Hata sonrası bu süre hizmet denenmez (DeepL daha kısa bekler: [DeepLTranslator.RETRY_AFTER_MS]). */
         const val RETRY_AFTER_MS = 60_000L
         /** Dakikalık sınır aşılınca en çok bu kadar beklenir (hizmet bekleme önermezse de bu kadar). */
         const val RATE_LIMIT_PAUSE_MS = 20_000L
+
+        /**
+         * Satır ücretsiz (cihaz üstü) çeviriye düştüğünde nedeni buraya yazılır (Mac/Windows'taki altyazı günlüğündeki
+         * "ücretsiz yedek: …" ile aynı); uygulama günlüğe bağlar. Anahtar ve hizmet yanıtı yazılmaz.
+         */
+        @Volatile var fallbackLog: ((String) -> Unit)? = null
+    }
+
+    /** Günlükteki motor adı (Mac ile aynı: "deepl", "gemini", "openai", "claude"). */
+    protected open val logName: String get() = "deepl"
+
+    private fun noteFallback(reason: String) {
+        fallbackLog?.invoke("çeviri: ücretsiz yedek: $logName $reason")
     }
 
     private val names = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
@@ -221,6 +265,19 @@ abstract class SentenceTranslator<C>(
     /** Oynanan oyun (yalnız yapay zekâ kullanır); bilinmiyorsa null. */
     protected open fun game(): String? = null
 
+    /** Hata sonrası hizmetin denenmediği süre. */
+    protected open val retryAfterMs: Long get() = RETRY_AFTER_MS
+
+    /** 429 (çok sık istek) sonrası en az bekleme; DeepL Windows ve Mac/iPhone gibi kendi süresini kullanır. */
+    protected open val rateLimitPauseMs: Long get() = RATE_LIMIT_PAUSE_MS
+
+    /** Hata sonrası bekleme; 429'da (çok sık istek) en az [rateLimitPauseMs] ve yerel çeviri olmasa da istek gitmez. */
+    private fun pauseAfter(error: Exception?) {
+        val rateLimited = (error as? OnlineException)?.rateLimited == true
+        pausedUntil = clock() + if (rateLimited) maxOf(retryAfterMs, rateLimitPauseMs) else retryAfterMs
+        pauseRateLimited = rateLimited
+    }
+
     /** Büyük harfle kalacak ek sözcükler (sözlükteki adlar). */
     protected open val extraNames: Set<String> get() = emptySet()
 
@@ -245,28 +302,41 @@ abstract class SentenceTranslator<C>(
         // Hizmetin beklemesi yalnız eksik çeviriler içindir; önbellekteki parçalar yerel motor istemez. Hata sonrası
         // beklemede yerel çeviri yoksa (indirilmemiş, açılamadı) satır düşmesin: hizmet yine denenir. 429 beklemesi kalır.
         if (sources.isNotEmpty() && clock() < pausedUntil) {
-            if (pauseRateLimited) return fallback(text, game)
-            tryLocal(text)?.let { remember(text, it, game); return it }
+            if (pauseRateLimited) {
+                noteFallback("dakikalık hizmet sınırı")
+                return fallback(text, game)
+            }
+            tryLocal(text)?.let {
+                noteFallback("yeniden deneme beklemesi (${lastError ?: "bekleme"})")
+                remember(text, it, game)
+                return it
+            }
         }
         // Dakikalık hak bittiyse satır sessizce yerel çeviriyle çevrilir (hata değildir). Hak uygulamanın temkinli
         // tahminidir; yerel çeviri yoksa satır denenmeden düşmesin, istek yine gönderilir.
-        if (sources.isNotEmpty() && budget?.take() == false) tryLocal(text)?.let { remember(text, it, game); return it }
+        if (sources.isNotEmpty() && budget?.take() == false) tryLocal(text)?.let {
+            noteFallback("uygulama dakikalık sınırı")
+            remember(text, it, game)
+            return it
+        }
         val translated = try {
             if (sources.isEmpty()) emptyList()
             else request(sources, context, game, SpeakerNameGuard.occurring(speakers.protected, sources.joinToString("\n"), exact = true))
                 .also { report(null) }
         } catch (error: AiRateLimitedException) {
             rateLimited(error.limit)
+            noteFallback("dakikalık hizmet sınırı")
             return fallback(text, game)
         } catch (error: IOException) {
-            report(OnlineKeyState.of(error))
-            pausedUntil = clock() + RETRY_AFTER_MS
-            pauseRateLimited = (error as? OnlineException)?.rateLimited == true
+            val state = OnlineKeyState.of(error)
+            report(state)
+            pauseAfter(error)
+            noteFallback("hizmet durumu: $state")
             return fallback(text, game)
         } catch (error: JSONException) {
             report(OnlineKeyState.UNREACHABLE)
-            pausedUntil = clock() + RETRY_AFTER_MS
-            pauseRateLimited = false
+            pauseAfter(null)
+            noteFallback("hizmet durumu: ${OnlineKeyState.UNREACHABLE}")
             return fallback(text, game)
         }
         var local = false
@@ -278,6 +348,7 @@ abstract class SentenceTranslator<C>(
                 val retried = tryLocal(piece)
                 if (retried != null && retried.isNotBlank() && !isEcho(piece, retried)) {
                     // Yerel çeviri bu motorun önbelleğine yazılmaz.
+                    noteFallback("boş veya değişmemiş yanıt")
                     translations[index] = retried
                     local = true
                     continue
@@ -343,8 +414,7 @@ abstract class SentenceTranslator<C>(
     protected fun failed(error: Exception) {
         if (error is AiRateLimitedException) return rateLimited(error.limit)
         report(OnlineKeyState.of(error))
-        pausedUntil = clock() + RETRY_AFTER_MS
-        pauseRateLimited = (error as? OnlineException)?.rateLimited == true
+        pauseAfter(error)
     }
 
     /**
@@ -383,6 +453,21 @@ class DeepLTranslator(
     private val key = key.trim()
     private val recent = ArrayDeque<String>()
     private var recentGame: String? = null
+    /** Gerçek bağlantıyla (testlerin sahte [Http]'si değil) çalışırken bağlantıyı sıcak tutan. */
+    private val warmer = if (http === Http.Default && this.key.isNotEmpty()) DeepLConnectionWarmer.Shared else null
+
+    init {
+        // Oturum başında ısınır, oyun boyunca sıcak kalır.
+        warmer?.touch(this.key)
+    }
+
+    override val retryAfterMs: Long get() = DeepLTranslator.RETRY_AFTER_MS
+    override val rateLimitPauseMs: Long get() = DeepLTranslator.RETRY_AFTER_MS
+
+    override fun translate(text: String): String {
+        warmer?.touch(key)
+        return super.translate(text)
+    }
 
     override fun game(): String? = playedGame?.invoke()?.trim()
 
@@ -392,6 +477,15 @@ class DeepLTranslator(
     companion object {
         /** Kalıcı önbellek dosyasındaki motor adı (iPhone ile aynı). */
         const val ENGINE_ID = "deepl"
+        /** Hata sonrası bu süre DeepL denenmez; 1 dk oyunda çok uzundu (Windows ve Mac/iPhone ile aynı). */
+        const val RETRY_AFTER_MS = 15_000L
+
+        /**
+         * Yeniden denenecek ağ hatası: bağlantı koptu, sıfırlandı vb. Zaman aşımı ([java.net.SocketTimeoutException]) ve
+         * kesinti denenmez; DeepL'in durum kodları (429, 456, 403) [OnlineException] olarak gelir, denenmez.
+         */
+        fun isDroppedConnection(error: IOException) =
+            error !is OnlineException && error !is InterruptedIOException && !Thread.currentThread().isInterrupted
 
         /** Ücretsiz anahtarlar ":fx" ile biter ve ayrı adrese gider. */
         fun baseUrl(key: String) = if (key.trim().endsWith(":fx")) "https://api-free.deepl.com/v2/" else "https://api.deepl.com/v2/"
@@ -435,15 +529,82 @@ class DeepLTranslator(
         val wrapped = sentences.map { DeepLMarkup.wrap(it, glossary) }
         val tagged = wrapped.any { it != null }
         val sources = if (tagged) sentences.indices.map { wrapped[it] ?: DeepLMarkup.escape(sentences[it]) } else sentences
-        val (status, response) = http.send(
-            "POST", baseUrl(key) + "translate",
-            mapOf("Authorization" to "DeepL-Auth-Key $key", "Content-Type" to "application/json"), body(sources, context, tagged), 4000,
-        )
+        val send = {
+            http.send(
+                "POST", baseUrl(key) + "translate",
+                mapOf("Authorization" to "DeepL-Auth-Key $key", "Content-Type" to "application/json"), body(sources, context, tagged), 4000,
+            )
+        }
+        val (status, response) = try {
+            send()
+        } catch (error: IOException) {
+            // Açık tutulan bağlantıyı sunucu sessizce kapatmış olabilir: yeni bağlantıyla hemen bir kez daha denenir,
+            // yedek çeviriye (ve DeepL'in beklemesine) ancak ikinci hata düşürür.
+            if (!isDroppedConnection(error)) throw error
+            send()
+        }
         if (status !in 200..299) throw OnlineException(failure(status), rateLimited = status == 429)
         val list = JSONObject(response).optJSONArray("translations") ?: throw OnlineException(OnlineKeyState.UNREACHABLE)
         if (list.length() != sentences.size) throw OnlineException(OnlineKeyState.UNREACHABLE)
         val reply = (0 until list.length()).map { list.getJSONObject(it).getString("text") }
         return if (tagged) reply.map(DeepLMarkup::unwrap) else reply
+    }
+}
+
+/**
+ * Ortak DeepL bağlantısını sıcak tutar (Windows: DeepLTranslator.KeepWarm, Mac/iPhone: DeepLConnectionWarmer): oturum
+ * başında ve son çeviriden sonraki [KEEP_WARM_FOR_MS] boyunca her [KEEP_WARM_EVERY_MS]'de bir kullanım sorgusu
+ * (`/v2/usage`; karakter kotasından yemez) gönderir. Boşta kalan bağlantı sunucuda genelde 60 sn'de kapanıyor,
+ * sessizlikten sonraki ilk satır yeni TLS el sıkışmasını bekliyordu. Süre dolunca durur, sonraki çeviride yeniden başlar.
+ */
+class DeepLConnectionWarmer(
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val scheduler: ScheduledExecutorService? = null,
+    private val ping: (String) -> Unit,
+) {
+    companion object {
+        const val KEEP_WARM_EVERY_MS = 40_000L
+        const val KEEP_WARM_FOR_MS = 10 * 60_000L
+
+        val Shared: DeepLConnectionWarmer by lazy {
+            val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
+                Thread(runnable, "deepl-keep-warm").apply { isDaemon = true }
+            }
+            DeepLConnectionWarmer(scheduler = executor) { key -> KeyCheck.deepL(key) }
+        }
+    }
+
+    private var key = ""
+    private var lastUsed = Long.MIN_VALUE / 2
+    private var task: ScheduledFuture<*>? = null
+
+    /** Anahtarı ve son kullanım anını yazar; sıcak tutma durmuşsa yeniden başlatır. */
+    @Synchronized
+    fun touch(key: String) {
+        if (key.isBlank()) return
+        this.key = key
+        lastUsed = clock()
+        if (task == null) task = scheduler?.scheduleWithFixedDelay({ tick() }, 0, KEEP_WARM_EVERY_MS, TimeUnit.MILLISECONDS)
+    }
+
+    /** Şimdi sorgu gönderilecek anahtar; son çeviriden bu yana [KEEP_WARM_FOR_MS] geçtiyse null (döngü durur). */
+    @Synchronized
+    fun nextPing(): String? {
+        if (clock() - lastUsed > KEEP_WARM_FOR_MS || key.isEmpty()) {
+            task?.cancel(false)
+            task = null
+            return null
+        }
+        return key
+    }
+
+    private fun tick() {
+        val key = nextPing() ?: return
+        try {
+            ping(key)
+        } catch (_: Exception) {
+            // Sıcak tutma sessizdir: hata ana ekrana çıkmaz, sonraki turda yine denenir.
+        }
     }
 }
 
@@ -465,6 +626,10 @@ object AiRequest {
             "\"Doesn't 00k good.\"); translate the line the speaker clearly meant. " +
             "A subtitle may continue the previous one (it starts in lowercase or with a word like \"and\"); " +
             "translate it so that it reads as that continuation. " +
+            // #827: menü ve görev etiketi kısa, tekil emir kipi ("Para Kazan", "Para Kazanın" değil).
+            "Short menu items, objectives and button labels without a subject (\"Make Money\", \"Find Donnie's Package\") " +
+            "are commands to the player: translate them as short singular informal imperatives (\"Para Kazan\", " +
+            "\"Donnie'nin Paketini Bul\"), never polite or plural forms such as \"Para Kazanın\". " +
             "Reply with only the translation, no explanations, notes or quotes."
 
     /** Kullanıcının ek talimatında en çok bu kadar karakter gider (fazlası kesilir). */
@@ -520,6 +685,9 @@ object AiRequest {
         maxOutputTokens: Int = MAX_OUTPUT_TOKENS, game: String? = null, names: List<String> = emptyList(),
         // Ayarlardaki "Ek talimat"; sistem talimatının sonuna eklenir, boşsa hiçbir şey değişmez.
         instruction: String? = null,
+        // Yerel model sunucusu (yalnız LOCAL); [thinkingOff]: Ollama'da düşünmeyi kapatan alanlar gitsin mi.
+        server: LocalAiServer? = null,
+        thinkingOff: Boolean = true,
     ): AiHttpRequest {
         val trimmed = key.trim()
         val user = userMessage(sentences, context, game, names)
@@ -559,6 +727,24 @@ object AiRequest {
                 AiHttpRequest("https://api.anthropic.com/v1/messages",
                     mapOf("x-api-key" to trimmed, "anthropic-version" to "2023-06-01", "Content-Type" to "application/json"), body.toString())
             }
+            AiProvider.LOCAL -> {
+                // Ollama ve LM Studio'nun OpenAI uyumlu Chat Completions'ı (Mac/iPhone AIRequest ile aynı alanlar): yalnız
+                // iki sunucunun da tanıdığı alanlar gider; anahtar boşsa Authorization başlığı hiç eklenmez.
+                val local = server ?: LocalAiServer(LocalAiServer.OLLAMA_URL, model.id)
+                val body = JSONObject()
+                    .put("model", model.id)
+                    .put("messages", JSONArray()
+                        .put(JSONObject().put("role", "system").put("content", system))
+                        .put(JSONObject().put("role", "user").put("content", user)))
+                    .put("temperature", 0.0)
+                    .put("max_tokens", maxOutputTokens)
+                    .put("stream", false)
+                if (thinkingOff && local.disablesThinking) body.put("think", false).put("reasoning_effort", "none")
+                if (local.kind == LocalAiServer.Kind.OLLAMA) body.put("keep_alive", LocalAiServer.OLLAMA_KEEP_ALIVE)
+                val headers = mutableMapOf("Content-Type" to "application/json")
+                if (trimmed.isNotEmpty()) headers["Authorization"] = "Bearer $trimmed"
+                AiHttpRequest(local.chatUrl, headers, body.toString())
+            }
         }
     }
 
@@ -573,7 +759,7 @@ object AiRequest {
             AiProvider.GEMINI -> root.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
                 ?.let { parts -> (0 until parts.length()).mapNotNull { parts.optJSONObject(it) }.filter { !it.optBoolean("thought", false) }
                     .joinToString("") { it.optString("text") } }
-            AiProvider.OPENAI -> root.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
+            AiProvider.OPENAI, AiProvider.LOCAL -> root.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
             AiProvider.CLAUDE -> root.optJSONArray("content")?.let { blocks ->
                 (0 until blocks.length()).mapNotNull { blocks.optJSONObject(it) }.filter { it.optString("type") == "text" }
                     .joinToString("") { it.optString("text") }
@@ -731,6 +917,8 @@ class AiTranslator(
     // Ayarlardaki "Ek talimat" (#306): sistem talimatının sonuna eklenir; boşsa hiçbir şey değişmez. Her istekte
     // sorulur: Ayarlar'da değişince çalışan çeviri hattı yeni talimatı hemen kullanır (iPhone ile aynı).
     private val instruction: (() -> String?)? = null,
+    // Yerel model sunucusu (yalnız LOCAL).
+    private val server: LocalAiServer? = null,
 ) : SentenceTranslator<List<AiRequest.ContextLine>>(fallback, cache, clock, budget ?: RequestBudget.shared(provider, model)) {
     companion object {
         /** Kalıcı önbellek dosyasındaki motor adı (iPhone ile aynı: "gemini:<model>"). */
@@ -745,6 +933,8 @@ class AiTranslator(
     override val translatesTogether: Boolean get() = true
 
     override val retriesEcho: Boolean get() = true
+
+    override val logName: String get() = provider.id
 
     /**
      * "Ekranı çevir": birbirinden bağımsız parçalar (menü satırı, görev yazısı...) tek istekte, aynı sırada çevrilir
@@ -763,7 +953,7 @@ class AiTranslator(
             countRequest()
             try {
                 val request = AiRequest.build(provider, key, model, sentences, emptyList(), AiRequest.SCREEN_OUTPUT_TOKENS, game,
-                    instruction = scope.instruction)
+                    instruction = scope.instruction, server = server, thinkingOff = thinkingOff)
                 val (status, body) = http.send("POST", request.url, request.headers, request.body, SCREEN_TIMEOUT_MS)
                 if (status !in 200..299) throw AiRequest.error(status, body)
                 val translated = AiRequest.translations(AiRequest.text(provider, body), sentences.size)
@@ -831,9 +1021,20 @@ class AiTranslator(
         return scope.tag?.let { "i:$it\u001f$key" } ?: key
     }
 
+    /** Ollama düşünmeyi kapatan alanları reddettiyse (eski sürüm) oturum boyunca bu alanlar gönderilmez. */
+    @Volatile private var thinkingOff = true
+
     override fun request(sentences: List<String>, context: List<AiRequest.ContextLine>, game: String?, names: List<String>): List<String> {
-        val request = AiRequest.build(provider, key, model, sentences, context, game = game, names = names, instruction = scope.instruction)
-        val (status, body) = http.send("POST", request.url, request.headers, request.body, 5000)
+        val timeout = if (provider == AiProvider.LOCAL) LocalAiServer.TIMEOUT_MS else 5000
+        fun send() = AiRequest.build(provider, key, model, sentences, context, game = game, names = names, instruction = scope.instruction,
+            server = server, thinkingOff = thinkingOff).let { http.send("POST", it.url, it.headers, it.body, timeout) }
+        var (status, body) = send()
+        if (status == 400 && thinkingOff && server?.disablesThinking == true) {
+            thinkingOff = false
+            val retry = send()
+            status = retry.first
+            body = retry.second
+        }
         if (status !in 200..299) throw AiRequest.error(status, body)
         return AiRequest.translations(AiRequest.text(provider, body), sentences.size)
     }

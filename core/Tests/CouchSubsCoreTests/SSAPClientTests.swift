@@ -185,6 +185,121 @@ final class TVKeeperTests: XCTestCase {
         XCTAssertEqual(control.launches.last?.1["server"], "http://1.2.3.4:8787")
     }
 
+    func testStandsDownWhenTheUserKeepsReturningToTheInput() async throws {
+        // Kullanıcı PS5 kapalıyken TV'yi başka girişe alıyor; bekçi her seferinde CouchSubs'ı geri getiriyordu.
+        let hdmi = "com.webos.app.hdmi1"
+        let control = FakeControl(foreground: ["com.couchsubs.tv", hdmi, hdmi, hdmi, hdmi, hdmi, "com.couchsubs.tv", hdmi])
+        var time = ContinuousClock.now
+        let keeper = TVKeeper(connect: { control }, appId: "com.couchsubs.tv", params: [:], now: { time })
+        await keeper.tick()   // bağlanır ve başlatır
+        await keeper.tick()   // uygulama önde
+        for _ in 0..<TVKeeper.standDownAfter {
+            time += .seconds(10)
+            await keeper.tick()   // girişte → geri getir
+        }
+        XCTAssertEqual(control.launches.count, 1 + TVKeeper.standDownAfter)
+        time += .seconds(10)
+        await keeper.tick()   // yine girişte: kullanıcı ısrarlı → bekçi çekilir
+        XCTAssertTrue(keeper.stoodDown)
+        time += .seconds(600)
+        await keeper.tick()   // sonra da zorlamaz
+        XCTAssertEqual(control.launches.count, 1 + TVKeeper.standDownAfter)
+        await keeper.tick()   // kullanıcı CouchSubs'ı TV'de kendisi açtı → bekçi işine döner
+        XCTAssertFalse(keeper.stoodDown)
+        await keeper.tick()   // TV yine girişe geçti (SimpLink) → geri getir
+        XCTAssertEqual(control.launches.count, 2 + TVKeeper.standDownAfter)
+    }
+
+    func testOccasionalInputSwitchesNeverStandDown() async throws {
+        // SimpLink/CEC arada bir TV'yi girişe geçirir: aralıklı geçişler sınıra takılmaz.
+        let control = FakeControl(foreground: ["com.couchsubs.tv"] + Array(repeating: "com.webos.app.hdmi2", count: 12))
+        var time = ContinuousClock.now
+        let keeper = TVKeeper(connect: { control }, appId: "com.couchsubs.tv", params: [:], now: { time })
+        await keeper.tick()
+        await keeper.tick()
+        for _ in 0..<12 {
+            time += .seconds(60)
+            await keeper.tick()
+        }
+        XCTAssertFalse(keeper.stoodDown)
+        XCTAssertEqual(control.launches.count, 13)
+    }
+
+    func testPSButtonOnTheConsoleInputIsNeverCountedAsInsisting() async throws {
+        // X (Kas 2026): oyunda PS tuşu TV'yi PS5'in girişine (CEC) geçiriyor. Eskiden her basış "ısrar" sayılıyordu;
+        // 90 sn'de dördüncü basışta bekçi çekiliyor, çeviri bir daha TV'ye gelmiyordu (Windows ile aynı test).
+        let presses = 8
+        var foreground = ["com.couchsubs.tv"]
+        for _ in 0..<presses { foreground += ["com.webos.app.hdmi2", "com.couchsubs.tv"] }
+        let control = FakeControl(foreground: foreground)
+        var time = ContinuousClock.now
+        let keeper = TVKeeper(connect: { control }, appId: "com.couchsubs.tv", params: [:], consolePort: { 2 }, now: { time })
+        await keeper.tick()
+        await keeper.tick()
+        for _ in 0..<presses {
+            time += .seconds(5)
+            await keeper.tick()   // PS tuşu → konsol girişi → hemen geri getir
+            time += .seconds(3)
+            await keeper.tick()   // uygulama yine önde
+        }
+        XCTAssertFalse(keeper.stoodDown)
+        XCTAssertEqual(control.launches.count, 1 + presses)
+    }
+
+    func testAnotherHdmiNumberIsStillRespected() async throws {
+        // Konsol HDMI 2'de; kullanıcı HDMI 1'e (başka cihaz) geçiyor: eskisi gibi üç geri getirmeden sonra bekçi çekilir.
+        let control = FakeControl(foreground: ["com.couchsubs.tv"] + Array(repeating: "com.webos.app.hdmi1", count: 5))
+        var time = ContinuousClock.now
+        let keeper = TVKeeper(connect: { control }, appId: "com.couchsubs.tv", params: [:], consolePort: { 2 }, now: { time })
+        await keeper.tick()
+        await keeper.tick()
+        for _ in 0...TVKeeper.standDownAfter {
+            time += .seconds(10)
+            await keeper.tick()
+        }
+        XCTAssertTrue(keeper.stoodDown)
+        XCTAssertEqual(control.launches.count, 1 + TVKeeper.standDownAfter)
+    }
+
+    func testEndlessConsoleBounceStandsDown() async throws {
+        let control = FakeControl(foreground: ["com.couchsubs.tv"] + Array(repeating: "com.webos.app.hdmi3", count: 30))
+        var time = ContinuousClock.now
+        let keeper = TVKeeper(connect: { control }, appId: "com.couchsubs.tv", params: [:], consolePort: { 3 }, now: { time })
+        await keeper.tick()
+        await keeper.tick()
+        for _ in 0..<20 {
+            time += .seconds(3)
+            await keeper.tick()
+        }
+        XCTAssertTrue(keeper.stoodDown)
+        XCTAssertEqual(control.launches.count, 1 + TVKeeper.consoleLoopLimit)
+    }
+
+    func testWaitsForTheAppToComeForwardBeforeLookingAgain() async throws {
+        let control = FakeControl(foreground: ["com.couchsubs.tv", "com.webos.app.hdmi1", "com.webos.app.hdmi1", "com.couchsubs.tv"])
+        var time = ContinuousClock.now
+        let keeper = TVKeeper(connect: { control }, appId: "com.couchsubs.tv", params: [:], now: { time })
+        await keeper.tick()
+        await keeper.tick()
+        time += .seconds(1)
+        await keeper.tick()   // girişte → geri getir
+        time += .seconds(1)
+        await keeper.tick()   // daha öne gelmedi: bekle
+        XCTAssertEqual(control.launches.count, 2)
+    }
+
+    func testLGPollsEverySecondSamsungKeepsItsInterval() {
+        let control = FakeControl(foreground: [])
+        let lg = TVKeeper(connect: { control }, appId: "com.couchsubs.tv", params: [:])
+        let samsung = TVKeeper(connect: { control }, appId: "x", params: [:], appConnected: { true })
+        XCTAssertEqual(lg.pollInterval(.seconds(5)), .seconds(1))
+        XCTAssertEqual(samsung.pollInterval(.seconds(5)), .seconds(5))
+        XCTAssertTrue(TVKeeper.isConsoleInput("com.webos.app.hdmi2", port: 2))
+        XCTAssertFalse(TVKeeper.isConsoleInput("com.webos.app.hdmi2", port: 1))
+        XCTAssertFalse(TVKeeper.isConsoleInput("com.webos.app.hdmi2", port: nil))
+        XCTAssertFalse(TVKeeper.isConsoleInput("com.webos.app.livetv", port: 2))
+    }
+
     func testReconnectsWhenTVWasOffOrConnectionDropped() async throws {
         struct Off: Error {}
         let control = FakeControl(foreground: [])
@@ -205,6 +320,102 @@ final class TVKeeperTests: XCTestCase {
         XCTAssertEqual(attempts, 3)
         XCTAssertEqual(control.launches.count, 2)
         XCTAssertEqual(control.closes, 1, "kopan bağlantı kapatılır")
+    }
+
+    func testReportsWhetherTheTVAppCouldBeOpened() async throws {
+        // Açma sessizce başarısız oluyordu; ana ekran nedenini söylesin diye her denemenin sonucu bildirilir.
+        struct Off: Error {}
+        let control = FakeControl(foreground: [])
+        var attempts = 0
+        var results: [TVOpenProblem?] = []
+        let keeper = TVKeeper(connect: {
+            attempts += 1
+            if attempts == 1 { throw Off() }
+            return control
+        }, appId: "com.couchsubs.tv", params: [:], onOpenResult: { results.append($0) })
+        await keeper.tick()                     // TV kapalı
+        await keeper.tick()                     // açıldı
+        XCTAssertEqual(results, [.unreachable, nil])
+
+        var samsungResults: [TVOpenProblem?] = []
+        let samsung = TVKeeper(connect: { throw Off() }, appId: "x", params: [:], appConnected: { false },
+                               onOpenResult: { samsungResults.append($0) })
+        await samsung.tick()
+        XCTAssertEqual(samsungResults, [.unreachable])
+    }
+
+    func testOpenProblemShownByKeyAndBrand() {
+        // Kayıtlı anahtar yokken yanıt vermeyen LG/Samsung "izin yok" sayılır; Android TV kendi nedenini söyler.
+        XCTAssertEqual(TVOpenProblem.shown(.unreachable, brand: .lg, hasKey: false), .notPaired)
+        XCTAssertEqual(TVOpenProblem.shown(.unreachable, brand: .samsung, hasKey: true), .unreachable)
+        XCTAssertEqual(TVOpenProblem.shown(.debugOff, brand: .androidTV, hasKey: false), .debugOff)
+        XCTAssertNil(TVOpenProblem.shown(nil, brand: .lg, hasKey: false))
+        XCTAssertNotEqual(TVOpenText.openOnTV(.androidTV), TVOpenText.openOnTV(.lg))
+        XCTAssertEqual(TVOpenText.openOnTV(.lg), TVOpenText.openOnTV(.samsung))
+        XCTAssertNil(TVOpenText.reason(nil))
+        for problem in [TVOpenProblem.unreachable, .notPaired, .debugOff, .debugNotApproved] {
+            XCTAssertNotNil(TVOpenText.reason(problem))
+        }
+    }
+
+    func testSamsungFirstOpenIsImmediateAndIgnoredCommandIsReported() async throws {
+        // iPhone, Samsung (TestFlight build 27): TV açma komutunu alıp CouchSubs'ı açmıyordu; ekranda neden yoktu.
+        let control = FakeControl(foreground: [])
+        var time = ContinuousClock.now
+        var results: [TVOpenProblem?] = []
+        let keeper = TVKeeper(connect: { control }, appId: "x", params: [:], appConnected: { false },
+                              onOpenResult: { results.append($0) }, now: { time })
+        await keeper.tick()                     // çeviri başlar başlamaz (beklemeden) açar
+        XCTAssertEqual(control.launches.count, 1)
+        XCTAssertEqual(results, [nil])
+        time += .seconds(10)
+        await keeper.tick()                     // henüz bekleniyor
+        XCTAssertEqual(results, [nil])
+        time += TVKeeper.samsungOpenCheck
+        await keeper.tick()                     // uygulama bağlanmadı → "TV açmadı"
+        XCTAssertEqual(results, [nil, .notOpened])
+        time += .seconds(10)
+        await keeper.tick()                     // 30 sn doldu → yeniden açar; neden satırı silinmez
+        XCTAssertEqual(control.launches.count, 2)
+        XCTAssertEqual(results, [nil, .notOpened])
+        keeper.reconnect()                      // "Otomatik açmayı dene": hemen açar
+        await keeper.tick()
+        XCTAssertEqual(control.launches.count, 3)
+        XCTAssertEqual(results, [nil, .notOpened, nil])
+        XCTAssertNotNil(TVOpenText.reason(.notOpened))
+    }
+
+    func testSamsungConnectedAppIsNotReportedAsNotOpened() async throws {
+        let control = FakeControl(foreground: [])
+        let connected = Flag()
+        var time = ContinuousClock.now
+        var results: [TVOpenProblem?] = []
+        let keeper = TVKeeper(connect: { control }, appId: "x", params: [:], appConnected: { connected.value },
+                              onOpenResult: { results.append($0) }, now: { time })
+        await keeper.tick()
+        connected.value = true
+        time += TVKeeper.samsungOpenCheck
+        await keeper.tick()
+        connected.value = false                 // kullanıcı sonradan çıktı: yeni açma, eski komut "açmadı" sayılmaz
+        time += .seconds(20)
+        await keeper.tick()
+        XCTAssertEqual(results, [nil, nil])
+    }
+
+    func testSamsungLauncherTriesDeveloperConnectionFirst() async throws {
+        let remote = FakeControl(foreground: [])
+        var remoteConnects = 0
+        let bySdb = SamsungLauncher(openWithSdb: { true }, connectRemote: { remoteConnects += 1; return remote })
+        try await bySdb.launch(appId: "x", params: [:])
+        XCTAssertEqual(remoteConnects, 0)
+        let byRemote = SamsungLauncher(openWithSdb: { false }, connectRemote: { remoteConnects += 1; return remote })
+        try await byRemote.launch(appId: "x", params: [:])
+        XCTAssertEqual(remoteConnects, 1)
+        XCTAssertEqual(remote.launches.count, 1)
+        XCTAssertEqual(remote.closes, 1)
+        XCTAssertTrue(SamsungLauncher.sdbLaunched("launch app CouchSubsT.CouchSubs\napp_id[CouchSubsT.CouchSubs] launched\n"))
+        XCTAssertFalse(SamsungLauncher.sdbLaunched("app_id[CouchSubsT.CouchSubs] launch start\napp_id[CouchSubsT.CouchSubs] launch failed"))
+        XCTAssertFalse(SamsungLauncher.sdbLaunched(""))
     }
 
     func testSamsungIsLeftAloneWhileTheAppIsConnected() async throws {

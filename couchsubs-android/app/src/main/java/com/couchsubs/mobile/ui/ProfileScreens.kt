@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import com.couchsubs.mobile.BuildConfig
 import com.couchsubs.mobile.R
 import com.couchsubs.mobile.Services
+import com.couchsubs.mobile.account.Backend
 import com.couchsubs.mobile.core.SubtitleBackgroundShape
 import com.couchsubs.mobile.core.SubtitlePlacement
 import com.couchsubs.mobile.core.SubtitleTextColor
@@ -81,8 +82,22 @@ fun ProfileScreen(onBack: () -> Unit, onSettings: () -> Unit, onPairing: () -> U
     var pool by remember { mutableStateOf(settings.sharePool) }
     var askGame by remember { mutableStateOf(settings.askGame) }
     var speakerNames by remember { mutableStateOf(settings.showSpeakerNames) }
+    var speakerColors by remember { mutableStateOf(settings.speakerColors) }
+    var gameAreaPresets by remember { mutableStateOf(settings.gameAreaPresets) }
+    var autoScreenText by remember { mutableStateOf(settings.autoScreenText) }
+    var kindPhone by remember { mutableStateOf(settings.screenTextPhone) }
+    var kindMission by remember { mutableStateOf(settings.screenTextMission) }
+    var kindHelp by remember { mutableStateOf(settings.screenTextHelp) }
+    var kindMenus by remember { mutableStateOf(settings.screenTextMenus) }
+    var kindOther by remember { mutableStateOf(settings.screenTextOther) }
+    var setTextApart by remember { mutableStateOf(settings.setTextApart) }
     var fastReading by remember { mutableStateOf(settings.fastSubtitleDetection) }
+    var gamePhone by remember { mutableStateOf(settings.autoReadGamePhone) }
+    var subtitleBackground by remember { mutableStateOf(settings.watchSubtitleBackground) }
+    var misreadWait by remember { mutableStateOf(settings.misreadWaitMs) }
+    var partialWait by remember { mutableStateOf(settings.partialWaitMs) }
     var usage by remember { mutableStateOf(settings.usageData) }
+    var backgroundPip by remember { mutableStateOf(settings.backgroundPip) }
     LaunchedEffect(Unit) { tvs = withContext(Dispatchers.IO) { runCatching { TvDiscovery.search() }.getOrDefault(emptyList()) } }
     ScreenScaffold(top = { TopBar(stringResource(R.string.profile), onBack = onBack) { SettingsAction(onSettings) } }) {
         TwoColumns(
@@ -94,8 +109,7 @@ fun ProfileScreen(onBack: () -> Unit, onSettings: () -> Unit, onPairing: () -> U
         )
         Tile(Modifier.fillMaxWidth(), onClick = onTarget) {
             TileLabel(stringResource(R.string.profile_tvs))
-            Text(if (settings.target == SubtitleTarget.TV) settings.tvName ?: stringResource(R.string.main_target_tv) else stringResource(R.string.main_target_phone),
-                style = Tokens.Type.title, color = Tokens.Color.text)
+            Text(targetName(settings), style = Tokens.Type.title, color = Tokens.Color.text)
             when (val found = tvs) {
                 null -> Text(stringResource(R.string.target_searching), style = Tokens.Type.caption, color = Tokens.Color.secondary)
                 else -> Text(if (found.isEmpty()) stringResource(R.string.target_tvs_none) else found.joinToString { "${it.name} (${brandName(it.brand)})" },
@@ -104,6 +118,10 @@ fun ProfileScreen(onBack: () -> Unit, onSettings: () -> Unit, onPairing: () -> U
         }
         RowList(listOf(
             { RowItem(stringResource(R.string.notify_disconnect)) { Switch(notifyDisconnect, { notifyDisconnect = it; settings.notifyDisconnect = it }) } },
+            // iPhone ile aynı ad ve açıklama (orada Resim içinde resim penceresi çeviriyi ayakta tutar).
+            { RowItem(stringResource(R.string.settings_background_pip), stringResource(R.string.settings_background_pip_short)) {
+                Switch(backgroundPip, { backgroundPip = it; settings.backgroundPip = it })
+            } },
             { RowItem(stringResource(R.string.notify_packs)) { Switch(notifyPacks, { notifyPacks = it; settings.notifyNewPacks = it }) } },
         ))
         RowList(listOf(
@@ -116,8 +134,64 @@ fun ProfileScreen(onBack: () -> Unit, onSettings: () -> Unit, onPairing: () -> U
             { RowItem(stringResource(R.string.settings_speaker_names), stringResource(R.string.settings_speaker_names_short)) {
                 Switch(speakerNames, { speakerNames = it; settings.showSpeakerNames = it })
             } },
+            { RowItem(stringResource(R.string.settings_speaker_colors), stringResource(R.string.settings_speaker_colors_short)) {
+                Switch(speakerColors, { speakerColors = it; settings.speakerColors = it; TranslationService.setSpeakerColors(it) })
+            } },
+            { RowItem(stringResource(R.string.settings_game_area_presets), stringResource(R.string.settings_game_area_presets_short)) {
+                Switch(gameAreaPresets, { gameAreaPresets = it; settings.gameAreaPresets = it })
+            } },
+            { Column {
+                RowItem(stringResource(R.string.settings_auto_screen_text), stringResource(R.string.settings_auto_screen_text_short)) {
+                    Switch(autoScreenText, { autoScreenText = it; settings.autoScreenText = it })
+                }
+                // Türler yalnız ayar açıkken görünür; dört platformda aynı ad ve sıra (bkz. ScreenTextKind).
+                if (autoScreenText) Column(Modifier.padding(start = 16.dp)) {
+                    Text(stringResource(R.string.settings_screen_text_kinds), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+                    RowItem(stringResource(R.string.settings_screen_text_phone)) {
+                        Switch(kindPhone, { kindPhone = it; settings.screenTextPhone = it })
+                    }
+                    RowItem(stringResource(R.string.settings_screen_text_mission)) {
+                        Switch(kindMission, { kindMission = it; settings.screenTextMission = it })
+                    }
+                    RowItem(stringResource(R.string.settings_screen_text_help)) {
+                        Switch(kindHelp, { kindHelp = it; settings.screenTextHelp = it })
+                    }
+                    RowItem(stringResource(R.string.settings_screen_text_menus)) {
+                        Switch(kindMenus, { kindMenus = it; settings.screenTextMenus = it })
+                    }
+                    RowItem(stringResource(R.string.settings_screen_text_other)) {
+                        Switch(kindOther, { kindOther = it; settings.screenTextOther = it })
+                    }
+                    Text(stringResource(R.string.settings_screen_text_manual), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+                }
+            } },
+            { RowItem(stringResource(R.string.settings_set_text_apart), stringResource(R.string.settings_set_text_apart_short)) {
+                Switch(setTextApart, { setTextApart = it; settings.setTextApart = it; TranslationService.setTextApart(it) })
+            } },
             { RowItem(stringResource(R.string.settings_fast_reading), stringResource(R.string.settings_fast_reading_short)) {
                 Switch(fastReading, { fastReading = it; settings.fastSubtitleDetection = it })
+            } },
+            { RowItem(stringResource(R.string.settings_game_phone)) {
+                Switch(gamePhone, { gamePhone = it; settings.autoReadGamePhone = it })
+            } },
+            { RowItem(stringResource(R.string.settings_subtitle_background), stringResource(R.string.settings_subtitle_background_short)) {
+                Switch(subtitleBackground, { subtitleBackground = it; settings.watchSubtitleBackground = it })
+            } },
+            // Windows, Mac ve iPhone'daki iki bekleme kaydırıcısı: aynı ad ve açıklama, 0–1 sn, 0,1 sn adım.
+            { Column {
+                WaitSlider(stringResource(R.string.settings_misread_wait), stringResource(R.string.settings_misread_wait_note), misreadWait) {
+                    misreadWait = it; settings.misreadWaitMs = it
+                }
+                WaitSlider(stringResource(R.string.settings_partial_wait), stringResource(R.string.settings_partial_wait_note), partialWait) {
+                    partialWait = it; settings.partialWaitMs = it
+                }
+                Text(stringResource(R.string.settings_waits_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+                GhostButton(stringResource(R.string.settings_waits_defaults)) {
+                    misreadWait = com.couchsubs.mobile.core.SubtitlePipeline.PACK_WAIT_MS
+                    partialWait = com.couchsubs.mobile.core.SubtitlePipeline.CLEAN_WAIT_MS
+                    settings.misreadWaitMs = misreadWait
+                    settings.partialWaitMs = partialWait
+                }
             } },
             { RowItem(stringResource(R.string.profile_usage), stringResource(R.string.profile_usage_note)) {
                 Switch(usage, { usage = it; Services.setUsageData(it) })
@@ -126,6 +200,7 @@ fun ProfileScreen(onBack: () -> Unit, onSettings: () -> Unit, onPairing: () -> U
             { RowItem(stringResource(R.string.profile_help), onClick = { open(context, context.getString(R.string.url_help)) }) },
         ))
         Text(stringResource(R.string.profile_no_account), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        DeveloperSignature()
     }
 }
 
@@ -135,12 +210,14 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
                    onPlatform: () -> Unit = {}, onDemo: () -> Unit = {}) {
     val context = LocalContext.current
     val settings = Services.settings
+    var showAbout by remember { mutableStateOf(false) }
     var engine by remember { mutableStateOf(settings.engine) }
     // Anahtar kaydedilmeden önce denenir (iPhone gibi): yalnız kabul edilen anahtar gizli depoya yazılır.
     var key by remember(engine) { mutableStateOf("") }
     var saved by remember(engine) { mutableStateOf(!settings.apiKey(engine).isNullOrBlank()) }
     var checking by remember { mutableStateOf(false) }
     var keyRejected by remember(engine) { mutableStateOf(false) }
+    var keyNotStored by remember(engine) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     var scale by remember { mutableStateOf(settings.subtitleScale.toFloat()) }
     var color by remember { mutableStateOf(settings.textColor) }
@@ -164,21 +241,66 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
         settings.engine = choice
     }
     ScreenScaffold(top = { TopBar(stringResource(R.string.settings), onBack = onBack) }) {
+        // Erişim anahtarı yenilenince ikinci ekran adresi ve QR kodu da yenilenir.
+        var keyVersion by remember { mutableStateOf(0) }
+        SecondScreenTile(version = keyVersion)
         Tile(Modifier.fillMaxWidth()) {
+            // "TV'yi eşle" (iPhone ile aynı): çeviri sürmese de iki dakika eşleşme açılır; TV kod gösterirse bu
+            // telefonda açılan "Bu TV eşleşsin mi?" penceresinde onaylanır.
+            var pairingOpened by remember { mutableStateOf(false) }
+            SecondaryButton(stringResource(R.string.settings_pair_tv)) { pairingOpened = TranslationService.openPairing(context) }
+            if (pairingOpened && com.couchsubs.mobile.service.LiveState.status.collectAsState().value.connectedTvs == 0)
+                Text(stringResource(R.string.settings_pair_tv_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+            // OBS katmanı adresi (Mac ve Windows'taki gibi adres görünür ve kopyalanır; telefonda ayrıca paylaşılır).
+            var address by remember { mutableStateOf(TranslationService.viewerAddress()) }
+            var addressCopied by remember { mutableStateOf(false) }
+            LaunchedEffect(addressCopied) {
+                if (addressCopied) {
+                    kotlinx.coroutines.delay(1500)
+                    addressCopied = false
+                }
+            }
+            address?.let { shown ->
+                TileLabel(stringResource(R.string.obs_overlay))
+                androidx.compose.foundation.text.selection.SelectionContainer {
+                    Text(shown, style = Tokens.Type.caption.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace), color = Tokens.Color.text)
+                }
+                Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(Tokens.Space.gap)) {
+                    SecondaryButton(stringResource(if (addressCopied) R.string.history_copied else R.string.history_copy), Modifier.weight(1f)) {
+                        context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("CouchSubs", shown))
+                        addressCopied = true
+                    }
+                    SecondaryButton(stringResource(R.string.share), Modifier.weight(1f)) {
+                        val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                            .putExtra(android.content.Intent.EXTRA_TEXT, shown)
+                        runCatching { context.startActivity(android.content.Intent.createChooser(send, null)) }
+                    }
+                }
+            }
+            androidx.compose.material3.TextButton(onClick = {
+                TranslationService.renewAccessKey()
+                address = TranslationService.viewerAddress()
+                keyVersion++
+            }){ Text(stringResource(R.string.tv_key_renew)) }
+            if (com.couchsubs.mobile.service.LiveState.status.collectAsState().value.legacyTv) Text(stringResource(R.string.tv_legacy_warning))
             TileLabel(stringResource(R.string.settings_engine))
             Segmented(listOf(stringResource(R.string.engine_free_short), "DeepL", "Gemini", stringResource(R.string.engine_other)), segment) { index ->
                 choose(when (index) {
                     0 -> EngineChoice.FREE
                     1 -> EngineChoice.DEEPL
                     2 -> EngineChoice.GEMINI
-                    else -> if (engine == EngineChoice.CLAUDE) EngineChoice.CLAUDE else EngineChoice.OPENAI
+                    else -> if (engine == EngineChoice.CLAUDE || engine == EngineChoice.LOCAL) engine else EngineChoice.OPENAI
                 })
             }
-            if (segment == 3) Segmented(listOf("OpenAI", "Claude"), if (engine == EngineChoice.CLAUDE) 1 else 0) {
-                choose(if (it == 1) EngineChoice.CLAUDE else EngineChoice.OPENAI)
+            // Diğer: OpenAI, Claude ya da yerel model (aynı ağdaki bilgisayarda Ollama / LM Studio; iPhone ile aynı).
+            if (segment == 3) Segmented(listOf("OpenAI", "Claude", stringResource(R.string.engine_local)),
+                when (engine) { EngineChoice.CLAUDE -> 1; EngineChoice.LOCAL -> 2; else -> 0 }) {
+                choose(when (it) { 1 -> EngineChoice.CLAUDE; 2 -> EngineChoice.LOCAL; else -> EngineChoice.OPENAI })
             }
-            if (engine == EngineChoice.GEMINI) GeminiModelChoice(settings)
-            if (engine != EngineChoice.FREE) {
+            // Model seçimi üç hizmette de var (Mac ve Windows ile aynı liste ve varsayılanlar); yerel modelde ad yazılır.
+            engine.aiProvider?.takeIf { it != AiProvider.LOCAL }?.let { provider -> androidx.compose.runtime.key(provider) { AiModelChoice(settings, provider) } }
+            if (engine == EngineChoice.LOCAL) LocalAiSection(settings)
+            if (engine != EngineChoice.FREE && engine != EngineChoice.LOCAL) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TileLabel(stringResource(R.string.settings_key_for, engineName(context)))
                     Spacer(Modifier.weight(1f))
@@ -189,15 +311,20 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
                         settings.setApiKey(engine, null)
                         saved = false
                     }
+                    // Mac ve Windows'taki kullanım satırı (#625): kayıtlı DeepL anahtarının bu ayki karakter kullanımı.
+                    if (engine == EngineChoice.DEEPL) DeepLUsageNote(settings)
                 } else {
-                    Field(key, { key = it; keyRejected = false }, stringResource(R.string.settings_key), secret = true)
+                    Field(key, { key = it; keyRejected = false; keyNotStored = false }, stringResource(R.string.settings_key), secret = true)
                     SecondaryButton(stringResource(if (checking) R.string.settings_key_checking else R.string.settings_key_save),
                         enabled = !checking && key.isNotBlank()) {
                         val choice = engine
                         val typed = key.trim()
                         checking = true
                         keyRejected = false
+                        keyNotStored = false
                         scope.launch {
+                            val logName = choice.aiProvider?.id ?: "deepl"
+                            Backend.breadcrumb("API anahtarı testi başladı: $logName")
                             val state = withContext(Dispatchers.IO) {
                                 val provider = choice.aiProvider
                                 if (provider == null) KeyCheck.deepL(typed)
@@ -206,17 +333,26 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
                                     if (model == null) OnlineKeyState.UNREACHABLE else KeyCheck.ai(provider, typed, model)
                                 }
                             }
+                            if (state != OnlineKeyState.VALID) Backend.breadcrumb("API anahtarı testi sonucu: $logName $state")
+                            // Hizmet kabul etse de Keystore'a yazılamayan anahtar kayıtlı sayılmaz (Mac ile aynı).
+                            val stored = KeyCheck.accepted(state) && withContext(Dispatchers.IO) { settings.storeApiKey(choice, typed) }
+                            if (KeyCheck.accepted(state) && !stored) Backend.breadcrumb("API anahtarı gizli depoya kaydedilemedi: $logName")
                             checking = false
-                            if (KeyCheck.accepted(state)) {
-                                settings.setApiKey(choice, typed)
+                            if (stored) {
                                 if (engine == choice) {
                                     saved = true
                                     key = ""
                                 }
-                            } else if (engine == choice) keyRejected = true
+                            } else if (engine == choice) {
+                                if (KeyCheck.accepted(state)) keyNotStored = true else keyRejected = true
+                            }
                         }
                     }
-                    AnimatedNote(if (keyRejected) stringResource(R.string.settings_key_rejected) else null)
+                    AnimatedNote(when {
+                        keyNotStored -> stringResource(R.string.settings_key_not_stored)
+                        keyRejected -> stringResource(R.string.settings_key_rejected)
+                        else -> null
+                    })
                 }
             }
             // Ek talimat (#306) yalnız yapay zekâ motorlarında; DeepL'de yoktur (iPhone ile aynı).
@@ -263,7 +399,8 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
             }
             Text(stringResource(R.string.settings_background_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
         }
-        if (settings.target == SubtitleTarget.TV) Tile(Modifier.fillMaxWidth()) {
+        // Yeri seçimi OBS katmanında da geçerlidir ("Yalnız OBS (yayın)"; iPhone ile aynı). Görüntü modu yalnız TV içindir.
+        if (settings.target.showsOnTv || settings.target == SubtitleTarget.OBS) Tile(Modifier.fillMaxWidth()) {
             SectionTitle(stringResource(R.string.settings_section_tv))
             // TV'de çevirinin yeri (Mac ve Windows'taki Yeri seçimi, iPhone ile aynı): üstünde/altında seçilince oyundaki
             // İngilizce altyazı da görünür; sabit yerde yükseklik kaydırıcıyla ayarlanır, bırakınca TV'de örnek altyazı çıkar.
@@ -278,7 +415,7 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
             if (placement == SubtitlePlacement.FIXED) {
                 SliderHeader(stringResource(R.string.settings_position_height), "%${bottomPercent.toInt()}")
                 Slider(bottomPercent, { bottomPercent = it; settings.tvBottomPercent = it.toInt() }, valueRange = 0f..85f,
-                    onValueChangeFinished = { TranslationService.sendTestSubtitle(context.getString(R.string.test_subtitle_text)) },
+                    onValueChangeFinished = { TranslationService.testSubtitle(context, context.getString(R.string.test_subtitle_text)) },
                     colors = couchSliderColors())
                 Text(stringResource(R.string.settings_placement_fixed_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
             } else {
@@ -286,17 +423,24 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
             }
             // Yalnız Android TV uygulaması kullanır: bazı TV'lerde (ör. TCL) uygulama içindeki PS5 görüntüsü siyah kalıyor.
             // Katman'da TV, PS5'i kendi HDMI girişinde gösterir (Mac ve Windows'taki Görüntü modu seçimi, iPhone ile aynı).
-            TileLabel(stringResource(R.string.settings_display_mode))
-            Segmented(listOf(stringResource(R.string.settings_display_mode_in_app), stringResource(R.string.settings_display_mode_overlay)),
-                if (displayMode == TvDisplayMode.OVERLAY) 1 else 0) {
-                displayMode = if (it == 1) TvDisplayMode.OVERLAY else TvDisplayMode.IN_APP
-                settings.tvDisplayMode = displayMode
+            if (settings.target.showsOnTv) {
+                TileLabel(stringResource(R.string.settings_display_mode))
+                Segmented(listOf(stringResource(R.string.settings_display_mode_in_app), stringResource(R.string.settings_display_mode_overlay)),
+                    if (displayMode == TvDisplayMode.OVERLAY) 1 else 0) {
+                    displayMode = if (it == 1) TvDisplayMode.OVERLAY else TvDisplayMode.IN_APP
+                    settings.tvDisplayMode = displayMode
+                }
+                Text(stringResource(R.string.settings_display_mode_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
             }
-            Text(stringResource(R.string.settings_display_mode_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
         }
         RowList(listOf({ RowItem(stringResource(R.string.settings_screen_on)) { Switch(screenOn, { screenOn = it; settings.keepScreenOn = it }) } }))
+        // Telefon kilitlenince ne olduğu açıkça yazar; pil kısıtlaması açıksa ayara giden düğme de çıkar.
+        Text(stringResource(R.string.settings_screen_on_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        BackgroundLimitNote()
         // Altyazı alanı ve ek alanlar (iPhone ile aynı sırada: görünümden sonra).
+        DubbingTile()
         AreaProfileTile()
+        GameProfilesTile()
         AreaTile()
         ExtraAreasTile()
         // İkinci hesabın PS5 giriş şifresi: yalnız 4 hane gizli depoya (Keystore) yazılır; silinince kaldırılır.
@@ -316,8 +460,7 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
         var xboxAudio by remember { mutableStateOf(settings.xboxAudioOnDevice) }
         RowList(listOfNotNull<@Composable () -> Unit>(
             { RowItem(stringResource(R.string.settings_packs), onClick = onPacks) { Pill(stringResource(if (settings.packsEnabled) R.string.main_packs_on else R.string.main_packs_off)) } },
-            { RowItem(stringResource(R.string.settings_target), if (settings.target == SubtitleTarget.TV) settings.tvName ?: stringResource(R.string.main_target_tv)
-                else stringResource(R.string.main_target_phone), onClick = onTarget) },
+            { RowItem(stringResource(R.string.settings_target), targetName(settings), onClick = onTarget) },
             { RowItem(stringResource(R.string.platform_setting), stringResource(if (settings.xbox) R.string.platform_xbox else R.string.platform_ps), onClick = onPlatform) {
                 if (settings.xbox) Pill(stringResource(R.string.beta)) } },
             if (settings.xbox) ({ RowItem("Xbox", settings.xboxConsole?.name ?: stringResource(R.string.profile_not_paired), onClick = onPairing) })
@@ -326,9 +469,11 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
             if (settings.xbox) ({ RowItem(stringResource(R.string.settings_xbox_audio), stringResource(R.string.settings_xbox_audio_short)) {
                 Switch(xboxAudio, { xboxAudio = it; settings.xboxAudioOnDevice = it })
             } }) else null,
-            { RowItem(stringResource(R.string.settings_about), BuildConfig.VERSION_NAME, onClick = { open(context, context.getString(R.string.url_source)) }) },
+            { RowItem(stringResource(R.string.settings_about), BuildConfig.VERSION_NAME, onClick = { showAbout = true }) },
         ))
+        if (showAbout) AboutDialog { showAbout = false }
         XboxSignOutRow()
+        PsnSignOutRow()
         // TV uygulamasını bu telefondan kurmak ve güncellemek (bilgisayardaki gibi; Samsung, LG, Android TV).
         Tile(Modifier.fillMaxWidth()) {
             TileLabel(stringResource(R.string.settings_tv_app))
@@ -338,34 +483,46 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
         Tile(Modifier.fillMaxWidth()) {
             TileLabel(stringResource(R.string.demo_mode))
             Text(stringResource(R.string.demo_mode_body), style = Tokens.Type.caption, color = Tokens.Color.secondary)
-            SecondaryButton(stringResource(R.string.demo_mode_try), onClick = onDemo)
+            // Deneme modu sürerken buradan da çıkılır (iPhone ile aynı).
+            val live by com.couchsubs.mobile.service.LiveState.status.collectAsState()
+            if (live.running && live.demo) SecondaryButton(stringResource(R.string.demo_mode_exit)) { TranslationService.stop(context) }
+            else SecondaryButton(stringResource(R.string.demo_mode_try), onClick = onDemo)
         }
         // Deneme altyazısı: TV'de (ya da telefon ekranında) yazının nasıl göründüğü; iPhone ile aynı.
         var testNote by remember { mutableStateOf<String?>(null) }
         SecondaryButton(stringResource(R.string.settings_test_subtitle)) {
-            testNote = if (TranslationService.sendTestSubtitle(context.getString(R.string.test_subtitle_text))) null
-                else context.getString(R.string.settings_test_needs_start)
+            // Çeviri sürmüyorsa bekleme sunucusu açılır, TV uygulaması bağlanınca altyazı gider (iPhone ile aynı).
+            val waiting = TranslationService.connectedTvs() == 0
+            testNote = if (!TranslationService.testSubtitle(context, context.getString(R.string.test_subtitle_text)))
+                context.getString(R.string.settings_test_needs_start)
+            // TV bağlı değilse yazı TV'ye gitmiyordu; TV'deki 6 haneli kodun nereye yazılacağı aranıyordu (kod yazılmaz,
+            // bu telefonda açılan "Bu TV eşleşsin mi?" penceresinde onaylanır).
+            else if (settings.target.showsOnTv && waiting)
+                context.getString(R.string.settings_test_tv_not_connected)
+            else null
         }
         AnimatedNote(testNote, Tokens.Color.secondary)
         Text(stringResource(R.string.settings_copyright), style = Tokens.Type.caption, color = Tokens.Color.secondary,
             modifier = Modifier.padding(top = Tokens.Space.inline))
+        DeveloperSignature()
     }
 }
 
 /**
- * Gemini modeli (Mac ve Windows'taki Model seçimi, iPhone ile aynı): seçenekler ortak ai-models.json'dan gelir, ilki
- * varsayılandır. Kayıt "geminiModel" adıyla tutulur; dakikalık istek hakkı seçilen modelin sınırıdır.
+ * Yapay zekâ modeli: Gemini, OpenAI ve Claude (Mac ve Windows'taki Model seçimi, iPhone ile aynı). Seçenekler ortak
+ * ai-models.json'dan gelir, ilki varsayılandır. Kayıt "geminiModel" / "openAIModel" / "claudeModel" adıyla tutulur;
+ * Gemini'de dakikalık istek hakkı seçilen modelin sınırıdır.
  */
 @Composable
-private fun GeminiModelChoice(settings: AppSettings) {
+private fun AiModelChoice(settings: AppSettings, provider: AiProvider) {
     val context = LocalContext.current
-    val models = remember { AiModel.load(context)[AiProvider.GEMINI.id].orEmpty() }
+    val models = remember(provider) { AiModel.load(context)[provider.id].orEmpty() }
     if (models.isEmpty()) return
-    var selected by remember { mutableStateOf(AiModel.selected(models, settings.aiModel(AiProvider.GEMINI))!!.id) }
+    var selected by remember(provider) { mutableStateOf(AiModel.selected(models, settings.aiModel(provider))!!.id) }
     TileLabel(stringResource(R.string.settings_model))
     Segmented(models.map { modelLabel(it) }, models.indexOfFirst { it.id == selected }.coerceAtLeast(0)) { index ->
         selected = models[index].id
-        settings.setAiModel(AiProvider.GEMINI, selected)
+        settings.setAiModel(provider, selected)
     }
     Text(selected, style = Tokens.Type.caption, color = Tokens.Color.secondary)
 }
@@ -392,6 +549,60 @@ private fun modelLabel(model: AiModel): String = when (model.label) {
     else -> model.label
 }
 
+
+/**
+ * PSN'den çıkış (iPhone signOutPSN ile aynı): çeviri durur; ikinci hesabın kimliği, PS5 eşleşmesi (PS5 o hesaba bağlıdır)
+ * ve giriş şifresi bu telefondan silinir. TV ve çeviri ayarları kalır. Yanlış hesapla giren kurulumu baştan almak zorundaydı.
+ */
+@Composable
+private fun PsnSignOutRow() {
+    val context = LocalContext.current
+    val settings = Services.settings
+    var linked by remember { mutableStateOf(settings.accountId != null || settings.console != null) }
+    var confirm by remember { mutableStateOf(false) }
+    if (settings.xbox || !linked) return
+    Tile(Modifier.fillMaxWidth()) {
+        RowItem(stringResource(R.string.psn_sign_out), onClick = { confirm = true })
+    }
+    if (confirm) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { confirm = false },
+        title = { Text(stringResource(R.string.psn_sign_out_title)) },
+        text = { Text(stringResource(R.string.psn_sign_out_body)) },
+        confirmButton = {
+            androidx.compose.material3.TextButton({
+                confirm = false
+                TranslationService.stop(context)
+                settings.accountId = null
+                settings.console = null
+                settings.loginPasscode = null
+                linked = false
+            }) { Text(stringResource(R.string.psn_sign_out_confirm), color = Tokens.Color.danger) }
+        },
+        dismissButton = { androidx.compose.material3.TextButton({ confirm = false }) { Text(stringResource(R.string.cancel)) } },
+        containerColor = Tokens.Color.surface2,
+    )
+}
+
+/** Hakkında (iPhone AboutScreen ile aynı): sürüm, lisans, Remote Play teşekkürü ve kaynak kodu bağlantısı. */
+@Composable
+private fun AboutDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("CouchSubs ${BuildConfig.VERSION_NAME}") },
+        text = {
+            Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(Tokens.Space.inline)) {
+                Text("Copyright © 2026 Sinan Yorulmaz", style = Tokens.Type.caption, color = Tokens.Color.secondary)
+                Text(stringResource(R.string.about_body), style = Tokens.Type.body, color = Tokens.Color.secondary)
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton({ open(context, context.getString(R.string.url_source)) }) { Text(stringResource(R.string.about_source)) }
+        },
+        dismissButton = { androidx.compose.material3.TextButton(onDismiss) { Text(stringResource(R.string.close)) } },
+        containerColor = Tokens.Color.surface2,
+    )
+}
 
 /** Xbox seçiliyken ve giriş yapılmışken Microsoft hesabından çıkış (jeton Keystore'dan silinir). */
 @Composable
@@ -424,5 +635,52 @@ private fun ColorSwatch(option: SubtitleTextColor, selected: Boolean, onSelect: 
         if (selected) Box(Modifier.size(44.dp).border(2.dp, Tokens.Color.accent, CircleShape))
         Box(Modifier.size(32.dp).background(if (yellow) Tokens.Color.accent else Tokens.Color.text, CircleShape)
             .border(1.dp, Tokens.Color.borderStrong, CircleShape))
+    }
+}
+
+/**
+ * DeepL anahtarının bu ayki kullanımı: "Bu ay: 500.000 karakterin 12.345 kadarı kullanıldı." (Mac, Windows ve iPhone ile
+ * aynı metin). Ayarlar açılınca ve anahtar kaydedilince sorulur; sorgu karakter kotasından yemez.
+ */
+@Composable
+private fun DeepLUsageNote(settings: AppSettings) {
+    var usage by remember { mutableStateOf<KeyCheck.DeepLUsage?>(null) }
+    LaunchedEffect(Unit) {
+        val key = settings.apiKey(EngineChoice.DEEPL)
+        usage = if (key.isNullOrBlank()) null else withContext(Dispatchers.IO) { KeyCheck.deepLUsage(key) }
+    }
+    usage?.let { Text(deepLUsageText(it), style = Tokens.Type.caption, color = Tokens.Color.secondary) }
+}
+
+@Composable
+private fun deepLUsageText(usage: KeyCheck.DeepLUsage): String = when (usage.state) {
+    OnlineKeyState.VALID -> stringResource(R.string.deepl_usage, "%,d".format(usage.used), "%,d".format(usage.limit))
+    OnlineKeyState.QUOTA_EXCEEDED -> stringResource(R.string.deepl_quota_used_up)
+    OnlineKeyState.INVALID -> stringResource(R.string.deepl_key_not_accepted)
+    else -> stringResource(R.string.deepl_unreachable)
+}
+
+/** Altyazı hedefinin adı: TV'nin adı, "Bu telefon" ya da ikisi birden (iPhone ile aynı). */
+/** Bekleme süresi kaydırıcısı: 0–1 sn, 0,1 sn adım; değer milisaniye olarak verilir. */
+@Composable
+private fun WaitSlider(title: String, note: String, ms: Int, onChange: (Int) -> Unit) {
+    val max = com.couchsubs.mobile.core.SubtitlePipeline.WAIT_SLIDER_MAX_MS
+    val seconds = ms.coerceIn(0, max) / 1000f
+    Column {
+        SliderHeader(title, "${String.format(java.util.Locale.getDefault(), "%.1f", seconds)} ${stringResource(R.string.unit_seconds)}")
+        Slider(seconds, { onChange(Math.round(it * 10) * 100) }, valueRange = 0f..max / 1000f, steps = max / 100 - 1,
+            colors = couchSliderColors())
+        Text(note, style = Tokens.Type.caption, color = Tokens.Color.secondary)
+    }
+}
+
+@Composable
+fun targetName(settings: AppSettings): String {
+    val tv = settings.tvName ?: stringResource(R.string.main_target_tv)
+    return when (settings.target) {
+        SubtitleTarget.TV -> tv
+        SubtitleTarget.PHONE -> stringResource(R.string.main_target_phone)
+        SubtitleTarget.BOTH -> stringResource(R.string.main_target_both, tv)
+        SubtitleTarget.OBS -> stringResource(R.string.target_obs)
     }
 }

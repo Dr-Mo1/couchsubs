@@ -33,7 +33,7 @@ public class AreaProfileTests
         var (controller, settings) = Ready();
         await controller.StartAsync();
         controller.ChooseGame("Far Cry 3");
-        controller.Settings = controller.Settings.WithCustomRegion(FarCryArea).WithExtraRegion(1, Quest).WithExtraLive(1, true);
+        controller.Settings = controller.Settings.WithCustomRegion(FarCryArea).WithArea(Quest, live: true);
         controller.SaveAreaProfile();
         controller.Stop();
         return (controller, settings);
@@ -67,22 +67,26 @@ public class AreaProfileTests
         Assert.Null(controller.Settings.GeneralAreas);
         Assert.Equal(FarCryArea, controller.Settings.Region);
 
-        controller.Settings = controller.Settings.WithCustomRegion(General).WithExtraRegion(1, null);
-        // Elle seçilen oyun uygulama açık kaldıkça hatırlanır: yeni oturum başlar başlamaz o oyunun alanları gelir.
+        controller.Settings = controller.Settings.WithCustomRegion(General) with { ExtraAreas = [] };
+        // Elle seçilen oyun uygulama açık kaldıkça hatırlanır; ama başka oyuna geçilmiş olabilir: alanları sorulur,
+        // kendiliğinden uygulanmaz. Oyun yeniden seçilince gelir.
         await controller.StartAsync();
-        Assert.Equal("Far Cry 3", controller.AreaProfileGame);
+        Assert.Null(controller.AreaProfileGame);
+        Assert.Equal("Far Cry 3", controller.OfferedAreaProfileGame);
+        Assert.Equal(General, controller.Settings.Region);
         controller.ChooseGame("Far Cry III");
         Assert.Equal("Far Cry 3", controller.AreaProfileGame);
         Assert.Equal(FarCryArea, controller.Settings.Region);
-        Assert.Equal(Quest, controller.Settings.ExtraRegion1);
-        Assert.True(controller.Settings.ExtraLive1);
+        var quest = Assert.Single(controller.Settings.ExtraAreas);
+        Assert.Equal(Quest, quest.Region);
+        Assert.True(quest.Enabled);
         Assert.Single(controller.Settings.WatchedAreas());
         Assert.Equal(General, settings.Saved?.GeneralAreas?.Region);
 
         controller.Stop();
         Assert.Null(controller.AreaProfileGame);
         Assert.Equal(General, controller.Settings.Region);
-        Assert.Null(controller.Settings.ExtraRegion1);
+        Assert.Empty(controller.Settings.ExtraAreas);
         Assert.Null(settings.Saved?.ActiveAreaProfile);
     }
 
@@ -171,6 +175,85 @@ public class AreaProfileTests
         Assert.Null(controller.Settings.GeneralAreas);
         Assert.Single(controller.Settings.AreaProfiles);
         Assert.Null(settings.Saved?.GeneralAreas);
+    }
+
+    private static readonly CropRegion GtaArea = new(0.74, 0.93, 0.18, 0.82);
+    private static readonly CropRegion AcArea = new(0.80, 0.98, 0.10, 0.90);
+
+    /// <summary>
+    /// Kullanıcının bildirdiği durum: GTA 6 için alanlar kaydedildi, sonraki oturumda Assassin's Creed oynandı, seçim GTA
+    /// 6'da kaldı. Eskiden GTA 6 profili kendiliğinden uygulanıyor, AC için yapılan değişiklik GTA 6'nın üzerine yazılıyordu.
+    /// </summary>
+    [Fact]
+    public async Task AnotherGamesAreasNeverOverwriteAProfile()
+    {
+        var (controller, _) = Ready();
+        controller.Settings = controller.Settings.WithCustomRegion(General);
+        await controller.StartAsync();
+        controller.ChooseGame("GTA 6");
+        controller.Settings = controller.Settings.WithCustomRegion(GtaArea);
+        controller.SaveAreaProfile();
+        controller.Stop();
+        controller.Settings = controller.Settings.WithCustomRegion(General);
+
+        await controller.StartAsync();
+        Assert.Equal("GTA 6", controller.OfferedAreaProfileGame);
+        controller.DeclineOfferedAreaProfile();
+        controller.Settings = controller.Settings.WithCustomRegion(AcArea);
+        Assert.True(controller.AreaProfileTargetHasOther);
+        controller.SaveAreaProfile();
+        Assert.Equal(GtaArea, controller.Settings.FindAreaProfile("gta 6|stream")?.Areas.Region);
+
+        Assert.Equal(AreaProfiles.Edit.Done, controller.SaveAreaProfileAs("Assassin's Creed Valhalla"));
+        Assert.Equal("Assassin's Creed Valhalla", controller.PlayedGame);
+        Assert.Equal("assassins creed valhalla|stream", controller.Settings.ActiveAreaProfile);
+        Assert.Equal(AreaProfiles.Edit.Exists, controller.SaveAreaProfileAs("Grand Theft Auto VI"));
+        controller.Settings = controller.Settings.WithCustomRegion(General);
+        controller.SaveAreaProfile();
+        Assert.Equal(General, controller.Settings.FindAreaProfile("assassins creed valhalla|stream")?.Areas.Region);
+        Assert.Equal(GtaArea, controller.Settings.FindAreaProfile("gta 6|stream")?.Areas.Region);
+
+        controller.UseAreaProfile("gta 6|stream");
+        Assert.Equal(GtaArea, controller.Settings.Region);
+        Assert.Equal("GTA 6", controller.PlayedGame);
+        controller.Stop();
+        Assert.Equal(AcArea, controller.Settings.Region);
+        Assert.Equal(2, controller.Settings.AreaProfiles.Count);
+    }
+
+    [Fact]
+    public void ProfilesCanBeAddedRenamedDuplicatedAndDeletedWhileStopped()
+    {
+        var (controller, _) = Ready();
+        controller.Settings = controller.Settings.WithCustomRegion(General);
+        Assert.Equal(AreaProfiles.Edit.Done, controller.SaveAreaProfileAs("GTA 6"));
+        Assert.Equal(AreaProfiles.Edit.Empty, controller.SaveAreaProfileAs("  "));
+        Assert.Equal("GTA 6", controller.PlayedGame);
+        Assert.Equal(AreaProfiles.Edit.Done, controller.DuplicateAreaProfile("gta 6|stream", "Mafia: The Old Country"));
+        Assert.Equal(AreaProfiles.Edit.Exists, controller.DuplicateAreaProfile("gta 6|stream", "Grand Theft Auto VI"));
+        Assert.Equal(AreaProfiles.Edit.Exists, controller.RenameAreaProfile("gta 6|stream", "Mafia The Old Country"));
+        Assert.Equal(AreaProfiles.Edit.Done, controller.RenameAreaProfile("gta 6|stream", "Red Dead Redemption 2"));
+        Assert.Equal("rdr 2|stream", controller.Settings.ActiveAreaProfile);
+        Assert.Equal("Red Dead Redemption 2", controller.PlayedGame);
+        Assert.Equal(["Mafia: The Old Country", "Red Dead Redemption 2"], controller.GameProfiles.Select(profile => profile.Game));
+        controller.DeleteAreaProfile("rdr 2|stream");
+        Assert.Null(controller.Settings.ActiveAreaProfile);
+        Assert.Equal("mafia the old country|stream", Assert.Single(controller.Settings.AreaProfiles).Key);
+    }
+
+    /// <summary>Eski sürümün kaydı (20 profil): hiçbiri kaybolmaz, her oyun kendi alanlarında kalır.</summary>
+    [Fact]
+    public void OldSettingsKeepEveryGamesProfile()
+    {
+        var areas = new UserSettings().WithCustomRegion(General).Areas;
+        var old = new UserSettings() with
+        {
+            AreaProfiles = [.. Enumerable.Range(0, 20).Select(i => new AreaProfile($"game {i}|stream", $"Game {i}", areas with { Region = GtaArea }))],
+        };
+        var json = System.Text.Json.JsonSerializer.Serialize(old);
+        var (controller, _) = Ready(System.Text.Json.JsonSerializer.Deserialize<UserSettings>(json));
+        Assert.Equal(20, controller.Settings.AreaProfiles.Count);
+        Assert.Equal(GtaArea, controller.Settings.FindAreaProfile("game 7|stream")?.Areas.Region);
     }
 
     [Fact]

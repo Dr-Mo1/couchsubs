@@ -28,7 +28,8 @@ fun interface NativeSessionListener {
  * Çağrı kısa sürmeli (kopyala ve dön); bu sürede çözücü yeni kare vermez.
  */
 fun interface NativeFrameListener {
-    fun onFrame(buffer: ByteBuffer, width: Int, height: Int, rowStride: Int, colorFormat: Int)
+    /** [chroma]: [buffer]'da Y düzleminin ardından yarım çözünürlüklü U ve V düzlemleri de var ([ChromaPlanes]). */
+    fun onFrame(buffer: ByteBuffer, width: Int, height: Int, rowStride: Int, colorFormat: Int, chroma: Boolean)
 }
 
 /** libchiaki'ye JNI köprüsü (app/src/main/cpp/couchsubs-jni.c). */
@@ -42,6 +43,12 @@ object NativeBridge {
     const val QUIT_REFUSED = 3
     const val QUIT_NETWORK = 4
     const val QUIT_OTHER = 5
+    /** PS5'teki Uzaktan Oynatma çöktü (CHIAKI_QUIT_REASON_SESSION_REQUEST_RP_CRASH). */
+    const val QUIT_RP_CRASHED = 6
+    /** PSN üzerinden eşleme reddedildi (CHIAKI_QUIT_REASON_PSN_REGIST_FAILED); QUIT_REFUSED yalnız TCP reddidir. */
+    const val QUIT_PSN_REGIST_FAILED = 7
+    /** PS5 akışı kendisi kapattı (CHIAKI_QUIT_REASON_STREAM_CONNECTION_REMOTE_DISCONNECTED / _REMOTE_SHUTDOWN); metin PS5'in nedeni. */
+    const val QUIT_CONSOLE_CLOSED = 8
 
     /** Yerel kütüphane yüklenebildi mi (yalnız Kotlin derlemesinde ya da desteklenmeyen işlemcide false). */
     val available: Boolean by lazy {

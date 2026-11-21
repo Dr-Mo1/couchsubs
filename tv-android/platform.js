@@ -45,12 +45,17 @@
   // Bağlantı kopukken katmanda sağ üstte küçük bir nokta; bağlıyken hiçbir şey görünmez.
   function connection(open) {
     if (!dot) return;
-    clearTimeout(dotTimer);
     if (open) {
+      clearTimeout(dotTimer);
+      dotTimer = null;
       dot.className = 'hidden';
       return;
     }
-    dotTimer = setTimeout(function () { dot.className = ''; }, DOT_AFTER_MS);
+    if (dotTimer !== null || dot.className !== 'hidden') return;
+    dotTimer = setTimeout(function () {
+      dotTimer = null;
+      dot.className = '';
+    }, DOT_AFTER_MS);
   }
 
   function setupOverlay() {
@@ -142,6 +147,15 @@
     chooseInput: function () { bridge.chooseInput(); },
 
     localAddress: function (callback) { callback(bridge.localAddress() || null); },
+
+    // Bilgi panelindeki ikinci tanı satırı: görüntü modu (uygulama içinde / katman), TvView'in durumu, cihazın üreticisi,
+    // modeli, Android ve WebView sürümü. Eski TV uygulamasının köprüsünde yoktur; o zaman yalnız WebView sürümü yazar.
+    diagnostics: function () {
+      var text = '';
+      try { text = bridge.diagnostics ? String(bridge.diagnostics() || '') : ''; } catch (e) { text = ''; }
+      var chrome = /Chrom(?:e|ium)\/([\d.]+)/.exec(window.navigator.userAgent || '');
+      return (text ? text + ' · ' : '') + 'WebView ' + (chrome ? chrome[1] : '?');
+    },
 
     exit: function () { bridge.exit(); }
   };

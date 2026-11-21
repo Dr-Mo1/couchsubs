@@ -56,7 +56,7 @@ public struct SubtitleStyle: Codable, Equatable, Sendable {
     /// yerine geçer. TV uygulaması 0.9.16 ve sonrası tanır (Windows: SubtitleStyle.StackPrevious).
     public var stackPrevious: Bool
 
-    public init(fontSize: Int = 46, bottomPercent: Int = 7, placement: SubtitlePlacement = .cover, background: Int = 72, backgroundShape: SubtitleBackgroundShape = .fit, bold: Bool = false,
+    public init(fontSize: Int = 46, bottomPercent: Int = 7, placement: SubtitlePlacement = .cover, background: Int = 90, backgroundShape: SubtitleBackgroundShape = .fit, bold: Bool = false,
                 textColor: SubtitleTextColor = .white, displayMode: TVDisplayMode = .inApp, stackPrevious: Bool = true) {
         self.fontSize = fontSize
         self.bottomPercent = bottomPercent
@@ -96,17 +96,24 @@ public struct SubtitleStyle: Codable, Equatable, Sendable {
 
 /// Sunucudan geçen ve bilgisayar ekranındaki altyazı penceresinin de gösterdiği olay.
 public enum SubtitleEvent: Equatable, Sendable {
-    /// `replaces`: satır öncekinin uzamış ya da düzelmiş okumasıdır; öncekinin üstüne yığılmaz, yerine geçer.
-    case subtitle(text: String, durationMs: Int, paragraphs: Bool, replaces: Bool = false)
+    /// `replaces`: satır öncekinin uzamış ya da düzelmiş okumasıdır; öncekinin üstüne yığılmaz, yerine geçer. `box`: oyundaki
+    /// altyazının karedeki yeri; pencere "Yazı kadar" kutuyu onu örtecek kadar büyütür (bkz. `OverlayCover`).
+    case subtitle(text: String, durationMs: Int, paragraphs: Bool, replaces: Bool = false, box: TextBox? = nil)
     case clear
-    /// "Ekranı çevir" sonuçları: grupların çevirisi, yukarıdan aşağı, her biri ayrı satırda.
-    case screen(text: String, durationMs: Int)
+    /// "Ekranı çevir" sonuçları: grupların çevirisi, yukarıdan aşağı, her biri ayrı satırda; `items` her birini yeri ve
+    /// özgün stiliyle taşır (yayın penceresi onları kendi yerinde çizer, telefon kartı dahil).
+    case screen(text: String, durationMs: Int, items: [ScreenTranslation.Item] = [])
     /// "Ekranı çevir" çevirileri kaldırıldı.
     case screenClear
     /// Ek alanın (görev, telefon, bildirim) çevirisi; `text` boşsa o alanın kutusu kalkar.
     case region(id: String, text: String, box: TextBox?)
     /// Bütün ek alan kutuları kalktı (çeviri durdu).
     case regionClear
+    /// Oyun içi telefonun renkleri ve yerleriyle gösterilen balonları. Boş liste yalnız telefonu kaldırır.
+    case gamePhone([ScreenTranslation.Item])
+    /// Kendiliğinden bulunan ekran yazısının blokları, özgün yazının yeri ve stiliyle (`TextLook`). Kutu kaldırılırken
+    /// `region` olayı boş metinle gelir.
+    case screenText(id: String, items: [ScreenTranslation.Item])
 }
 
 /// TV uygulamasının bağlandığı yerel Server-Sent Events sunucusu.
@@ -126,6 +133,25 @@ public final class SubtitleServer: @unchecked Sendable {
     private var files: [String: (data: Data, type: String)] = [:]
     private var speechPaths: [String] = []
     private var speechNumber = 0
+    private var key: String
+    private let allowLegacy: Bool
+    public let pairing: SubtitlePairing
+    public var onPairingRequest: (@Sendable (SubtitlePairing.Ticket) -> Void)?
+    private var legacySeen = false
+    public var onLegacyClient: (@Sendable () -> Void)?
+    public var accessKey: String { queue.sync { key } }
+    public var hasLegacyClient: Bool { queue.sync { legacySeen } }
+
+    public func rotateKey(_ key: String) {
+        queue.sync {
+            self.key = key
+            pairing.reset()
+            for connection in clients.values { connection.cancel() }
+            clients.removeAll()
+            viewers.removeAll()
+            notifyClientsChanged()
+        }
+    }
 
     public var onClientsChanged: ((Int) -> Void)?
 
@@ -140,19 +166,85 @@ public final class SubtitleServer: @unchecked Sendable {
     }
     private var tvEnabled = true
 
+    /// Konuşana göre renk: açıksa adlı satırları olan `subtitle` olayına `speakers` alanı ([{name, color}]) eklenir;
+    /// TV o adla başlayan satırı o renkte gösterir. Alanı tanımayan eski TV uygulaması yok sayar.
+    public var speakerColors: Bool {
+        get { queue.sync { colorsEnabled } }
+        set { queue.sync { colorsEnabled = newValue } }
+    }
+    private var colorsEnabled = false
+
+    /// Oturumun konuşan renkleri (v2; çeviri başlayınca sıfırlanır). Bilgisayar ekranındaki pencereler de buradan boyar.
+    public let speakerBook = SpeakerColorBook()
+
+    /// "Ekran yazılarını altyazıdan ayır": TV ek alan kutularını özgün renginde ve kendi yerinde, altyazı kutusundan farklı
+    /// zeminde çizer (`style` olayının `setApart` alanı; yoksa açık sayılır). Değişince `sendStyle` yeniden gönderilmeli.
+    public var setApart: Bool {
+        get { queue.sync { apart } }
+        set { queue.sync { apart = newValue } }
+    }
+    private var apart = true
+
     /// Bağlantı canlı tutma çerçevesi: yorum satırını EventSource görmez; adlı "ping" olayını TV görür ve
     /// bir süre gelmezse yarı açık kalmış bağlantıyı kapatıp yeniden bağlanır (Windows ile aynı).
     static let pingFrame = ": ping\n\nevent: ping\ndata: {}\n\n"
     private let pingInterval: TimeInterval
 
-    public init(port: UInt16 = 8787, pingInterval: TimeInterval = 15) {
+    /// Bu kurulumun kalıcı kimliği (`/hello` yanıtında). Aynı ağda iki CouchSubs varken TV uygulaması kendi bilgisayarını
+    /// ya da telefonunu adres değişse de bununla tanır; eskiden ağda ilk bulduğuna bağlanıyordu (GitHub #425).
+    public let instanceId: String
+
+    public init(port: UInt16 = 8787, pingInterval: TimeInterval = 15, key: String? = nil,
+                allowLegacy: Bool = SubtitleAccess.allowLegacyClients, instanceId: String = SubtitleServer.installationId,
+                pairing: SubtitlePairing = SubtitlePairing()) {
         requestedPort = port
+        self.pairing = pairing
         self.pingInterval = pingInterval
+        self.key = key ?? SubtitleAccess.createKey()
+        self.allowLegacy = allowLegacy
+        self.instanceId = instanceId
+    }
+
+    /// Kurulumun kimliği: ilk istekte rastgele üretilir ve ayarlarda saklanır (Mac ve iPhone).
+    public static var installationId: String {
+        let key = "couchsubs.serverId"
+        if let saved = UserDefaults.standard.string(forKey: key), !saved.isEmpty { return saved }
+        let made = UUID().uuidString.lowercased()
+        UserDefaults.standard.set(made, forKey: key)
+        return made
+    }
+
+    /// `/hello` yanıtı: uygulama, eşleştirme gerektiği (`auth`), kurulum kimliği ve bağlı TV sayısı (Windows ve Android ile
+    /// aynı biçim). Erişim anahtarını içermez. TV, ağda birden çok CouchSubs bulursa kayıtlı kimliği, yoksa TV'si bağlı
+    /// olmayanı seçer; onayladığı anahtarı da bu kimlikle eşler.
+    static func helloBody(id: String, tvs: Int) -> String {
+        let escaped = id.filter { $0.isLetter || $0.isNumber || $0 == "-" }
+        return #"{"app":"couchsubs","auth":1,"id":""# + escaped + #"","tvs":"# + String(max(0, tvs)) + "}"
     }
 
     public var connectedClients: Int {
         queue.sync { clients.count - viewers.count }
     }
+
+    private var reportedPort: Int?
+
+    /// TV uygulamasının gösterdiği HDMI girişi (1-4): altyazı akışına bağlanırken `/events?hdmi=2` ile bildirir. Bağlantı
+    /// kopsa da son bildirilen akılda kalır. Bekçi (TVKeeper) PS tuşunun TV'yi konsol girişine geçirmesini kullanıcının
+    /// başka girişe geçmesinden bununla ayırır (Windows ve Android ile aynı). Eski TV uygulaması bildirmez: nil.
+    public var consolePort: Int? { queue.sync { reportedPort } }
+
+    /// `hdmi` parametresi: 1-4 arası tek rakam, değilse nil.
+    static func hdmiPort(_ value: String?) -> Int? {
+        guard let value, value.count == 1, let port = Int(value), (1...4).contains(port) else { return nil }
+        return port
+    }
+
+    /// Dinleyici açık ve bağlantı kabul ediyor. iPhone'da uygulama arka planda askıya alınınca iOS dinleyiciyi
+    /// kapatabiliyor; eskiden bu sessiz kalıyor, sunucu "başlamış" sayıldığı için TV bir daha bağlanamıyordu.
+    public var isListening: Bool { queue.sync { listening } }
+    private var listening = false
+    /// Hazır olduktan sonra dinleyici düştü (neden); çağıran `start()` ile yeniden açabilir. Sunucunun kuyruğunda çağrılır.
+    public var onListenerFailed: (@Sendable (String) -> Void)?
 
     /// OBS'de "Tarayıcı kaynağı" olarak eklenen altyazı katmanı (`GET /obs`).
     public static let obsOverlay: Data = {
@@ -162,7 +254,27 @@ public final class SubtitleServer: @unchecked Sendable {
     }()
 
     /// Sunucuyu başlatır ve dinlenen portu döner (`port: 0` ise rastgele seçilen port).
+    ///
+    /// Sabit portta "Address already in use" gelirse kısa aralıklarla yeniden denenir: az önce kapatılan dinleyici portu
+    /// birkaç milisaniye sonra bırakır. Eskiden `stop()` ardından `start()` hep bu hatayı veriyor, çağıran rastgele bir
+    /// porta düşüyordu; ağı yalnız 8787'de tarayan TV uygulaması (Android TV) telefonu bir daha bulamıyordu.
     public func start() async throws -> UInt16 {
+        var attempt = 0
+        while true {
+            do {
+                return try await startOnce()
+            } catch PortBusy.busy(let reason) {
+                attempt += 1
+                guard requestedPort != 0, attempt < Self.busyRetries else { throw ServerError.failedToStart(reason) }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+        }
+    }
+
+    private enum PortBusy: Error { case busy(String) }
+    static let busyRetries = 10
+
+    private func startOnce() async throws -> UInt16 {
         let port: NWEndpoint.Port = requestedPort == 0 ? .any : NWEndpoint.Port(rawValue: requestedPort)!
         // Sessizce kaybolan TV'ler (fişten çekme, Wi-Fi kopması) TCP canlılık denetimiyle fark edilir.
         let tcp = NWProtocolTCP.Options()
@@ -180,17 +292,34 @@ public final class SubtitleServer: @unchecked Sendable {
             // Durum değişiklikleri seri kuyrukta gelir; devamı yalnız bir kez çağırmak için saklanır.
             startContinuation = continuation
             listener.stateUpdateHandler = { [weak self] state in
-                guard let self, let continuation = self.startContinuation else { return }
+                guard let self else { return }
+                guard let continuation = self.startContinuation else {
+                    // Açıldıktan sonra düşen dinleyici (stop() ile kapatılan .cancelled olur, o sayılmaz).
+                    if case .failed(let error) = state, self.listener === listener {
+                        self.listening = false
+                        self.pingTimer?.cancel()
+                        self.pingTimer = nil
+                        listener.cancel()
+                        self.onListenerFailed?(error.localizedDescription)
+                    }
+                    return
+                }
                 switch state {
                 case .ready:
                     self.startContinuation = nil
+                    self.listening = true
+                    self.pingTimer?.cancel()
                     self.startPing()
                     continuation.resume(returning: listener.port?.rawValue ?? 0)
                 case .failed(let error), .waiting(let error):
                     // .waiting: port ya da ağ şu an kullanılamıyor; beklemek yerine hata ver ki çağıran başka port denesin.
                     self.startContinuation = nil
                     listener.cancel()
-                    continuation.resume(throwing: ServerError.failedToStart(error.localizedDescription))
+                    if case .posix(.EADDRINUSE) = error {
+                        continuation.resume(throwing: PortBusy.busy(error.localizedDescription))
+                    } else {
+                        continuation.resume(throwing: ServerError.failedToStart(error.localizedDescription))
+                    }
                 default:
                     break
                 }
@@ -201,8 +330,13 @@ public final class SubtitleServer: @unchecked Sendable {
 
     private var startContinuation: CheckedContinuation<UInt16, Error>?
 
-    public func stop() {
+    /// `keepPairing`: sunucu hemen yeniden açılacaksa (dinleyici düştü, port geri alınıyor) eşleştirme durumu korunur.
+    /// Eskiden her kapanış onay bekleyen isteği ve "TV eşleştir" süresini siliyordu: TV'de kod beklerken sunucu yeniden
+    /// açılınca TV "Eşleştirme tamamlanmadı" diyor, telefondaki pencere artık geçersiz isteği gösteriyordu.
+    public func stop(keepPairing: Bool = false) {
+        if !keepPairing { pairing.setSession(false) }
         queue.sync {
+            listening = false
             pingTimer?.cancel()
             pingTimer = nil
             listener?.cancel()
@@ -216,19 +350,55 @@ public final class SubtitleServer: @unchecked Sendable {
     /// `box`: oyundaki İngilizce altyazının ekrandaki yeri (kenarlara oranla); TV çeviriyi buna göre yerleştirir.
     /// `replaces`: çeviri, az önce gösterilen satırın uzamış ya da düzelmiş bir okumasından gelir (`TextMatch.isRevision`);
     /// TV onu öncekinin üstüne yığmaz, yerine koyar (`replace` alanı; eski TV uygulamaları yok sayar).
+    /// `paragraphs`: çok parçalı yazı (görev paneli: başlık, maddeler); TV satır satır, sola yaslı gösterir (Windows ile aynı).
     public func sendSubtitle(_ text: String, durationMs: Int = 15000, box: TextBox? = nil, replaces: Bool = false) {
+        sendSubtitle(text, durationMs: durationMs, box: box, replaces: replaces, paragraphs: false)
+    }
+
+    public func sendSubtitle(_ text: String, durationMs: Int, box: TextBox?, replaces: Bool = false, paragraphs: Bool) {
         let at = Int(Date().timeIntervalSince1970 * 1000)
         var json: [String: Any] = ["text": text, "duration": durationMs, "at": at]
         if let box { json["box"] = Self.json(box) }
+        if paragraphs { json["paragraphs"] = true }
         if replaces { json["replace"] = true }
+        if speakerColors {
+            let speakers = SpeakerColors.speakers(in: text, book: speakerBook)
+            if !speakers.isEmpty { json["speakers"] = speakers.map { ["name": $0.name, "color": $0.color] } }
+        }
         broadcast(event: "subtitle", json: json)
-        onEvent?(.subtitle(text: text, durationMs: durationMs, paragraphs: false, replaces: replaces))
+        onEvent?(.subtitle(text: text, durationMs: durationMs, paragraphs: paragraphs, replaces: replaces, box: box))
     }
 
     /// Dört basamağa yuvarlanır; Decimal, JSON'da 0.80000000000000004 yerine 0.8 yazılsın diye.
     static func json(_ box: TextBox) -> [String: Decimal] {
         let round = { (value: Double) in Decimal(Int((max(0, min(1, value)) * 10000).rounded())) / 10000 }
         return ["left": round(box.left), "top": round(box.top), "right": round(box.right), "bottom": round(box.bottom)]
+    }
+
+    /// Yeriyle bir çeviri ("Ekranı çevir" öğesi ya da ek alan bloğu).
+    static func json(_ item: ScreenTranslation.Item, phone: Bool = false) -> [String: Any] {
+        let line = Decimal(Int((max(0, min(1, item.lineHeight)) * 10000).rounded())) / 10000
+        var result: [String: Any] = ["box": Self.json(item.box), "line": line, "text": item.translation]
+        if item.paragraphs { result["paragraphs"] = true }
+        if phone || item.look != nil, let style = item.style, isRGB(style.background), isRGB(style.foreground) {
+            var surface: [String: Any] = ["background": style.background, "foreground": style.foreground]
+            if let look = item.look { surface["flat"] = look.flat }
+            result["surface"] = surface
+        }
+        // Otomatik ekran yazısı: özgün yazının görünüşü (eski TV yok sayar).
+        if let look = item.look {
+            result["style"] = ["align": look.align.rawValue, "bold": look.bold, "condensed": look.condensed, "upper": look.upper]
+        }
+        if let icons = item.icons, !icons.isEmpty { result["icons"] = Self.json(icons) }
+        return result
+    }
+
+    private static func isRGB(_ color: String) -> Bool {
+        color.utf8.count == 7 && color.first == "#" && color.dropFirst().allSatisfy { $0.isASCII && $0.isHexDigit }
+    }
+
+    static func json(_ icons: [IconPlacement]) -> [[String: Any]] {
+        icons.map { icon -> [String: Any] in ["at": icon.at, "src": icon.image] }
     }
 
     public func clear() {
@@ -258,29 +428,70 @@ public final class SubtitleServer: @unchecked Sendable {
     }
 
     /// "Ekranı çevir" sonuçları: `screen` olayı her çeviriyi yazının yeri (`box`), tipik satır yüksekliği (`line`,
-    /// ekrana oranla) ve çok parçalıysa `paragraphs` ile taşır. TV öncekinin yerine bunları koyar.
+    /// ekrana oranla) ve çok parçalıysa `paragraphs` ile taşır. TV öncekinin yerine bunları koyar. Çevirinin içinde
+    /// kumanda simgeleri varsa `icons` her simgenin düz metindeki yerini (`at`) ve PNG'sini (`src`) taşır; eski TV
+    /// uygulamaları alanı yok sayıp düz metni gösterir (Windows ile aynı).
     public func sendScreen(_ items: [ScreenTranslation.Item], durationMs: Int) {
-        let round = { (value: Double) in Decimal(Int((max(0, min(1, value)) * 10000).rounded())) / 10000 }
-        let list: [[String: Any]] = items.map { item in
-            var json: [String: Any] = ["box": Self.json(item.box), "line": round(item.lineHeight), "text": item.translation]
-            if item.paragraphs { json["paragraphs"] = true }
-            return json
-        }
-        broadcast(event: "screen", json: ["duration": durationMs, "items": list])
+        let items = items.filter { Self.area($0.box) <= Self.maxBoxArea }
+        broadcast(event: "screen", json: ["duration": durationMs, "items": items.map { Self.json($0) }])
         // Altyazı yalnız bilgisayardaysa (TV yok) çeviriler başka hiçbir yere gitmiyordu: tuşa basınca yalnız
         // "Ekran çevriliyor…" görünüyordu.
-        onEvent?(.screen(text: items.map(\.translation).joined(separator: "\n"), durationMs: durationMs))
+        // Telefon kartının zemini (`ScreenPhoneCard.backdropText`) düz metne girmez.
+        let text = items.filter { !ScreenPhoneCard.isBackdrop($0) }.map(\.translation).joined(separator: "\n")
+        onEvent?(.screen(text: text, durationMs: durationMs, items: items))
     }
 
     /// Ek alanın çevirisi: `region` olayı alanın kimliğini (`id`), çeviriyi (`text`; boşsa kutu kalkar), yazının karedeki
     /// yerini (`box`) ve satır yüksekliğini (`line`, ekrana oranla) taşır. TV çeviriyi o yerde küçük bir kutuda gösterir;
     /// ana altyazıya dokunmaz. Olayı tanımayan eski TV uygulamaları yok sayar.
     public func sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double? = nil) {
+        sendRegion(id: id, text: text, box: box, lineHeight: lineHeight, icons: nil)
+    }
+
+    /// `icons`: çevirinin içindeki kumanda simgeleri; `icons` alanı her simgenin düz metindeki yerini (`at`) ve PNG'sini
+    /// (`src`) taşır. Eski TV uygulamaları alanı yok sayıp düz metni gösterir.
+    public func sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?, icons: [IconPlacement]?) {
+        sendRegion(id: id, text: text, box: box, lineHeight: lineHeight, icons: icons, blocks: nil)
+    }
+
+    /// `blocks`: alanda ayrı duran yazı gruplarının çevirileri kendi yerleriyle (`blocks`; her biri `screen` olayındaki
+    /// öğe gibi `box`, `line`, `text`). TV her birini kendi İngilizce yazısının üstüne koyar. Alanı tanımayan eski TV
+    /// uygulamaları birleşik `text`'i tek kutuda gösterir (Windows ile aynı).
+    public func sendRegion(id: String, text: String, box: TextBox?, lineHeight: Double?, icons: [IconPlacement]?,
+                           blocks: [ScreenTranslation.Item]?) {
+        let (text, blocks) = Self.guarded(text: text, box: box, blocks: blocks)
         var json: [String: Any] = ["id": id, "text": text]
+        if let icons, !icons.isEmpty { json["icons"] = Self.json(icons) }
+        if let blocks, !blocks.isEmpty, !text.isEmpty { json["blocks"] = blocks.map { Self.json($0, phone: id == "game-phone") } }
         if let box { json["box"] = Self.json(box) }
         if let lineHeight { json["line"] = Decimal(Int((max(0, min(1, lineHeight)) * 10000).rounded())) / 10000 }
         broadcast(event: "region", json: json)
-        onEvent?(.region(id: id, text: text, box: box))
+        if id == "game-phone" { onEvent?(.gamePhone(text.isEmpty ? [] : blocks ?? [])) }
+        else if let blocks, !blocks.isEmpty, !text.isEmpty, blocks.contains(where: { $0.look != nil }) {
+            onEvent?(.screenText(id: id, items: blocks))
+        } else { onEvent?(.region(id: id, text: text, box: box)) }
+    }
+
+    /// Ekranın bu oranından büyük çeviri kutusu gönderilmez. TV ve OBS kutuyu opak zeminle çizer; yanlış bir algılamanın
+    /// (oyun telefonu, otomatik ekran yazısı) ekranın büyük kısmını kaplayan kutusu oyun görüntüsünü kapatıyordu
+    /// (LG'de "siyah ekran, ses var"). Windows: SubtitleServer.MaxBoxArea, Android: SubtitleServer.MAX_BOX_AREA.
+    public static let maxBoxArea = 0.4
+
+    static func area(_ box: TextBox) -> Double { max(0, box.right - box.left) * max(0, box.bottom - box.top) }
+
+    /// Büyük kutu koruması: alanı `maxBoxArea`'dan büyük bloklar atılır; blokların toplamı da sınırı aşıyorsa ya da
+    /// bloksuz alanın kutusu sınırdan büyükse alan boş gönderilir (TV kutuyu kaldırır).
+    static func guarded(text: String, box: TextBox?, blocks: [ScreenTranslation.Item]?) -> (String, [ScreenTranslation.Item]?) {
+        guard !text.isEmpty else { return (text, blocks) }
+        var blocks = blocks
+        if let all = blocks, !all.isEmpty {
+            let kept = all.filter { area($0.box) <= maxBoxArea }
+            if kept.reduce(0, { $0 + area($1.box) }) > maxBoxArea { return ("", nil) }
+            if !kept.isEmpty { return (text, kept) }
+            blocks = nil
+        }
+        if let box, area(box) > maxBoxArea { return ("", nil) }
+        return (text, blocks)
     }
 
     /// Bütün ek alan kutularını kaldırır.
@@ -320,12 +531,18 @@ public final class SubtitleServer: @unchecked Sendable {
 
     public func sendStyle(_ style: SubtitleStyle) {
         queue.async { self.lastStyle = style }
-        broadcast(event: "style", json: style.json)
+        var json = style.json
+        json["setApart"] = setApart
+        broadcast(event: "style", json: json)
     }
 
     // MARK: - Bağlantılar
 
     private func accept(_ connection: NWConnection) {
+        guard case let .hostPort(host, _) = connection.endpoint, SubtitleAccess.isLocalPeer("\(host)") else {
+            connection.cancel()
+            return
+        }
         connection.start(queue: queue)
         readRequest(connection, buffer: Data())
     }
@@ -337,7 +554,7 @@ public final class SubtitleServer: @unchecked Sendable {
             if let data { buffer.append(data) }
             if let end = buffer.range(of: Data("\r\n\r\n".utf8)) {
                 let head = String(decoding: buffer[..<end.lowerBound], as: UTF8.self)
-                self.route(connection, requestLine: head.components(separatedBy: "\r\n").first ?? "")
+                self.route(connection, requestLine: head)
             } else if isComplete || error != nil || buffer.count > 65536 {
                 connection.cancel()
             } else {
@@ -347,47 +564,95 @@ public final class SubtitleServer: @unchecked Sendable {
     }
 
     private func route(_ connection: NWConnection, requestLine: String) {
-        let parts = requestLine.split(separator: " ")
-        let target = parts.count > 1 ? String(parts[1]) : ""
-        let path = target.components(separatedBy: "?")[0]
-        let method = parts.first.map(String.init) ?? ""
+        guard let request = SubtitleAccess.parse(requestLine) else {
+            respondAndClose(connection, status: "400 Bad Request")
+            return
+        }
+        let access = SubtitleAccess.authorize(request, key: key, allowLegacy: allowLegacy)
+        let cors = SubtitleAccess.cors(request)
+        guard access.status == 200 else {
+            respondAndClose(connection, status: access.status == 403 ? "403 Forbidden" : "401 Unauthorized", cors: access.status == 403 ? "" : cors)
+            return
+        }
+        let path = request.path
+        let method = request.method
 
+        if path == "/pair" {
+            if method == "POST" {
+                guard let ticket = pairing.begin() else { respondAndClose(connection, status: "409 Conflict", cors: cors); return }
+                if let handler = onPairingRequest { DispatchQueue.main.async { handler(ticket) } }
+                let data = try! JSONSerialization.data(withJSONObject: ["id": ticket.id, "code": ticket.code])
+                respondAndClose(connection, status: "200 OK", data: data, type: "application/json", cors: cors)
+            } else if method == "GET" {
+                let state: String
+                if request.parameter("validate") == "1" {
+                    let supplied = request.parameter("k") ?? ""
+                    let check = SubtitleAccess.Request(method: "GET", target: "/events?k=\(supplied.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")", origin: request.origin, host: request.host)
+                    state = SubtitleAccess.authorize(check, key: key, allowLegacy: false).status == 200 ? "valid" : "expired"
+                } else { state = pairing.poll(request.parameter("id") ?? "") }
+                var result: [String: Any] = ["state": state]
+                if state == "approved" { result["key"] = key }
+                // Eski TV uygulamaları `rejected`'ı tanımaz: `expired` görüp durur. Yenisi `rejected` ile Tamam bekler, yalnız
+                // `expired`'da kendisi yeniden ister (GitHub #737).
+                if state == "rejected" { result = ["state": "expired", "rejected": true] }
+                respondAndClose(connection, status: "200 OK", data: try! JSONSerialization.data(withJSONObject: result), type: "application/json", cors: cors)
+            } else { respondAndClose(connection, status: "405 Method Not Allowed", cors: cors) }
+            return
+        }
         if method == "OPTIONS" {
-            respondAndClose(connection, status: "204 No Content")
+            // Chromium'un yerel ağ erişimi denetimi (Private Network Access) ön istekte bu başlıkları ister; yeni
+            // tarayıcılı TV'ler (Tizen 9.0 ve sonrası) başlık olmadan bilgisayara bağlanmayabilir. Eski TV'ler yok sayar.
+            respondAndClose(connection, status: "204 No Content", data: Data(), type: nil, cors: cors + Self.preflightHeaders)
         } else if method == "GET" && path == "/events" {
-            openStream(connection, viewer: target.contains("viewer=obs"))
+            // OBS katmanı ve ikinci ekran sayfası izleyicidir: TV sayılmaz, altyazı hedefi TV değilken de olayları alır.
+            let obs = request.parameter("viewer") == "obs" || request.parameter("viewer") == SecondScreen.viewer
+            // Anahtarsız OBS sayfası eski bir OBS adresidir; TV uygulamasının eski olduğu anlamına gelmez.
+            if access.legacy && !obs && !legacySeen {
+                legacySeen = true
+                if let handler = onLegacyClient { DispatchQueue.main.async { handler() } }
+            }
+            if !obs, let port = Self.hdmiPort(request.parameter("hdmi")) { reportedPort = port }
+            openStream(connection, viewer: obs, cors: cors)
         } else if method == "GET" && path == "/obs" {
-            respondAndClose(connection, status: "200 OK", data: Self.obsOverlay, type: "text/html; charset=utf-8")
+            respondAndClose(connection, status: "200 OK", data: Self.obsOverlay, type: "text/html; charset=utf-8", cors: cors)
+        } else if method == "GET" && path == SecondScreen.path {
+            // Anahtar `authorize`'da denetlendi (anahtarsız istek 401 aldı).
+            respondAndClose(connection, status: "200 OK", data: SecondScreen.page, type: "text/html; charset=utf-8", cors: cors)
         } else if method == "GET" && path == "/hello" {
-            // TV uygulaması ağdaki bilgisayarı bu yanıtla tanır.
-            respondAndClose(connection, status: "200 OK", body: #"{"app":"couchsubs"}"#)
+            // TV uygulaması ağdaki bilgisayarı bu yanıtla tanır (bağlantı kuyruğunda: sayaçlar doğrudan okunur).
+            respondAndClose(connection, status: "200 OK", body: Self.helloBody(id: instanceId, tvs: clients.count - viewers.count), cors: cors)
         } else if method == "GET", let file = files[path] {
-            respondAndClose(connection, status: "200 OK", data: file.data, type: file.type)
+            respondAndClose(connection, status: "200 OK", data: file.data, type: file.type, cors: cors)
         } else {
-            respondAndClose(connection, status: "404 Not Found")
+            respondAndClose(connection, status: "404 Not Found", cors: cors)
         }
     }
 
-    private func respondAndClose(_ connection: NWConnection, status: String, body: String = "") {
-        respondAndClose(connection, status: status, data: Data(body.utf8), type: nil)
+    private func respondAndClose(_ connection: NWConnection, status: String, body: String = "", cors: String = "") {
+        respondAndClose(connection, status: status, data: Data(body.utf8), type: nil, cors: cors)
     }
 
-    private func respondAndClose(_ connection: NWConnection, status: String, data: Data, type: String?) {
-        var head = "HTTP/1.1 \(status)\r\nAccess-Control-Allow-Origin: *\r\n"
-        if let type { head += "Content-Type: \(type)\r\nCache-Control: no-cache\r\n" }
+    static let preflightHeaders = "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: *\r\n"
+        + "Access-Control-Allow-Private-Network: true\r\nAccess-Control-Max-Age: 600\r\n"
+
+    private func respondAndClose(_ connection: NWConnection, status: String, data: Data, type: String?, cors: String = "") {
+        var head = "HTTP/1.1 \(status)\r\n\(cors)Cache-Control: no-store\r\nReferrer-Policy: no-referrer\r\n"
+        if let type { head += "Content-Type: \(type)\r\n" }
         head += "Content-Length: \(data.count)\r\nConnection: close\r\n\r\n"
         connection.send(content: Data(head.utf8) + data, completion: .contentProcessed { _ in connection.cancel() })
     }
 
-    private func openStream(_ connection: NWConnection, viewer: Bool = false) {
+    private func openStream(_ connection: NWConnection, viewer: Bool = false, cors: String = "") {
         var head = "HTTP/1.1 200 OK\r\n"
         head += "Content-Type: text/event-stream; charset=utf-8\r\n"
         head += "Cache-Control: no-cache\r\n"
         head += "Connection: keep-alive\r\n"
-        head += "Access-Control-Allow-Origin: *\r\n\r\n"
+        head += cors + "\r\n"
         head += "retry: 2000\n\n"
         if let style = lastStyle {
-            head += Self.frame(event: "style", json: style.json)
+            var json = style.json
+            json["setApart"] = apart
+            head += Self.frame(event: "style", json: json)
         }
         connection.send(content: Data(head.utf8), completion: .contentProcessed { _ in })
 

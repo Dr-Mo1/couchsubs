@@ -7,7 +7,15 @@ import Sparkle
 #endif
 import SwiftUI
 
+/// Uygulama `--ocr-helper` ile açıldıysa pencere açmaz: yedek okuyucu olarak çalışır (`OcrHelper`, #679).
 @main
+enum Launcher {
+    static func main() {
+        if CommandLine.arguments.contains(OcrHelper.argument) { OcrHelper.runAsHelper() }
+        CouchSubsApp.main()
+    }
+}
+
 struct CouchSubsApp: App {
     @StateObject private var model = Self.makeModel()
     /// Bilgisayar ekranındaki altyazı penceresi.
@@ -34,6 +42,7 @@ struct CouchSubsApp: App {
                 .task {
                     overlay.attach(model)
                     stream.attach(model)
+                    CrashNotice.shared.checkOnce()
                     #if !APP_STORE
                     guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
                     updater.updater.checkForUpdatesInBackground()
@@ -64,7 +73,7 @@ struct CouchSubsApp: App {
                      isInserted: Binding(get: { model.step == .done && model.settings.output.showsOnComputer }, set: { _ in })) {
             Toggle("Clicks pass through", isOn: Binding(get: { model.settings.overlayClickThrough },
                                                         set: { model.settings.overlayClickThrough = $0 }))
-            Button("Adjust the subtitle window") { model.overlayAdjusting = true }
+            Button("Position the subtitles") { model.overlayAdjusting = true }
             Divider()
             Button("Open CouchSubs") {
                 if #available(macOS 14, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }

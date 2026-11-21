@@ -45,6 +45,14 @@ public class AiTranslatorTests
         Assert.Equal(2, fake.Requests.Count);
     }
 
+    /// <summary>#827: menü ve görev etiketleri kısa, tekil emir kipinde çevrilir ("Para Kazan"; "Para Kazanın" değil).</summary>
+    [Fact]
+    public void SystemPromptAsksForSingularImperativeLabels()
+    {
+        Assert.Contains("singular informal imperatives", AiRequest.SystemPrompt);
+        Assert.Contains("\"Para Kazan\"", AiRequest.SystemPrompt);
+    }
+
     [Fact]
     public async Task GameCacheAlsoSeparatesSentencePieces()
     {
@@ -1193,8 +1201,13 @@ public class AiTranslatorTests
         // Zaman aşımı: hizmete ulaşıldı ama yanıt zamanında gelmedi; "internet bağlantınızı denetleyin" denmez.
         var fake = new FakeAi((_, _) => throw new TaskCanceledException("timeout"));
         var translator = Make(AiProvider.Claude, fake);
-        Assert.Equal("yerel: Run!", await translator.TranslateAsync("Run!"));
+        var probe = new TranslationProbe();
+        TranslationProbe.Current = probe;
+        try { Assert.Equal("yerel: Run!", await translator.TranslateAsync("Run!")); }
+        finally { TranslationProbe.Current = null; }
         Assert.Equal(OnlineKeyState.Busy, translator.LastError);
+        // Günlükte ücretsiz yedeğe düşmenin nedeni görünür (Mac ile aynı).
+        Assert.Contains("ücretsiz yedek: claude hizmet durumu: Busy", probe.Outcome());
 
         // Bağlantı kurulamadıysa (DNS, ağ yok) gerçekten ulaşılamamıştır.
         var offline = Make(AiProvider.Claude, new FakeAi((_, _) => throw new HttpRequestException("No such host is known.")));
@@ -1224,6 +1237,23 @@ public class AiTranslatorTests
         var old = AiModel.Parse("""{"gemini":[{"id":"g","label":"L"}]}""")["gemini"][0];
         Assert.Equal(new AiModel("g", "L"), old);
         Assert.False(old.FreeTier);
+    }
+
+    [Fact]
+    public void GeminiPaidKeysSkipTheFreeTierBudgetAndFreeKeysStayIsolated()
+    {
+        var model = AiProvider.Gemini.DefaultModel();
+        var free = RequestBudget.Shared(AiProvider.Gemini, model, apiKey: "free-key-one");
+        Assert.NotNull(free);
+        Assert.Same(free, RequestBudget.Shared(AiProvider.Gemini, model, apiKey: "free-key-one"));
+        Assert.NotSame(free, RequestBudget.Shared(AiProvider.Gemini, model, apiKey: "free-key-two"));
+        var paid = RequestBudget.Shared(AiProvider.Gemini, model, apiKey: "paid-key", paidTier: true);
+        Assert.NotNull(paid);
+        Assert.NotSame(paid, RequestBudget.Shared(AiProvider.Gemini, model, apiKey: "paid-key"));
+        Assert.Equal(int.MaxValue, paid.PerMinute);
+        paid.Lower(7); // the provider's real 429 limit still applies
+        Assert.Equal(7, paid.PerMinute);
+        Assert.Same(paid, RequestBudget.Shared(AiProvider.Gemini, model, apiKey: "paid-key", paidTier: true));
     }
 
     /// <summary>Kayan bir dakikalık pencere: hak bitince istek verilmez, en eski istek pencereden çıkınca yeniden verilir.</summary>

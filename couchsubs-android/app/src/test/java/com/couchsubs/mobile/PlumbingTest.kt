@@ -17,6 +17,8 @@ import com.couchsubs.mobile.translation.DeepLTranslator
 import com.couchsubs.mobile.translation.Http
 import com.couchsubs.mobile.translation.OnlineKeyState
 import com.couchsubs.mobile.translation.RequestBudget
+import com.couchsubs.mobile.translation.SentenceTranslator
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -46,7 +48,25 @@ class RemotePlayLogicTest {
         assertEquals(RegistrationFailure.WRONG_CODE, Registration.failureFrom(0x80108b09.toInt(), emptyList()))
         assertEquals(RegistrationFailure.NO_ANSWER, Registration.failureFrom(null, listOf("Regist search failed")))
         assertEquals(RegistrationFailure.FAILED, Registration.failureFrom(null, emptyList()))
+        // GitHub #590: PS5 aramaya yanıt verip bağlantı açılamadığında ya da aramayı reddettiğinde "yanıt vermedi" denmez.
+        assertEquals(RegistrationFailure.CONNECT_FAILED,
+            Registration.failureFrom(null, listOf("Regist connect failed: Network error", "Regist eventually failed to connect for request")))
+        assertEquals(RegistrationFailure.PAIRING_CLOSED,
+            Registration.failureFrom(null, listOf("Regist failed to receive search response: Connection refused", "Regist search failed")))
+        assertEquals(RegistrationFailure.NO_FREE_PORT,
+            Registration.failureFrom(null, listOf("Regist connect failed: Network error (Cannot assign requested address), attempt 3 of 3",
+                "Regist eventually failed to connect for request")))
         assertEquals("0x80108b09 (Regist failed)", Registration.detailFrom(listOf("x", "Reported Application Reason: 0x80108b09 (Regist failed)")))
+    }
+
+    @Test
+    fun onlyAnUnansweredSearchIsRetried() {
+        assertTrue(Registration.shouldRetry(RegistrationFailure.NO_ANSWER, 1))
+        assertFalse(Registration.shouldRetry(RegistrationFailure.NO_ANSWER, 3))
+        for (failure in listOf(RegistrationFailure.PAIRING_CLOSED, RegistrationFailure.CONNECT_FAILED, RegistrationFailure.NO_FREE_PORT,
+                RegistrationFailure.WRONG_CODE, RegistrationFailure.NO_REPLY)) {
+            assertFalse(failure.name, Registration.shouldRetry(failure, 1))
+        }
     }
 
     @Test
@@ -135,8 +155,16 @@ class OnlineTranslationTest {
     @Test
     fun failureFallsBackToTheLocalEngine() {
         val translator = DeepLTranslator("bad", { "yerel: $it" }, FakeHttp(403, ""))
-        assertEquals("yerel: Run!", translator.translate("Run!"))
+        val logged = mutableListOf<String>()
+        SentenceTranslator.fallbackLog = { logged += it }
+        try {
+            assertEquals("yerel: Run!", translator.translate("Run!"))
+        } finally {
+            SentenceTranslator.fallbackLog = null
+        }
         assertEquals(OnlineKeyState.INVALID, translator.lastError)
+        // Günlükte ücretsiz çeviriye düşmenin nedeni görünür (Mac ve Windows ile aynı); anahtar yazılmaz.
+        assertEquals(listOf("çeviri: ücretsiz yedek: deepl hizmet durumu: INVALID"), logged)
     }
 
     @Test
@@ -183,7 +211,7 @@ class OnlineTranslationTest {
             return when (provider) {
                 AiProvider.GEMINI -> json.getJSONObject("systemInstruction").getJSONArray("parts").getJSONObject(0).getString("text")
                 AiProvider.CLAUDE -> json.getString("system")
-                AiProvider.OPENAI -> json.getJSONArray("messages").getJSONObject(0).getString("content")
+                AiProvider.OPENAI, AiProvider.LOCAL -> json.getJSONArray("messages").getJSONObject(0).getString("content")
             }
         }
         for (provider in AiProvider.entries) {
@@ -333,6 +361,26 @@ class OnlineTranslationTest {
         assertEquals("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent", url)
         assertEquals("LOW", JSONObject(body!!).getJSONObject("generationConfig").getJSONObject("thinkingConfig").getString("thinkingLevel"))
     }
+
+    /**
+     * Ayarlar'daki model seçimi OpenAI ve Claude'da da var (Mac ve Windows ile aynı liste): her hizmette en az iki model,
+     * kayıt yoksa ya da listede yoksa ilki (varsayılan), seçilen model kimliğiyle bulunur.
+     */
+    @Test
+    fun openAiAndClaudeModelsAreSelectableLikeOnTheDesktop() {
+        val file = File(System.getProperty("couchsubs.packs") ?: return, "../ai-models.json")
+        val all = AiModel.parse(file.readText())
+        // Yerel modelin listesi yok: model adı yazılır.
+        for (provider in AiProvider.entries.filter { it != AiProvider.LOCAL }) {
+            val models = all.getValue(provider.id)
+            assertTrue(provider.id, models.size >= 2)
+            assertEquals(models.first().id, AiModel.selected(models, null)?.id)
+            assertEquals(models.first().id, AiModel.selected(models, "eski-model")?.id)
+            assertEquals(models.last().id, AiModel.selected(models, models.last().id)?.id)
+        }
+        assertEquals("gpt-6-luna", AiModel.selected(all.getValue("openai"), null)?.id)
+        assertEquals("claude-haiku-5-5", AiModel.selected(all.getValue("claude"), null)?.id)
+    }
 }
 
 class LinePoolTest {
@@ -350,7 +398,7 @@ class LinePoolTest {
         val file = File(Files.createTempDirectory("pool").toFile(), "pool.json")
         val bodies = mutableListOf<String>()
         var status = 503
-        val post = { _: URL, body: String -> bodies.add(body); status to null }
+        val post = { _: URL, body: String -> bodies.add(body); Triple(status, null, "") }
         val pool = LinePool(file, "test", post = post, clock = { 1_700_000_000_000 })
         pool.offer("Get in the car, Enzo.")
         pool.offer("Get in the car, Enzo.")
@@ -378,7 +426,7 @@ class LinePoolTest {
         val file = File(Files.createTempDirectory("pool").toFile(), "pool.json")
         val bodies = mutableListOf<String>()
         var status = 503
-        val post = { _: URL, body: String -> bodies.add(body); status to null }
+        val post = { _: URL, body: String -> bodies.add(body); Triple(status, null, "") }
         val pool = LinePool(file, "test", post = post, clock = { 1_700_000_000_000 })
         pool.offer("Who is that over there?")
         pool.setGame(RunningGame.create("ppsa12345", "  Grand Theft Auto VI\n"))
@@ -396,6 +444,61 @@ class LinePoolTest {
         assertEquals("PPSA12345", lines.getJSONObject(1).getString("titleId"))
         assertEquals("Grand Theft Auto VI", lines.getJSONObject(1).getString("game"))
         assertFalse(lines.getJSONObject(2).has("game"))
+    }
+
+    private fun saturatedReply(vararg keys: String) =
+        JSONObject().put("accepted", 1).put("recorded", 0).put("saturated", JSONArray(keys.toList())).toString()
+
+    @Test
+    fun saturatedKeysAreRememberedAndNotSentAgain() {
+        val file = File(Files.createTempDirectory("pool").toFile(), "pool.json")
+        val key = PackKey.key("Get in the car, Enzo.")!!
+        val post = { _: URL, _: String -> Triple(200, null, saturatedReply(key.uppercase())) }
+        val pool = LinePool(file, "test", post = post, clock = { 1_700_000_000_000 })
+        pool.offer("Get in the car, Enzo.")
+        pool.offer("Who is that man?")
+        pool.flush()
+        // Doymuş satır bir daha kuyruğa girmez; öteki de gönderildi sayılır.
+        pool.offer("Get in the car, Enzo.")
+        pool.offer("Who is that man?")
+        assertEquals(0, pool.queued.size)
+        // Yeniden başlatınca da hatırlanır.
+        val reopened = LinePool(file, "test", post = post, clock = { 1_700_000_000_000 })
+        reopened.offer("Get in the car, Enzo.")
+        assertEquals(0, reopened.queued.size)
+    }
+
+    @Test
+    fun saturatedKeysDropTheSameLinesStillWaitingInTheQueue() {
+        // 201 satır: ilk parça (200) gider; sunucu ikinci parçadaki satırı doymuş bildirirse o satır atılır.
+        val lines = (0 until 201).map { "Get in the car number $it, Lucia." }
+        var posts = 0
+        val post = { _: URL, _: String -> posts++; Triple(200, null, saturatedReply(PackKey.key(lines[200])!!)) }
+        val pool = LinePool(File(Files.createTempDirectory("pool").toFile(), "pool.json"), "test", post = post, clock = { 1_700_000_000_000 })
+        for (line in lines) pool.offer(line)
+        pool.flush()
+        assertEquals(1, posts)
+        assertEquals(0, pool.queued.size)
+    }
+
+    @Test
+    fun malformedSaturatedListIsIgnored() {
+        assertEquals(emptyList<String>(), LinePool.saturatedKeys("not json"))
+        assertEquals(emptyList<String>(), LinePool.saturatedKeys("{\"saturated\": 3}"))
+        assertEquals(emptyList<String>(), LinePool.saturatedKeys("{\"saturated\":[\"zz\",\"123\",5]}"))
+        assertEquals(listOf("abcdef0123456789"), LinePool.saturatedKeys("{\"saturated\":[\"zz\",\"ABCDEF0123456789\"]}"))
+    }
+
+    @Test
+    fun rejectedBatchIsRememberedSoItIsNotSentAgain() {
+        var posts = 0
+        val post = { _: URL, _: String -> posts++; Triple(400, null, "") }
+        val pool = LinePool(File(Files.createTempDirectory("pool").toFile(), "pool.json"), "test", post = post, clock = { 1_700_000_000_000 })
+        pool.offer("Get in the car, Enzo.")
+        pool.flush()
+        pool.offer("Get in the car, Enzo.")
+        assertEquals(0, pool.queued.size)
+        assertEquals(1, posts)
     }
 
     @Test

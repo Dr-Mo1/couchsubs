@@ -61,7 +61,10 @@ class SamsungInstaller(
         /** Bu sürüme kadar (dahil) TV, kurulumdan önce dağıtıcının cihaz profilini (device-profile.xml) ister. */
         const val DEVICE_PROFILE_UP_TO = "4.0"
 
-        fun isTooOld(platform: String) = platform.isNotEmpty() && SamsungDiagnostics.isNewer(MINIMUM_TIZEN, platform)
+        /** `0 was_execute` yanıtı uygulamanın açıldığını söylüyor mu ("app_id[…] launched"; Windows/Mac/iPhone ile aynı). */
+        fun sdbLaunched(reply: String): Boolean = reply.contains("] launched") && !reply.contains("fail", ignoreCase = true)
+
+        fun isTooOld(platform: String) =platform.isNotEmpty() && SamsungDiagnostics.isNewer(MINIMUM_TIZEN, platform)
 
         fun needsDeviceProfile(platform: String) =
             platform.isNotEmpty() && !isTooOld(platform) && !SamsungDiagnostics.isNewer(platform, DEVICE_PROFILE_UP_TO)
@@ -74,29 +77,61 @@ class SamsungInstaller(
         /**
          * Kurar; TV başka sertifikayla kurulmuş eski kopya ya da paket kimliği yüzünden reddederse eski kopyayı kaldırıp
          * bir kez daha dener. Sonuç yine başarısızsa TV'nin söylediği sebeple [SamsungInstallException] atar.
+         *
+         * @param alternative İki deneme de sebepsiz (yalın `[118]`) başarısız olursa çağrılır: başka biçimde hazırlanmış
+         * paketi sıraya koyup adını döner (yoksa null); o paketle üçüncü kez denenir.
+         * @param keepExisting TV'deki kopyaya dokunulmaz (`vd_appuninstall` yok): Tizen 2.x'te TV'de CouchSubs varsa ya da
+         * liste okunamadıysa. 2016 TV'de Tizen Studio ile elle kurulmuş, çalışan kopya kurtarma adımında silinmesin
+         * (docs/tv-samsung.md, #638). Sebepsiz `[118]`'de [alternative] yine bir kez denenir.
          */
-        fun installWithRecovery(tv: SamsungTvShell, progress: (InstallStep) -> Unit, log: InstallLog) {
+        fun installWithRecovery(tv: SamsungTvShell, progress: (InstallStep) -> Unit, log: InstallLog, alternative: (() -> String?)? = null,
+                                keepExisting: Boolean = false) {
             val output = tv.install()
             log.write("vd_appinstall çıktısı:\n${output.trim()}")
             val problem = SamsungDiagnostics.classify(output)
             if (problem == InstallProblem.NONE) return
             log.write("Kurulum başarısız: $problem")
+            if (keepExisting && SamsungDiagnostics.removingOldCopyMayHelp(problem)) {
+                log.write("TV'de CouchSubs var ya da liste okunamadı (elle kurulmuş olabilir); eski kopya kaldırılmıyor.")
+                val kept = if (problem == InstallProblem.OTHER) alternative?.invoke() else null
+                if (kept != null) {
+                    val second = tv.install()
+                    log.write("İkinci deneme ($kept) vd_appinstall çıktısı:\n${second.trim()}")
+                    val secondProblem = SamsungDiagnostics.classify(second)
+                    if (secondProblem == InstallProblem.NONE) return
+                    throw SamsungInstallException(SamsungDiagnostics.toError(secondProblem), SamsungDiagnostics.summary(second))
+                }
+                throw SamsungInstallException(SamsungDiagnostics.toError(problem), SamsungDiagnostics.summary(output))
+            }
             if (!SamsungDiagnostics.removingOldCopyMayHelp(problem))
                 throw SamsungInstallException(SamsungDiagnostics.toError(problem), SamsungDiagnostics.summary(output))
             progress(InstallStep.UNINSTALLING)
-            val removal = StringBuilder()
-            for (id in listOf(PACKAGE_ID, APP_ID)) {
-                try {
-                    removal.append("$id: ${tv.shell("0 vd_appuninstall $id").trim()}\n")
-                } catch (error: IOException) {
-                    removal.append("$id: ${error.message}\n")
+            fun remove(): String {
+                val removal = StringBuilder()
+                for (id in listOf(PACKAGE_ID, APP_ID)) {
+                    try {
+                        removal.append("$id: ${tv.shell("0 vd_appuninstall $id").trim()}\n")
+                    } catch (error: IOException) {
+                        removal.append("$id: ${error.message}\n")
+                    }
                 }
+                return removal.toString().trim()
             }
-            log.write("Eski kopya kaldırıldı mı:\n${removal.toString().trim()}")
+            log.write("Eski kopya kaldırıldı mı:\n${remove()}")
             val retry = tv.install()
             log.write("İkinci deneme vd_appinstall çıktısı:\n${retry.trim()}")
             val retryProblem = SamsungDiagnostics.classify(retry)
             if (retryProblem == InstallProblem.NONE) return
+            // TV iki kez de sebep söylemediyse (yalın [118]) ve başka biçimde hazırlanabilen paket varsa onunla bir kez daha.
+            val label = if (problem == InstallProblem.OTHER && retryProblem == InstallProblem.OTHER) alternative?.invoke() else null
+            if (label != null) {
+                log.write("Eski kopya kaldırıldı mı:\n${remove()}")
+                val last = tv.install()
+                log.write("Üçüncü deneme ($label) vd_appinstall çıktısı:\n${last.trim()}")
+                val lastProblem = SamsungDiagnostics.classify(last)
+                if (lastProblem == InstallProblem.NONE) return
+                throw SamsungInstallException(SamsungDiagnostics.toError(lastProblem), SamsungDiagnostics.summary(last))
+            }
             throw SamsungInstallException(SamsungDiagnostics.toError(retryProblem), SamsungDiagnostics.summary(retry))
         }
     }
@@ -132,6 +167,25 @@ class SamsungInstaller(
     /** Yalnız TV'deki CouchSubs sürümünü okur (kurmaz, açmaz); uygulama yoksa null. Güncelleme denetimi için. */
     fun installedVersion(): String? = connect().use { readInstalledVersion(it) }
 
+    /**
+     * Kurulu TV uygulamasını geliştirici bağlantısıyla (sdb, `was_execute`) açar; arka plandaysa öne getirir (Windows, Mac ve
+     * iPhone'daki bekçiyle aynı). sdb izin sormaz, TV'de bildirim çıkarmaz. Geliştirici modu kapalıysa ya da Host PC IP başka
+     * cihazınsa false.
+     */
+    fun openApp(): Boolean {
+        log.write("--- Samsung: TV uygulaması bağlı değil, açılıyor (TV $host)")
+        return try {
+            connect().use { device ->
+                val reply = device.shell("0 was_execute $APP_ID")
+                log.write("Uygulama açılıyor: ${reply.trim()}")
+                sdbLaunched(reply)
+            }
+        } catch (error: Exception) {
+            log.write("Uygulama açılamadı: ${error.message}")
+            false
+        }
+    }
+
     private fun installCore(wgt: () -> ByteArray, version: String?): Result {
         progress(InstallStep.CONNECTING)
         connect().use { device ->
@@ -144,6 +198,8 @@ class SamsungInstaller(
             if (platform.isNotEmpty() && SamsungDiagnostics.isNewer("5.0", platform)) log.write("Tizen $platform: 2016–2018 TV si, destek deneysel.")
 
             val onTv = readInstalledVersion(device)
+            // "CouchSubs yok" ile "liste okunamadı" ayrılsın (Tizen 2.x'te okunamayan listede kopya kaldırılmaz).
+            val listRead = lastListRead
             if (version != null && onTv != null && !SamsungDiagnostics.isNewer(version, onTv)) {
                 launch(device)
                 return Result(onTv, false)
@@ -169,20 +225,46 @@ class SamsungInstaller(
 
             progress(InstallStep.SIGNING)
             val key = profile.privateKey()
-            val signed = WgtSigner.sign(wgt(),
+            // Tizen 2.x (2016): #71'de çalışan config.xml ve SHA-256 imza; TV yine yalın [118] derse yalın paket (#638).
+            val legacy = LegacyTizenPackage.applies(platform)
+            val digest = if (legacy) WgtSigner.Digest.SHA256 else WgtSigner.Digest.SHA512
+            fun sign(unsigned: ByteArray) = WgtSigner.sign(unsigned,
                 WgtSigner.Signer(key, SamsungCertificates.chain(profile.author())),
-                WgtSigner.Signer(key, SamsungCertificates.chain(profile.distributor())))
+                WgtSigner.Signer(key, SamsungCertificates.chain(profile.distributor())), digest)
+            val original = wgt()
+            val signed = if (legacy) {
+                sign(LegacyTizenPackage.adapt(original)).also {
+                    log.write("Tizen $platform: paketten network.public izni ve ultra geniş ekran ayarı çıkarıldı (#621).")
+                    log.write("Tizen $platform: imza SHA-256 ile üretildi (rsa-sha256, sha256 özet; yeni TV'lerde SHA-512).")
+                }
+            } else sign(original)
             log.write("Paket imzalandı (${signed.size} bayt).")
             progress(InstallStep.INSTALLING)
             try {
-                installWithRecovery(SdbShell(device, signed, toolPath), progress, log)
+                val shell = SdbShell(device, signed, toolPath)
+                var lean = false
+                val alternative: (() -> String?)? = if (!legacy) null else {
+                    {
+                        shell.signed = sign(LegacyTizenPackage.adapt(original, lean = true))
+                        lean = true
+                        log.write("Tizen $platform: yalın paket hazırlandı (${LegacyTizenPackage.LEAN_REMOVED} de çıkarıldı), imza SHA-256.")
+                        "yalın paket"
+                    }
+                }
+                installWithRecovery(shell, progress, log, alternative, keepExisting = legacy && (onTv != null || !listRead))
+                if (legacy) log.write("Tizen $platform: ${if (lean) "yalın paket" else "tam paket"} SHA-256 imzayla kuruldu.")
             } catch (error: SamsungInstallException) {
                 if (error.error == SamsungInstallError.CERTIFICATE_REJECTED) {
                     // TV bu sertifikayı kabul etmiyor; bir sonraki denemede Samsung'dan yenisi istensin.
                     profile.discard()
                     log.write("Kayıtlı sertifika bırakıldı; bir sonraki denemede yenisi alınacak.")
                 }
-                throw error
+                if (!legacy || onTv == null) throw error
+                // Tizen 2.x: TV'deki kopya (ör. Tizen Studio ile elle kurulmuş) yerinde; yeni paket kurulamadı diye
+                // çalışan uygulama "kurulamadı" gösterilmez, o açılır (#638).
+                log.write("Tizen $platform: yeni paket kurulamadı (${error.error}); TV'deki CouchSubs $onTv korunuyor ve açılıyor.")
+                launch(device)
+                return Result(onTv, false)
             }
             val after = readInstalledVersion(device)
             if (version != null && after != null && SamsungDiagnostics.isNewer(version, after))
@@ -193,8 +275,13 @@ class SamsungInstaller(
         }
     }
 
+    /** Son `vd_applist` okunabildi mi. */
+    private var lastListRead = false
+
     private fun readInstalledVersion(device: SdbConnection): String? = try {
+        lastListRead = false
         val listing = device.shell("0 vd_applist")
+        lastListRead = true
         SamsungDiagnostics.installedVersion(listing).also {
             log.write("vd_applist: ${if (it == null) "CouchSubs yok" else "CouchSubs $it"} (${listing.length} karakter)")
         }
@@ -248,7 +335,7 @@ class SamsungInstaller(
     }
 
     /** Gerçek TV: paket `sdk_toolpath`'e gönderilir ve `vd_appinstall` ile kurulur. */
-    private class SdbShell(private val device: SdbConnection, private val signed: ByteArray, private val toolPath: String) : SamsungTvShell {
+    private class SdbShell(private val device: SdbConnection, var signed: ByteArray, private val toolPath: String) : SamsungTvShell {
         private val remote = "$toolPath/couchsubs-%08x.wgt".format(SecureRandom().nextInt())
 
         /** TizenSdb'deki gibi hata da çıktıya yazılır; tanı çıktıdan yapılır. */

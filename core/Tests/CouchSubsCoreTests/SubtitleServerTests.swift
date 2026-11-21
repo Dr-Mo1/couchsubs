@@ -29,7 +29,7 @@ final class SubtitleServerTests: XCTestCase {
         let (bytes, response) = try await URLSession.shared.bytes(from: URL(string: "http://127.0.0.1:\(port)/events")!)
         let http = try XCTUnwrap(response as? HTTPURLResponse)
         XCTAssertEqual(http.statusCode, 200)
-        XCTAssertEqual(http.value(forHTTPHeaderField: "Access-Control-Allow-Origin"), "*")
+        XCTAssertNil(http.value(forHTTPHeaderField: "Access-Control-Allow-Origin"))
         XCTAssertTrue(http.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("text/event-stream") == true)
 
         try await waitUntil { server.connectedClients == 1 }
@@ -43,6 +43,81 @@ final class SubtitleServerTests: XCTestCase {
         XCTAssertTrue(lines.contains { $0.hasPrefix("data:") && $0.contains("\"text\":\"Merhaba\"") && $0.contains("\"duration\":4000")
             && $0.contains("\"box\":{\"bottom\":0.875,\"left\":0.25,\"right\":0.75,\"top\":0.8}") && !$0.contains("replace") })
         XCTAssertTrue(lines.contains { $0.hasPrefix("data:") && $0.contains("\"text\":\"Merhaba dostum\"") && $0.contains("\"replace\":true") })
+    }
+
+    /// TV uygulaması gösterdiği HDMI girişini akışa bağlanırken bildirir; bekçi PS tuşunu bununla tanır.
+    func testRemembersTheHdmiInputTheTVAppShows() async throws {
+        let server = SubtitleServer(port: 0)
+        let port = try await server.start()
+        defer { server.stop() }
+        XCTAssertNil(server.consolePort)
+        let (bytes, _) = try await URLSession.shared.bytes(from: URL(string: "http://127.0.0.1:\(port)/events?hdmi=3")!)
+        try await waitUntil { server.connectedClients == 1 }
+        XCTAssertEqual(server.consolePort, 3)
+        bytes.task.cancel()
+        XCTAssertNil(SubtitleServer.hdmiPort("9"))
+        XCTAssertNil(SubtitleServer.hdmiPort("12"))
+        XCTAssertNil(SubtitleServer.hdmiPort(nil))
+        XCTAssertEqual(SubtitleServer.hdmiPort("4"), 4)
+    }
+
+    /// Konuşana göre renk açıkken adlı satır `speakers` alanını taşır; adsız satırda ve ayar kapalıyken alan yoktur.
+    func testSubtitleCarriesSpeakerColorsWhenEnabled() async throws {
+        let server = SubtitleServer(port: 0)
+        let port = try await server.start()
+        defer { server.stop() }
+        let (bytes, _) = try await URLSession.shared.bytes(from: URL(string: "http://127.0.0.1:\(port)/events")!)
+        try await waitUntil { server.connectedClients == 1 }
+        server.sendSubtitle("Mattia: Gidelim.", durationMs: 4000)
+        server.speakerColors = true
+        server.sendSubtitle("Mattia: Gidelim.\nLucia: Tamam.", durationMs: 4000)
+        server.sendSubtitle("Adsız satır", durationMs: 4000)
+        server.clear()
+
+        let data = try await readLines(bytes, until: "event: clear").filter { $0.hasPrefix("data:") && $0.contains("\"text\"") }
+        XCTAssertEqual(data.count, 3)
+        XCTAssertFalse(data[0].contains("speakers"))
+        XCTAssertTrue(data[1].contains("\"speakers\":[{"))
+        XCTAssertTrue(data[1].contains("\"name\":\"Mattia\"") && data[1].contains("#90CAF9"))
+        XCTAssertTrue(data[1].contains("\"name\":\"Lucia\"") && data[1].contains("#F06292"))
+        XCTAssertFalse(data[2].contains("speakers"))
+    }
+
+    /// Telefon, sunucu düştüyse (iOS arka planda dinleyiciyi kapatır) bunu `isListening` ile anlar ve aynı nesneyi
+    /// yeniden başlatır; yeniden başlatılan sunucu yine bağlantı kabul eder.
+    func testIsListeningFollowsStartStopAndRestart() async throws {
+        let server = SubtitleServer(port: 0)
+        XCTAssertFalse(server.isListening)
+        _ = try await server.start()
+        XCTAssertTrue(server.isListening)
+        server.stop()
+        XCTAssertFalse(server.isListening)
+        let port = try await server.start()
+        defer { server.stop() }
+        XCTAssertTrue(server.isListening)
+        let (_, response) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(port)/hello")!)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+    }
+
+    /// Sabit portta (TV'nin ağda aradığı 8787) kapatılıp hemen yeniden açılan sunucu aynı portu geri alır. Eskiden
+    /// kapanan dinleyici portu henüz bırakmadan yenisi "Address already in use" alıyor, telefon rastgele bir porta
+    /// düşüyor, ağı yalnız 8787'de tarayan TV uygulaması telefonu bir daha bulamıyordu.
+    func testRestartOnFixedPortKeepsThePort() async throws {
+        let probe = SubtitleServer(port: 0)
+        let port = try await probe.start()
+        probe.stop()
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let server = SubtitleServer(port: port)
+        defer { server.stop() }
+        for _ in 0..<5 {
+            let started = try await server.start()
+            XCTAssertEqual(started, port)
+            server.stop()
+        }
+        let again = try await server.start()
+        XCTAssertEqual(again, port)
+        let (_, response) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(port)/hello")!)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
     }
 
     /// TV yarı açık bağlantıyı adlı "ping" olayının gelmemesinden anlar; yorum satırını EventSource görmez.
@@ -97,6 +172,34 @@ final class SubtitleServerTests: XCTestCase {
         XCTAssertTrue(lines.contains(#"data: {"box":{"bottom":0.12,"left":0.7,"right":0.95,"top":0.05},"id":"q","line":0.03,"text":"Demirciyi bul"}"#), "\(lines)")
         XCTAssertTrue(lines.contains(#"data: {"id":"q","text":""}"#), "\(lines)")
         XCTAssertEqual(received.all, [.region(id: "q", text: "Demirciyi bul", box: box), .region(id: "q", text: "", box: nil), .regionClear])
+    }
+
+    func testOnlyPhoneBlocksCarryNativeSurfaceOnTVAndDesktop() async throws {
+        let server = SubtitleServer(port: 0)
+        let port = try await server.start()
+        defer { server.stop() }
+        let received = LockedEvents()
+        server.onEvent = { received.append($0) }
+        let (bytes, _) = try await URLSession.shared.bytes(from: URL(string: "http://127.0.0.1:\(port)/events")!)
+        try await waitUntil { server.connectedClients == 1 }
+        let box = TextBox(left: 0.4, top: 0.45, right: 0.55, bottom: 0.50)
+        var item = ScreenTranslation.Item(source: "Reply", translation: "Yanıtla", box: box, lineHeight: 0.05)
+        item.style = PhoneTextStyle(background: "#123456", foreground: "#ABCDEF")
+        for id in ["q", "game-phone"] {
+            server.sendRegion(id: id, text: item.translation, box: box, lineHeight: item.lineHeight, icons: nil, blocks: [item])
+        }
+        server.sendRegion(id: "game-phone", text: "", box: nil)
+        server.clearRegions()
+
+        let lines = try await readLines(bytes, until: "event: region-clear")
+        let phone = try XCTUnwrap(lines.first { $0.contains(#""id":"game-phone""#) && $0.contains(#""blocks""#) })
+        XCTAssertTrue(phone.contains(##""surface":{"background":"#123456","foreground":"#ABCDEF"}"##))
+        let manual = try XCTUnwrap(lines.first { $0.contains(#""id":"q""#) })
+        XCTAssertFalse(manual.contains(#""surface""#))
+        XCTAssertEqual(received.all, [.region(id: "q", text: item.translation, box: box), .gamePhone([item]), .gamePhone([]), .regionClear])
+
+        item.style = PhoneTextStyle(background: "transparent", foreground: "#ABCDEF")
+        XCTAssertNil(SubtitleServer.json(item, phone: true)["surface"])
     }
 
     func testSpeechIsAnnouncedAndServed() async throws {
@@ -183,6 +286,41 @@ final class SubtitleServerTests: XCTestCase {
         XCTAssertTrue(lines.contains("event: subtitle"))
     }
 
+    /// İkinci ekran: sayfa ve akışı anahtarsız (eski TV geçişi açıkken de) ya da yanlış anahtarla açılmaz; doğru
+    /// anahtarla sayfa gelir, akış TV sayılmaz ve altyazı hedefi TV değilken de altyazıyı alır.
+    func testSecondScreenNeedsTheKeyAndAlwaysGetsSubtitles() async throws {
+        let server = SubtitleServer(port: 0, key: "dogru-anahtar", allowLegacy: true)
+        let port = try await server.start()
+        defer { server.stop() }
+        let base = "http://127.0.0.1:\(port)"
+        for target in ["/view", "/view?k=yanlis", "/events?viewer=second", "/events?viewer=second&k=yanlis"] {
+            let (_, response) = try await URLSession.shared.data(from: URL(string: base + target)!)
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 401, target)
+        }
+        let (page, response) = try await URLSession.shared.data(from: URL(string: base + "/view?k=dogru-anahtar")!)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertTrue((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("text/html") == true)
+        let html = String(decoding: page, as: UTF8.self)
+        XCTAssertTrue(html.contains("/events?viewer=second&k="))
+        XCTAssertTrue(html.contains("wakeLock"))
+
+        server.sendsToTV = false
+        let (bytes, _) = try await URLSession.shared.bytes(from: URL(string: base + "/events?viewer=second&k=dogru-anahtar")!)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(server.connectedClients, 0)
+        XCTAssertFalse(server.hasLegacyClient)
+        server.sendSubtitle("Merhaba", durationMs: 4000)
+        server.clear()
+        let lines = try await readLines(bytes, until: "event: clear")
+        XCTAssertTrue(lines.contains { $0.hasPrefix("data:") && $0.contains("\"text\":\"Merhaba\"") })
+    }
+
+    func testSecondScreenAddressCarriesTheKey() {
+        XCTAssertEqual(SecondScreen.address(host: "192.168.1.20", port: 8787, key: "a-b_C9"), "http://192.168.1.20:8787/view?k=a-b_C9")
+        XCTAssertEqual(SecondScreen.address(host: "fe80::1", port: 8787, key: "k"), "http://[fe80::1]:8787/view?k=k")
+        XCTAssertNotNil(SecondScreen.qrImage(for: "http://192.168.1.20:8787/view?k=a-b_C9"))
+    }
+
     /// Şeffaflık tanımayan yayın programları için düz zemin (?bg=green) ve OBS'te kapalı ipucu; adresteki
     /// parametreler sayfayı değiştirmez, aynı dosya gelir.
     func testObsOverlayOffersSolidBackgroundAndHint() async throws {
@@ -259,26 +397,48 @@ final class SubtitleServerTests: XCTestCase {
         XCTAssertEqual(received.all, [.subtitle(text: "Merhaba", durationMs: 4000, paragraphs: false), .clear])
     }
 
+    /// Altyazının oyundaki yeri pencereye de gider: "Yazı kadar" kutu oyunun altyazısını örtecek kadar büyür.
+    func testLocalListenerGetsTheSubtitleBox() {
+        let server = SubtitleServer(port: 0)
+        let received = LockedEvents()
+        server.onEvent = { received.append($0) }
+        let box = TextBox(left: 0.25, top: 0.8, right: 0.75, bottom: 0.9)
+        server.sendSubtitle("Merhaba", durationMs: 4000, box: box)
+        XCTAssertEqual(received.all, [.subtitle(text: "Merhaba", durationMs: 4000, paragraphs: false, box: box)])
+    }
+
     /// "Ekranı çevir" sonuçları da pencereye gider: altyazı yalnız bilgisayardayken (TV yok) hiçbir yerde görünmüyordu.
     func testLocalListenerGetsScreenTranslations() {
         let server = SubtitleServer(port: 0)
         let received = LockedEvents()
         server.onEvent = { received.append($0) }
         let box = TextBox(left: 0.1, top: 0.1, right: 0.4, bottom: 0.2)
-        server.sendScreen([ScreenTranslation.Item(source: "Map\nInventory", translation: "Harita\nEnvanter", box: box, lineHeight: 0.03),
-                           ScreenTranslation.Item(source: "Leave", translation: "Ayrıl", box: box, lineHeight: 0.03)], durationMs: 12000)
+        let items = [ScreenTranslation.Item(source: "Map\nInventory", translation: "Harita\nEnvanter", box: box, lineHeight: 0.03),
+                     ScreenTranslation.Item(source: "", translation: ScreenPhoneCard.backdropText, box: box, lineHeight: 0.03),
+                     ScreenTranslation.Item(source: "Leave", translation: "Ayrıl", box: box, lineHeight: 0.03)]
+        server.sendScreen(items, durationMs: 12000)
         server.clearScreen()
-        XCTAssertEqual(received.all, [.screen(text: "Harita\nEnvanter\nAyrıl", durationMs: 12000), .screenClear])
+        // Telefon kartının zemini düz metne girmez; öğeler yerleriyle pencereye de gider.
+        XCTAssertEqual(received.all, [.screen(text: "Harita\nEnvanter\nAyrıl", durationMs: 12000, items: items), .screenClear])
     }
 
     func testHelloIdentifiesTheApp() async throws {
-        let server = SubtitleServer(port: 0)
+        let server = SubtitleServer(port: 0, instanceId: "3f2a-b9")
         let port = try await server.start()
         defer { server.stop() }
         let (data, response) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(port)/hello")!)
         XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
-        XCTAssertEqual((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Access-Control-Allow-Origin"), "*")
-        XCTAssertEqual(String(decoding: data, as: UTF8.self), #"{"app":"couchsubs"}"#)
+        XCTAssertNil((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Access-Control-Allow-Origin"))
+        XCTAssertEqual(String(decoding: data, as: UTF8.self), #"{"app":"couchsubs","auth":1,"id":"3f2a-b9","tvs":0}"#)
+        XCTAssertFalse(String(decoding: data, as: UTF8.self).contains(server.accessKey))
+    }
+
+    /// Kurulum kimliği kalıcıdır: aynı ağdaki iki CouchSubs'ı TV bununla ayırır (GitHub #425).
+    func testInstallationIdIsStable() {
+        let first = SubtitleServer.installationId
+        XCTAssertFalse(first.isEmpty)
+        XCTAssertEqual(SubtitleServer.installationId, first)
+        XCTAssertEqual(SubtitleServer.helloBody(id: "a\"b", tvs: 2), #"{"app":"couchsubs","auth":1,"id":"ab","tvs":2}"#)
     }
 
     func testUnknownPathIs404() async throws {
@@ -292,7 +452,7 @@ final class SubtitleServerTests: XCTestCase {
 
     func testOldSavedStyleGetsNewDefaults() throws {
         let style = try JSONDecoder().decode(SubtitleStyle.self, from: Data(#"{"fontSize":58,"bottomPercent":12}"#.utf8))
-        XCTAssertEqual(style, SubtitleStyle(fontSize: 58, bottomPercent: 12, placement: .cover, background: 72, bold: false,
+        XCTAssertEqual(style, SubtitleStyle(fontSize: 58, bottomPercent: 12, placement: .cover, background: 90, bold: false,
                                              textColor: .white, displayMode: .inApp))
     }
 
@@ -326,6 +486,24 @@ final class SubtitleServerTests: XCTestCase {
         let decoded = try JSONDecoder().decode(SubtitleStyle.self, from: JSONEncoder().encode(style))
         XCTAssertFalse(decoded.stackPrevious)
         XCTAssertTrue(try JSONDecoder().decode(SubtitleStyle.self, from: Data("{}".utf8)).stackPrevious)
+    }
+
+    /// "Ekran yazılarını altyazıdan ayır": `style` olayı `setApart` alanını taşır (varsayılan açık); eski ayarlar açık gelir.
+    func testStyleCarriesSetApart() async throws {
+        let server = SubtitleServer(port: 0)
+        let port = try await server.start()
+        defer { server.stop() }
+        let (bytes, _) = try await URLSession.shared.bytes(from: URL(string: "http://127.0.0.1:\(port)/events")!)
+        try await waitUntil { server.connectedClients == 1 }
+        server.sendStyle(SubtitleStyle())
+        server.setApart = false
+        server.sendStyle(SubtitleStyle())
+        server.clear()
+        let styles = try await readLines(bytes, until: "event: clear").filter { $0.hasPrefix("data:") && $0.contains("fontSize") }
+        XCTAssertEqual(styles.count, 2)
+        XCTAssertTrue(styles[0].contains("\"setApart\":true"))
+        XCTAssertTrue(styles[1].contains("\"setApart\":false"))
+        XCTAssertTrue(try JSONDecoder().decode(UserSettings.self, from: Data("{}".utf8)).setTextApart)
     }
 }
 

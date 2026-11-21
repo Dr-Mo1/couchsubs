@@ -1,0 +1,268 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Xbox yayınının sağlamlığı: canlı tutma sayacı, yayın durunca gösterilen metnin türü ve günlük özeti (#575, #611),
+// görüntü başlayana kadar anahtar kare isteği ve tanı satırı (#403, #530). Kurallar ve satır biçimleri Windows'taki
+// CouchSubs.Shell/XboxSessionHealth.cs ve XboxFirstFrameWatch.cs ile, Android'deki XboxFirstFrame.kt ile birebir.
+
+import Foundation
+
+/// Canlı tutma isteği (30 sn'de bir). Tek başarısız istek yayını bitirmez; yalnız `maxFailures` ardışık hata (yaklaşık
+/// 90 sn yanıt yok) bitirir, arada başarılı bir istek sayacı sıfırlar.
+public struct XboxKeepalive {
+    public static let intervalSeconds = 30
+    public static let maxFailures = 3
+
+    public private(set) var failures = 0
+
+    public init() {}
+
+    public mutating func succeeded() { failures = 0 }
+
+    /// Oturum bitirilmeli mi.
+    public mutating func failed() -> Bool {
+        failures += 1
+        return failures >= Self.maxFailures
+    }
+}
+
+/// Yayının neden durduğu (kullanıcıya gösterilen metni seçer).
+public enum XboxStopKind: Equatable, Sendable {
+    /// `noPicture`: son bağlantılarda Xbox tek kare göndermedi (Windows XboxStopKind.NoPicture, Android NO_PICTURE).
+    case busy, consoleUnavailable, noPicture, other
+}
+
+/// Xbox yayını durunca günlük satırı ve kullanıcıya gösterilen metnin türü.
+public enum XboxStop {
+    /// Kullanıcı metninde gösterilen ham nedenin en çok uzunluğu (Xbox hizmeti 500 karakterlik JSON dönebilir).
+    public static let reasonLimit = 120
+
+    /// Ham nedene bakılır: ilk kare gelmeyince de hata türü `consoleUnavailable` olur ama o durumda "Xbox'a ulaşılamadı"
+    /// yanlış olur (Android'deki `stopKind` ile aynı).
+    public static func classify(_ reason: String?, kind: XboxErrorKind? = nil) -> XboxStopKind {
+        if kind == .noFirstFrame { return .noPicture }
+        let text = reason ?? ""
+        func has(_ word: String) -> Bool { text.range(of: word, options: .caseInsensitive) != nil }
+        if kind == .busy || has("InUse") || has("Busy") || has("AlreadyStreaming") { return .busy }
+        if has("Offline") || has("NotFound") || has("Unavailable") || has("PowerOff") || has("StreamingDisabled") { return .consoleUnavailable }
+        return .other
+    }
+
+    /// Ham nedeni tek satıra indirir ve `limit` karakterde keser; boşsa `fallback`.
+    public static func shorten(_ reason: String?, limit: Int = reasonLimit, fallback: String = "?") -> String {
+        let line = (reason ?? "").split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        if line.isEmpty { return fallback }
+        return line.count <= limit ? line : String(line.prefix(limit - 1)) + "…"
+    }
+
+    /// Bağlantı bitince yazılan özet: neden, kare ve onay sayısı, ilk kareden sonra kaç saniye sürdüğü. "Görüntü hiç
+    /// gelmedi" ile "görüntü geldi, sonra kesildi" bu satırla ayrılır.
+    public static func summary(reason: String?, frames: Int, acks: Int? = nil, secondsSinceFirstFrame: Int?) -> String {
+        let why = (reason ?? "").trimmingCharacters(in: .whitespaces).isEmpty ? "durduruldu" : reason!
+        let lived = secondsSinceFirstFrame.map { "\($0) sn" } ?? "ilk kare yok"
+        return "bağlantı bitti: \(why); kare \(frames), \(acks.map { "onay \($0), " } ?? "")ilk kareden sonra \(lived)"
+    }
+}
+
+/// Bir saat adımında yapılacaklar: Xbox'tan anahtar kare istenir mi, tanı satırı yazılır mı.
+public struct XboxWatchStep: Equatable, Sendable {
+    public var requestKeyframe = false
+    public var logStats = false
+
+    public init(requestKeyframe: Bool = false, logStats: Bool = false) {
+        self.requestKeyframe = requestKeyframe
+        self.logStats = logStats
+    }
+}
+
+/// Xbox görüntüsü başlayana kadar yapılanlar. Xbox kare onayı alamazsa oturumu ~60 sn sonra kapatır; onay yalnız
+/// gösterilen karede gider, kare hiç gelmezse onay da gitmez. İlk kare gelene kadar kontrol kanalından anahtar kare
+/// istenir (xbox-xcloud-player Channel/Control.ts `requestKeyframeRequest`) ve bağlantıdan 10 sn sonra, sonra 10 sn'de
+/// bir tanı satırı yazılır.
+public struct XboxFirstFrameWatch {
+    /// Bağlantıdan sonra ilk kare için beklenen en uzun süre; dolunca bağlantı `.noFirstFrame` ile kapatılır, Xbox'ın
+    /// kendisi kapatması (~60 sn) beklenmez (Windows ve Android'de de 30 sn).
+    public static let firstFrameLimitMs = 30_000
+    public static let keyframeIntervalMs = 2500
+    /// Bu süreden sonra anahtar kare istenmez; tanı satırları sürer.
+    public static let keyframeWindowMs = 20_000
+    public static let statsDelayMs = 10_000
+    public static let statsIntervalMs = 10_000
+    /// Saatin adımı.
+    public static let tickMs = 500
+    /// Kontrol kanalı iletisi (Control.ts `requestKeyframeRequest`).
+    public static let keyframeRequest = "{\"message\":\"videoKeyframeRequested\",\"ifrRequested\":true}"
+
+    private var lastKeyframe: Int?
+    private var nextStats = XboxFirstFrameWatch.statsDelayMs
+    /// İlk kare geldi; bundan sonra hiçbir şey yapılmaz.
+    public private(set) var frameSeen = false
+    public private(set) var keyframesRequested = 0
+
+    public init() {}
+
+    public mutating func frameArrived() { frameSeen = true }
+
+    /// `sinceConnectedMs`: bağlantıdan (input kanalı açıldı) bu yana geçen süre. `keyframeReady`: görüntü parçası var ve
+    /// kontrol kanalı açık.
+    public mutating func tick(sinceConnectedMs: Int, keyframeReady: Bool) -> XboxWatchStep {
+        if frameSeen { return XboxWatchStep() }
+        let keyframe = keyframeReady && sinceConnectedMs <= Self.keyframeWindowMs
+            && (lastKeyframe.map { sinceConnectedMs - $0 >= Self.keyframeIntervalMs } ?? true)
+        if keyframe {
+            lastKeyframe = sinceConnectedMs
+            keyframesRequested += 1
+        }
+        let stats = sinceConnectedMs >= nextStats
+        // Saat takıldıysa kaçan satırlar art arda yazılmaz.
+        if stats { while nextStats <= sinceConnectedMs { nextStats += Self.statsIntervalMs } }
+        return XboxWatchStep(requestKeyframe: keyframe, logStats: stats)
+    }
+}
+
+/// Görüntü bekçisinin bir saat adımındaki kararı.
+public enum XboxPictureVerdict: Equatable, Sendable {
+    case fine
+    /// Görüntü `warnAfterMs`'dir gelmiyor ya da ICE bağlantısı takıldı: ana ekranda "bağlı" yerine uyarı (bir kez).
+    case warn
+    /// Uyarıdan sonra görüntü yeniden geliyor: yeniden "bağlı".
+    case recovered
+    /// Oturum kapatılıp yeniden kurulmalı; değer günlükteki neden.
+    case stalled(String)
+}
+
+/// İlk kareden sonra Xbox görüntüsünün kesilip kesilmediği (PS5'teki `PictureWatchdog`un Xbox karşılığı). Eskiden
+/// yayın yalnız WebRTC bağlantısı `failed`/`closed` olunca, input kanalı kapanınca ya da canlı tutma üç kez yanıtsız
+/// kalınca bitiyordu: ICE `disconnected`da takılı kalan ya da kare göndermeyi bırakan yayında ana ekran "bağlı"
+/// diyor, altyazı donuyor ve bir daha gelmiyordu (X'te kullanıcı bildirimi, iPhone + Xbox Series S). Kare
+/// `warnAfterMs` gelmezse (ICE `disconnected` iken 1 sn) uyarı gösterilir; `stallAfterMs` gelmezse ya da ICE
+/// `failed` olursa oturum kapatılıp `XboxSessionMachine`in aralıklarıyla (5, 15, 45 sn) yeniden kurulur. Windows'taki
+/// CouchSubs.Shell/XboxPictureWatch ve Android'deki XboxPictureWatch ile birebir.
+public struct XboxPictureWatch {
+    public static let warnAfterMs = 5000
+    public static let stallAfterMs = 12_000
+    /// ICE `disconnected` iken uyarı için yeterli boşluk (bağlantı takılınca kareler hemen kesilir).
+    public static let iceWarnAfterMs = 1000
+
+    /// RTCIceConnectionState'in bekçiyi ilgilendiren kısmı.
+    public enum Ice: Sendable {
+        case connected, disconnected, failed, other
+    }
+
+    private var lastFrameMs: Int?
+    private var iceLostSinceMs: Int?
+    private var iceFailed = false
+    /// Uyarı gösteriliyor.
+    public private(set) var warned = false
+
+    public init() {}
+
+    public mutating func frameArrived(atMs now: Int) { lastFrameMs = now }
+
+    public mutating func iceChanged(_ state: Ice, atMs now: Int) {
+        switch state {
+        case .connected: iceLostSinceMs = nil
+        case .disconnected: if iceLostSinceMs == nil { iceLostSinceMs = now }
+        case .failed: iceFailed = true
+        case .other: break
+        }
+    }
+
+    /// Saniyede bir çağrılır. İlk kare gelmeden karar verilmez (ilk kare sınırı ayrı).
+    public mutating func tick(atMs now: Int) -> XboxPictureVerdict {
+        guard let last = lastFrameMs else { return .fine }
+        let iceLost = iceLostSinceMs != nil
+        if iceFailed { return .stalled("Xbox ICE bağlantısı koptu (failed)") }
+        let gap = now - last
+        if gap >= Self.stallAfterMs {
+            return .stalled("Xbox'tan \(gap / 1000) sn'dir görüntü gelmiyor (\(iceLost ? "ICE disconnected" : "bağlantı açık görünüyor"))")
+        }
+        let trouble = gap >= Self.warnAfterMs || (iceLost && gap >= Self.iceWarnAfterMs)
+        if trouble, !warned {
+            warned = true
+            return .warn
+        }
+        if !trouble, warned {
+            warned = false
+            return .recovered
+        }
+        return .fine
+    }
+}
+
+/// getStats raporunun bir girdisi (RTCStats: tür, kimlik, alanlar).
+public struct XboxStat {
+    public let type: String
+    public let id: String
+    public let members: [String: Any]
+
+    public init(type: String, id: String, members: [String: Any]) {
+        self.type = type
+        self.id = id
+        self.members = members
+    }
+}
+
+/// WebRTC getStats özetini tek günlük satırına çevirir; Windows'taki XboxStreamStats ile aynı biçim.
+public enum XboxStreamStats {
+    /// `codec`: anlaşılan görüntü kodeği tanı satırına girer.
+    public static let types: Set<String> = ["inbound-rtp", "candidate-pair", "local-candidate", "remote-candidate", "transport", "codec"]
+
+    /// Telefonda ve Mac'te video öğesi yok: görüntü parçasının durumu (LIVE, ENDED).
+    public static func picture(trackState: String) -> String { "görüntü parça \(trackState)" }
+
+    public static func describe(sinceConnectedMs: Int, frameSeen: Bool, keyframes: Int, stats: [XboxStat], picture: String) -> String {
+        var line = "tanı (\(sinceConnectedMs / 1000) sn, \(frameSeen ? "ilk kare geldi" : "ilk kare yok")): keyframe isteği \(keyframes); "
+        if let video = stats.first(where: { $0.type == "inbound-rtp" && (text($0, "kind") ?? text($0, "mediaType")) == "video" }) {
+            line += "video paket \(number(video, "packetsReceived")), bayt \(number(video, "bytesReceived")), kayıp \(number(video, "packetsLost")), "
+            line += "çözülen \(number(video, "framesDecoded")), düşen \(number(video, "framesDropped")), anahtar kare \(number(video, "keyFramesDecoded")), "
+            line += "PLI \(number(video, "pliCount")), çözücü \(text(video, "decoderImplementation") ?? "?")"
+            if let codec = byId(stats, text(video, "codecId")) {
+                line += ", kodek \(text(codec, "mimeType") ?? "?") \(text(codec, "sdpFmtpLine") ?? "")".trimmingCharacters(in: .whitespaces)
+            }
+            line += "; "
+        } else {
+            line += "video yok; "
+        }
+        if let pair = selectedPair(stats) {
+            let local = byId(stats, text(pair, "localCandidateId"))
+            let remote = byId(stats, text(pair, "remoteCandidateId"))
+            line += "aday yerel \(field(local, "candidateType"))/\(field(local, "protocol")) ağ \(field(local, "networkType")), "
+            line += "uzak \(field(remote, "candidateType")), durum \(text(pair, "state") ?? "?"); "
+        } else {
+            line += "aday seçilmedi; "
+        }
+        return line + picture
+    }
+
+    private static func selectedPair(_ stats: [XboxStat]) -> XboxStat? {
+        for transport in stats where transport.type == "transport" {
+            if let pair = byId(stats, text(transport, "selectedCandidatePairId")) { return pair }
+        }
+        let pairs = stats.filter { $0.type == "candidate-pair" }
+        return pairs.first { flag($0, "selected") } ?? pairs.first { flag($0, "nominated") && text($0, "state") == "succeeded" }
+    }
+
+    private static func byId(_ stats: [XboxStat], _ id: String?) -> XboxStat? {
+        guard let id else { return nil }
+        return stats.first { $0.id == id }
+    }
+
+    private static func field(_ stat: XboxStat?, _ name: String) -> String { stat.flatMap { text($0, name) } ?? "?" }
+
+    private static func text(_ stat: XboxStat, _ name: String) -> String? { stat.members[name] as? String }
+
+    /// Yalnız gerçek Bool (JSON `true`, NSNumber(bool)); 1 sayısı sayılmaz.
+    private static func flag(_ stat: XboxStat, _ name: String) -> Bool {
+        guard let value = stat.members[name] else { return false }
+        if let number = value as? NSNumber { return CFGetTypeID(number) == CFBooleanGetTypeID() && number.boolValue }
+        return value as? Bool ?? false
+    }
+
+    private static func number(_ stat: XboxStat, _ name: String) -> String {
+        guard let value = stat.members[name], !(value is String) else { return "?" }
+        if let number = value as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() { return "?" }
+            return String(Int64(number.doubleValue))
+        }
+        return "?"
+    }
+}

@@ -68,16 +68,39 @@ public partial class TvAppCard : UserControl
         var hostPcProblem = state.Kind == TvAppKind.Failed && state.Error is DevModeError.Unreachable or DevModeError.HostPcMismatch;
         SamsungSteps.Visibility = Visible((devModeOff || hostPcProblem) && brand == TvBrand.Samsung);
         AndroidSteps.Visibility = Visible(devModeOff && brand == TvBrand.AndroidTv);
+        AndroidChoice.Visibility = Visible(state.Kind == TvAppKind.ChooseAndroidTv);
+        AndroidHosts.Children.Clear();
+        var choices = state.Kind == TvAppKind.ChooseAndroidTv && state.Hosts is { } found ? found : Array.Empty<string>();
+        foreach (var host in choices)
+        {
+            var choose = new Button
+            {
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(0, 4, 0, 0),
+                Content = text["Install on the TV at %@"].Replace("%@", host),
+            };
+            choose.Click += async (_, _) =>
+            {
+                if (controller is not null) await controller.ChooseAndroidTvAsync(host);
+            };
+            AndroidHosts.Children.Add(choose);
+        }
         // Parola alanı LG'nin geliştirici modu adımlarında da görünür: CouchSubs geliştirici modunu göremese de TV'de Key
         // Server ve parola açıksa kullanıcı takılmaz (#94). Anahtar ancak "TV'ye kur"a basılınca istenir.
         PassphraseArea.Visibility = Visible(state.Kind == TvAppKind.NeedsPassphrase || (devModeOff && brand == TvBrand.Lg));
         OpenAgain.Visibility = Visible(state.Kind == TvAppKind.SignIn);
         if (state.Kind != TvAppKind.SignIn) CopyLink.Content = text["Copy the link"];
         Retry.Visibility = Visible(state.Kind == TvAppKind.Failed);
+        // Hata varken (LG'nin parola adımındaki hata dahil) günlük gösterilip kopyalanabilir.
+        LogActions.Visibility = Visible(state.Error is not null);
+        if (state.Error is null) CopyLog.Content = text["Copy the log"];
         // Uygulama "hazır" görünüp TV'de yoksa ya da açılmıyorsa (TV uygulaması bağlı değil) yeniden kurulabilir.
         Reinstall.Visibility = Visible(state.Kind == TvAppKind.UpToDate && controller?.CanReinstallTvApp == true);
         SamsungHostStep.Text = text["3. Turn Developer mode On, type this computer's address as Host PC IP: %@ and press OK."]
             .Replace("%@", controller?.ComputerAddress ?? "?");
+        // Wi-Fi ve Ethernet ikisi de bağlıysa ya da birden çok ağ varsa diğer adresler de yazılır.
+        if (brand == TvBrand.Samsung && controller?.OtherComputerAddresses is { Length: > 0 } others)
+            SamsungHostStep.Text += "\n" + text.Format(TvAppMessages.OtherAddressesLine, string.Join(", ", others));
 
         Status.Text = state.Kind switch
         {
@@ -93,6 +116,7 @@ public partial class TvAppCard : UserControl
             TvAppKind.SignIn => text["The Samsung account page opened in your browser. Finish signing in there. If you do not see it, switch to the browser or press Open the page again."],
             TvAppKind.ApproveOnTv => text["Look at the TV: it asks whether to allow debugging from this computer."],
             TvAppKind.PressInstallOnTv => text["The Google Play page opened on the TV: press Install (or Update) with the TV remote. The app opens by itself once it is installed."],
+            TvAppKind.ChooseAndroidTv => text["More than one Android TV with debugging on was found on the network. Which one is yours?"],
             _ => "",
         };
         Detail.Text = state.Kind switch
@@ -141,6 +165,28 @@ public partial class TvAppCard : UserControl
         try { Clipboard.SetText(url.AbsoluteUri); }
         catch (System.Runtime.InteropServices.COMException) { return; } // pano başka bir uygulamada kilitli
         CopyLink.Content = Localizer.Current["Copied"];
+    }
+
+    /// <summary>Kurulum günlüğünü Explorer'da seçili gösterir; dosya henüz yoksa klasörünü açar.</summary>
+    private void OnShowLog(object sender, RoutedEventArgs e)
+    {
+        var path = Services.LiveServices.TvInstallLogPath;
+        try
+        {
+            if (System.IO.File.Exists(path)) Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+            else Process.Start(new ProcessStartInfo(System.IO.Path.GetDirectoryName(path)!) { UseShellExecute = true });
+        }
+        catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException) { }
+    }
+
+    /// <summary>Günlüğün sonunu panoya kopyalar (GitHub'a ya da iletiye yapıştırmak için).</summary>
+    private void OnCopyLog(object sender, RoutedEventArgs e)
+    {
+        var log = TvInstall.InstallLog.ReadTail(Services.LiveServices.TvInstallLogPath);
+        if (log.Length == 0) return;
+        try { Clipboard.SetText(log); }
+        catch (System.Runtime.InteropServices.COMException) { return; } // pano başka bir uygulamada kilitli
+        CopyLog.Content = Localizer.Current["Copied"];
     }
 
     private void OnGuide(object sender, RoutedEventArgs e) =>

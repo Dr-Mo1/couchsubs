@@ -42,6 +42,20 @@
             <!-- Sol: denetimler ve durum -->
             <ScrollViewer Width="{DynamicResource size.mainColumn}" VerticalScrollBarVisibility="Auto" Focusable="False" Margin="0,0,12,0">
                 <StackPanel Margin="0,0,0,8">
+                    <!-- Önceki çalışma yerel bir hatayla kapandı: kayıt yalnız bu bilgisayarda, bir kez bildirilir -->
+                    <c:Card x:Name="CrashCard" Margin="0,0,0,12" Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock Text="{t:T 'CouchSubs closed unexpectedly last time.'}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <TextBlock Text="{t:T 'A crash record was saved on this computer. It stays here and is never sent anywhere on its own; you can add it when you report the problem.'}"
+                                       Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,6,0,0" />
+                            <WrapPanel Margin="0,4,0,0">
+                                <Button Content="{t:T 'Show crash record'}" Style="{StaticResource SecondaryButton}" Margin="0,8,8,0" Click="OnShowCrash" />
+                                <Button x:Name="CrashCopyButton" Content="{t:T 'Copy summary'}" Style="{StaticResource SecondaryButton}" Margin="0,8,8,0" Click="OnCopyCrash" />
+                                <Button Content="{t:T 'Close'}" Style="{StaticResource SecondaryButton}" Margin="0,8,0,0" Click="OnDismissCrash" />
+                            </WrapPanel>
+                        </StackPanel>
+                    </c:Card>
+
                     <!-- Yeni sürüm -->
                     <c:Card x:Name="UpdateCard" Margin="0,0,0,12" Visibility="Collapsed">
                         <StackPanel>
@@ -50,6 +64,12 @@
                             <TextBlock x:Name="UpdateErrorText" Foreground="{DynamicResource dangerBrush}" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="Collapsed" />
                             <Button x:Name="UpdateButton" Content="{t:T 'Update now'}" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left"
                                     Margin="0,12,0,0" Click="OnUpdate" />
+                            <Expander x:Name="UpdateNotes" Margin="0,8,0,0" Header="{t:T 'Release notes'}"
+                                      Foreground="{DynamicResource textPrimaryBrush}" Expanded="OnUpdateNotesExpanded">
+                                <ScrollViewer MaxHeight="240" VerticalScrollBarVisibility="Auto" Margin="0,6,0,0">
+                                    <TextBlock x:Name="UpdateNotesText" Style="{StaticResource SecondaryText}" TextWrapping="Wrap" />
+                                </ScrollViewer>
+                            </Expander>
                         </StackPanel>
                     </c:Card>
 
@@ -70,10 +90,30 @@
                                     <DataTrigger Binding="{Binding ShowsOnTv}" Value="True">
                                         <Setter Property="Content" Value="{t:T 'Test on TV'}" />
                                     </DataTrigger>
+                                    <!-- TV uygulaması bağlı değilse önce TV'de açılır, bağlanınca deneme altyazısı gider. -->
+                                    <DataTrigger Binding="{Binding OpeningTvAppForTest}" Value="True">
+                                        <Setter Property="Content" Value="{t:T 'Opening the app on the TV…'}" />
+                                        <Setter Property="IsEnabled" Value="False" />
+                                    </DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
                     </Button>
+                    <!-- Deneme yazısı TV'ye gitmediyse: TV'deki 6 haneli kod bir yere yazılmaz, bu bilgisayarda onaylanır. -->
+                    <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,8,0,0"
+                               Text="{t:T 'The test subtitle did not reach the TV because the TV app is not connected. Open CouchSubs on the TV. If the TV shows a 6-digit code, don\'t type it anywhere: approve it in the “Pair this TV?” window that opens on this computer, then test again.'}"
+                               Visibility="{Binding ShowTestTvHint, Converter={StaticResource VisibleIf}}" />
+
+                    <!-- Çeviri sürüyor ama TV uygulaması bağlı değil: CouchSubs TV'de nerede (markaya göre), otomatik açma neden
+                         olmadı ve "Otomatik açmayı dene" (Mac, iPhone ve Android ile aynı). -->
+                    <c:Card Margin="0,12,0,0" Visibility="{Binding ShowTvOpenHint, Converter={StaticResource VisibleIf}}">
+                        <StackPanel>
+                            <TextBlock Text="{Binding TvOpenHintText}" Foreground="{DynamicResource textPrimaryBrush}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding TvOpenReasonText}" Foreground="{DynamicResource warningBrush}" TextWrapping="Wrap" Margin="0,8,0,0"
+                                       Visibility="{Binding HasTvOpenReason, Converter={StaticResource VisibleIf}}" />
+                            <Button Content="{t:T 'Try opening automatically'}" HorizontalAlignment="Left" Margin="0,12,0,0" Padding="16,0" Click="OnRetryTvOpen" />
+                        </StackPanel>
+                    </c:Card>
 
                     <!-- Durum karoları -->
                     <Grid Margin="0,12,0,0">
@@ -101,7 +141,16 @@
                                     </Style.Triggers>
                                 </Style>
                             </c:Card.Style>
-                            <c:StatusRow Title="{Binding ConsoleTitle}" Glyph="{x:Static c:Glyphs.Controller}" Value="{Binding Ps5StatusText}" Tone="{Binding Ps5Tone}" />
+                            <StackPanel>
+                                <c:StatusRow x:Name="ConsoleStatus" Title="{Binding ConsoleTitle}" Glyph="{x:Static c:Glyphs.Controller}" Value="{Binding Ps5StatusText}" Tone="{Binding Ps5Tone}" />
+                                <!-- Xbox seçili ama Microsoft girişi ya da Xbox seçimi eksik (Mac ana ekranı ile aynı). -->
+                                <Button Content="{Binding XboxLinkTitle}" HorizontalAlignment="Left" Margin="0,12,0,0" Padding="16,0" Click="OnLinkXbox"
+                                        Style="{StaticResource PrimaryButton}" Visibility="{Binding NeedsXboxLink, Converter={StaticResource VisibleIf}}" />
+                                <!-- Oturum yeniden denemeyi bıraktıysa hemen, süren denemelerde 45 sn sonra: uygulamayı kapatıp açmadan
+                                     konsol bağlantısı baştan kurulur, çeviri sürer (ReconnectOffer; Mac, iPhone ve Android ile aynı). -->
+                                <Button Content="{t:T 'Reconnect'}" HorizontalAlignment="Left" Margin="0,12,0,0" Padding="16,0" Click="OnReconnect"
+                                        Visibility="{Binding OffersReconnect, Converter={StaticResource VisibleIf}}" />
+                            </StackPanel>
                         </c:Card>
 
                         <!-- Altyazı yalnız bilgisayar ekranındaysa TV durumu gösterilmez. -->
@@ -119,19 +168,41 @@
                                 <c:StatusRow Title="TV" Glyph="{x:Static c:Glyphs.Tv}" Value="{Binding TvStatusText}" Tone="{Binding TvTone}" />
                                 <Button Content="{t:T 'Connect a TV'}" HorizontalAlignment="Left" Margin="0,12,0,0" Padding="16,0" Click="OnConnectTv"
                                         Visibility="{Binding NeedsTv, Converter={StaticResource VisibleIf}}" />
+                                <!-- TV eşleşmiş ama TV uygulaması bağlı değil (LG): TV adımı açılır; başka TV seçilir ya da kurulum adımları yeniden izlenir. -->
+                                <Button Content="{t:T 'Connect a TV'}" HorizontalAlignment="Left" Margin="0,12,0,0" Padding="16,0" Click="OnConnectTv"
+                                        Visibility="{Binding CanReconnectTv, Converter={StaticResource VisibleIf}}" />
                                 <!-- TV uygulaması bağlanmıyor (ör. TV'den kaldırıldı): TV adımı açılır, uygulama yeniden kurulur ya da açılır. -->
                                 <Button Content="{t:T 'Reinstall the TV app'}" HorizontalAlignment="Left" Margin="0,12,0,0" Padding="16,0" Click="OnReinstallTvApp"
                                         Visibility="{Binding CanReinstallTvApp, Converter={StaticResource VisibleIf}}" />
+                                <!-- TV eşleşmişken (TV uygulaması bağlı olsa da) yalnız TV adımı açılır: başka TV seçilir, "Yeniden kur…" gerekmez. -->
+                                <Button Style="{StaticResource GhostButton}" Content="{t:T 'Change TV'}" HorizontalAlignment="Left" Margin="0,8,0,0" Click="OnConnectTv"
+                                        Visibility="{Binding CanChangeTv, Converter={StaticResource VisibleIf}}" />
                             </StackPanel>
                         </c:Card>
 
                         <!-- Altyazının yeri: TV, bilgisayar ekranı ya da ikisi -->
-                        <local:SubtitleOutputCard x:Name="OutputCard" Grid.Row="2" Grid.ColumnSpan="3" />
+                        <StackPanel Grid.Row="2" Grid.ColumnSpan="3">
+                            <!-- Kurulum bitmeden de uygulama örnek görüntülerle denenebilir. -->
+                            <local:DemoModeButton x:Name="DemoButton" ButtonStyle="GhostButton" Large="True" HorizontalAlignment="Left"
+                                                  Margin="0,0,0,12" Visibility="Collapsed" />
+                            <local:SubtitleOutputCard x:Name="OutputCard" />
+                        </StackPanel>
 
                         <!-- Bilgi karosu: çeviri motoru (Ayarlar › Çeviri'yi açar) ve ekranı çevirme kısayolu. Canlı durum değil, ayar
                              bilgisi olduğu için durum karoları gibi simgeli ve büyük değil (docs/TASARIM.md › InfoCard). -->
                         <c:Card Grid.Row="4" Grid.ColumnSpan="3" Padding="16,4">
                             <StackPanel>
+                                <!-- Görüntünün nereden okunduğu; dokununca Ayarlar › Görüntü kaynağı (Xbox'ta gizli). -->
+                                <StackPanel x:Name="PictureSourceRow">
+                                    <Button Style="{StaticResource InfoRowButton}" Click="OnPictureSourceSettings"
+                                            AutomationProperties.Name="{t:T 'Picture source'}">
+                                        <DockPanel>
+                                            <TextBlock Text="{t:T 'Picture source'}" Style="{StaticResource InfoRowLabel}" />
+                                            <TextBlock x:Name="PictureSourceText" Style="{StaticResource InfoRowValue}" HorizontalAlignment="Right" Margin="12,0,0,0" />
+                                        </DockPanel>
+                                    </Button>
+                                    <Border Style="{StaticResource InfoDivider}" />
+                                </StackPanel>
                                 <Button Style="{StaticResource InfoRowButton}" Click="OnTranslationSettings"
                                         AutomationProperties.Name="{t:T 'Translation'}">
                                     <DockPanel>
@@ -240,6 +311,8 @@
 
             <!-- Sağ: oyun paketi ve canlı altyazı -->
             <DockPanel Grid.Column="1">
+                <!-- Deneme modunda: rozet, "Çık" düğmesi ve okunan örnek oyun görüntüsü. -->
+                <local:DemoFrameTile DockPanel.Dock="Top" Margin="0,0,0,12" />
                 <c:Card x:Name="PackTile" DockPanel.Dock="Top" Margin="0,0,0,12" Visibility="Collapsed">
                     <DockPanel>
                         <Border Style="{StaticResource ProIcon}" Margin="0,0,12,0" VerticalAlignment="Center">
@@ -257,8 +330,23 @@
                                    Visibility="{Binding LastTranslation, Converter={StaticResource VisibleIf}, ConverterParameter=invert}" />
                         <!-- Çeviri PS5'ten (ikinci hesap) okunurken: kolu açınca ana hesap seçilmeli (GitHub #231). -->
                         <TextBlock Style="{StaticResource HintText}" Margin="0,8,0,0" TextWrapping="Wrap"
-                                   Text="{t:T 'When you turn on the controller to play, choose your MAIN account on the PS5. Don\'t play with the second account CouchSubs signs in with, or the controller won\'t work in the game.'}"
+                                   Text="{t:T 'To play without the connection dropping: 1. On the PS5, start the game with your MAIN account first. 2. Then start translating. 3. Don\'t switch users during the game; when you turn on the controller, choose your MAIN account. Don\'t play with the second account CouchSubs signs in with, or the controller will turn off by itself or won\'t work in the game.'}"
                                    Visibility="{Binding ShowsMainAccountTip, Converter={StaticResource VisibleIf}}" />
+                        <!-- Otomatik ekran yazısı beta.63'te açık geliyordu; bir kez kapatıldı, kullanıcıya söylenir. -->
+                        <TextBlock Style="{StaticResource HintText}" Margin="0,8,0,0" TextWrapping="Wrap"
+                                   Text="{t:T 'Automatic on-screen text translation is experimental; you can turn it on in Settings.'}"
+                                   Visibility="{Binding ShowsAutoScreenTextNotice, Converter={StaticResource VisibleIf}}" />
+                        <!-- Kullanım verisi ilk açılışta bir kez söylenir; ilk çeviride ya da ayar değişince kaybolur. -->
+                        <TextBlock Style="{StaticResource HintText}" Margin="0,8,0,0" TextWrapping="Wrap"
+                                   Text="{t:T 'CouchSubs measures how the app is used without linking it to you; no subtitle text, picture or account data is sent. You can turn this off in Settings › Game packs › Usage data.'}"
+                                   Visibility="{Binding ShowsUsageNotice, Converter={StaticResource VisibleIf}}" />
+                        <!-- Görüntü bir dakikadır geliyor ama hiç altyazı satırı okunmadı (GitHub #503, #566, #572). -->
+                        <TextBlock Style="{StaticResource HintText}" Margin="0,8,0,0" TextWrapping="Wrap"
+                                   Text="{t:T 'Turn on the game\'s own subtitles: CouchSubs reads the English subtitles on screen, not the audio.'}"
+                                   Visibility="{Binding ShowsSubtitleOffTip, Converter={StaticResource VisibleIf}}" />
+                        <TextBlock Style="{StaticResource HintText}" Margin="0,4,0,0" TextWrapping="Wrap"
+                                   Text="{t:T '“Watch subtitle background” is on: only text on GTA 6’s dark subtitle panel is read. Set the game’s subtitle background to Solid or turn this setting off.'}"
+                                   Visibility="{Binding ShowsSubtitleBackgroundTip, Converter={StaticResource VisibleIf}}" />
                         <TextBlock x:Name="LiveLine" Text="{Binding LastTranslation}" Style="{StaticResource LiveText}" Foreground="{DynamicResource accentTextBrush}" Margin="0,4,0,0"
                                    Visibility="{Binding LastTranslation, Converter={StaticResource VisibleIf}}" />
                         <TextBlock Text="{Binding LastSource}" Style="{StaticResource CaptionText}" Margin="0,8,0,0"

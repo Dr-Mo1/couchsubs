@@ -20,7 +20,17 @@
   const FRAME_WAIT_MS = 1000;
   let frameSentAt = 0;
   let frameWaiting = false;
-  let keepalive;
+  // İlk kare (#403, #530): Xbox kare onayı alamazsa ~60 sn'de kapatır; onay requestVideoFrameCallback'te gider.
+  // Uygulama ilk kare gelene kadar anahtar kare ister ve getStats tanısı sorar (XboxFirstFrameWatch).
+  let frameCallbacks = 0;
+  // Görüntü bekçisi (XboxPictureWatch): ilk kareden sonra saniyede bir yeni kare sayısı bildirilir; video öğesi
+  // donunca aynı kare yeniden okumaya gönderilmez (eskiden donmuş görüntü okunmayı sürdürüyor, altyazı takılı kalıyordu).
+  let pictureTimer = 0;
+  let capturedCallbacks = -1;
+  let firstFrameSent = false;
+  let keyframeReadySent = false;
+  // 'codec': anlaşılan görüntü kodeği tanı satırına girer (Xbox görüntü göndermeyince kodek mi, ayrılsın).
+  const STAT_TYPES = ['inbound-rtp', 'candidate-pair', 'local-candidate', 'remote-candidate', 'transport', 'codec'];
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d', { willReadFrequently: true });
   function send(message) { window.chrome.webview.postMessage(message); }
@@ -29,12 +39,55 @@
     send({ kind: 'rpc', id, command, args });
     return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
   }
+  function controlOpen() { return player?.getDataChannel('control')?.readyState === 'open'; }
+  function notifyKeyframeReady() {
+    if (keyframeReadySent || !controlOpen() || !document.querySelector('#stream video')) return;
+    keyframeReadySent = true;
+    send({ kind: 'keyframeReady' });
+  }
+  function watchFrames(video) {
+    if (!video.requestVideoFrameCallback) return;
+    const onFrame = (_, metadata) => {
+      frameCallbacks++;
+      if (!firstFrameSent) {
+        firstFrameSent = true;
+        send({ kind: 'firstFrame', width: metadata.width || video.videoWidth, height: metadata.height || video.videoHeight });
+        pictureTimer = setInterval(() => send({ kind: 'picture', callbacks: frameCallbacks }), 1000);
+      }
+      video.requestVideoFrameCallback(onFrame);
+    };
+    video.requestVideoFrameCallback(onFrame);
+  }
+  async function sendStats() {
+    const video = document.querySelector('#stream video');
+    const stats = [];
+    try {
+      const report = await player?._webrtcClient?.getStats();
+      report?.forEach(entry => { if (STAT_TYPES.includes(entry.type)) stats.push({ ...entry }); });
+    } catch { /* Tanı alınamadıysa yalnız video durumu yazılır. */ }
+    send({ kind: 'stats', stats, video: {
+      readyState: video?.readyState ?? -1, width: video?.videoWidth ?? 0, height: video?.videoHeight ?? 0,
+      visibility: document.visibilityState, callbacks: frameCallbacks,
+    } });
+  }
   function fail(error) { send({ kind: 'state', state: 'error', detail: String(error?.message || error) }); }
+  // Yayını bitirmeyen sorunlar (oynatıcı kitaplığındaki yakalanmamış hata, video.play reddi) yalnız günlüğe yazılır.
+  // Eskiden her biri fail() çağırıyor ve görüntü akarken oturum kapanıyordu.
+  function log(text) { send({ kind: 'log', text: String(text?.message || text) }); }
+  function play(video, retry = true) {
+    video.play().catch(error => {
+      log('video.play: ' + (error?.name || '') + ' ' + (error?.message || error));
+      if (retry) setTimeout(() => play(video, false), 1000);
+    });
+  }
   function capture(video) {
     if (!video || !video.videoWidth || !video.videoHeight) return;
     const now = performance.now();
     if (now - lastFrame < frameMs) return;
     if (frameWaiting && now - frameSentAt < FRAME_WAIT_MS) return;
+    // Kare sayılabiliyorsa yalnız yeni kare okunur.
+    if (firstFrameSent && frameCallbacks === capturedCallbacks) return;
+    capturedCallbacks = frameCallbacks;
     lastFrame = now;
     frameSentAt = now;
     frameWaiting = true;
@@ -52,6 +105,17 @@
     });
     player.bind();
     player.setControllerRumble(false);
+    player.getDataChannel('control')?.addEventListener('open', notifyKeyframeReady);
+    // Veri kanallarının açılışı ve message kanalının el sıkışması günlüğe girer (telefonlardaki "kanal …" satırları gibi):
+    // HandshakeAck gelmezse oynatıcı kontrol kanalında yetki isteğini göndermez, Xbox da görüntü göndermez.
+    for (const name of ['input', 'control', 'message', 'chat']) {
+      const channel = player.getDataChannel(name);
+      channel?.addEventListener('open', () => log('kanal ' + name + ': open'));
+      channel?.addEventListener('close', () => log('kanal ' + name + ': closed'));
+    }
+    player.getDataChannel('message')?.addEventListener('message', event => {
+      if (typeof event.data === 'string' && event.data.includes('"HandshakeAck"')) log('kanal message: HandshakeAck');
+    });
     player.setSdpHandler(async (_, offer) => {
       try {
         const answer = await rpc('chatSdp', { sdp: offer.sdp });
@@ -59,6 +123,8 @@
       } catch (error) { fail(error); }
     });
     player.getEventBus().on('connectionstate', event => {
+      // Bağlantı takıldığı ya da koptuğu anki ağ durumu günlüğe girsin.
+      if (event.state === 'disconnected' || event.state === 'failed') sendStats();
       send({ kind: 'state', state: event.state });
       if (event.state === 'connected') {
         const applyAudioPreference = () => {
@@ -79,7 +145,9 @@
           const video = document.querySelector('#stream video');
           if (!video) return false;
           video.muted = true;
-          video.play().catch(fail);
+          watchFrames(video);
+          notifyKeyframeReady();
+          play(video);
           video.addEventListener('loadeddata', () => capture(video));
           frameTimer = setInterval(() => capture(video), frameMs);
           return true;
@@ -88,7 +156,6 @@
           const observer = new MutationObserver(() => { if (attach()) observer.disconnect(); });
           observer.observe(document.getElementById('stream'), { childList: true, subtree: true });
         }
-        keepalive = setInterval(() => rpc('keepalive').catch(fail), 30_000);
       }
     });
     try {
@@ -114,7 +181,7 @@
   }
   function stop() {
     clearInterval(frameTimer);
-    clearInterval(keepalive);
+    clearInterval(pictureTimer);
     audioObserver?.disconnect();
     audioObserver = undefined;
     for (const item of pending.values()) item.reject(new Error('Xbox stream stopped'));
@@ -130,13 +197,18 @@
       pending.delete(message.id);
       if (message.error) item.reject(new Error(message.error)); else item.resolve(message.value);
     } else if (message.kind === 'frameDone') frameWaiting = false;
+    else if (message.kind === 'keyframe') {
+      if (controlOpen()) player.getChannelProcessor('control')?.requestKeyframeRequest();
+    }
+    else if (message.kind === 'stats') sendStats();
     else if (message.kind === 'start') {
       frameMs = message.legacyFrameRate ? 200 : 66;
       playAudio = message.playAudio !== false;
-      start();
+      start().catch(fail);
     }
     else if (message.kind === 'stop') stop();
   });
-  window.addEventListener('error', event => fail(event.error || event.message));
+  window.addEventListener('error', event => log('hata: ' + (event.error?.stack || event.error || event.message)));
+  window.addEventListener('unhandledrejection', event => log('yakalanmamış söz: ' + (event.reason?.stack || event.reason)));
 })();
 </script></html>

@@ -21,6 +21,13 @@ internal static unsafe partial class NativeMethods
     internal const int QuitRefused = 2;
     internal const int QuitNetwork = 3;
     internal const int QuitOther = 4;
+    /// <summary>PS5'teki Uzaktan Oynatma çöktü (CHIAKI_QUIT_REASON_SESSION_REQUEST_RP_CRASH).</summary>
+    internal const int QuitRpCrashed = 5;
+    /// <summary>PSN üzerinden eşleme reddedildi (CHIAKI_QUIT_REASON_PSN_REGIST_FAILED); QuitRefused yalnız TCP reddidir.</summary>
+    internal const int QuitPsnRegistFailed = 6;
+    /// <summary>PS5 akışı kendisi kapattı (CHIAKI_QUIT_REASON_STREAM_CONNECTION_REMOTE_DISCONNECTED / _REMOTE_SHUTDOWN); metin
+    /// PS5'in nedenidir.</summary>
+    internal const int QuitConsoleClosed = 7;
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct RegisteredConsoleNative
@@ -59,8 +66,9 @@ internal static unsafe partial class NativeMethods
     /// <param name="eventCallback">void (*)(int event, int quit_reason, const char *reason_text, void *user)</param>
     [LibraryImport(Library, StringMarshalling = StringMarshalling.Utf8)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    internal static partial nint cs_session_start(string host, byte* registKey, byte* morning, byte* accountId, int maxFps,
-                                                  nint frame, nint eventCallback, nint log, nint user);
+    /// <param name="videoHeight">1080 ya da 720 (bağlantı sık koparsa daha az bant genişliği).</param>
+    internal static partial nint cs_session_start_ex(string host, byte* registKey, byte* morning, byte* accountId, int maxFps,
+                                                     int videoHeight, nint frame, nint eventCallback, nint log, nint user);
 
     [LibraryImport(Library)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

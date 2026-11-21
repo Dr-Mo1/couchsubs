@@ -200,12 +200,24 @@ public struct LocalAIServer: Equatable, Sendable {
         }
     }
 
-    /// Önbellekteki motor adı: sunucu (makine ve kapı) ve model girer; farklı yerel modellerin çevirileri karışmaz.
-    /// Ör. "local:localhost:11434/qwen2.5:7b".
+    /// Önbellekteki motor adı sunucu adresini ve modeli içerir; farklı yerel uç noktaların çevirileri karışmaz.
     public var engineID: String {
+        let scheme = baseURL.scheme?.lowercased() ?? ""
         let host = baseURL.host?.lowercased() ?? ""
-        let port = baseURL.port.map { ":\($0)" } ?? ""
-        return "\(AIProvider.local.rawValue):\(host)\(port)/\(model)"
+        let port = baseURL.port.map { String($0) } ?? ""
+        let path = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)?.percentEncodedPath ?? baseURL.path
+
+        // Standart HTTP /v1 adresinin mevcut önbellek anahtarını koru.
+        if scheme == "http", path == "/v1" {
+            let legacyPort = baseURL.port.map { ":\($0)" } ?? ""
+            return "\(AIProvider.local.rawValue):\(host)\(legacyPort)/\(model)"
+        }
+
+        // Alan uzunlukları yol ve model ayraçlarının yeni bir önbellek çakışması oluşturmasını engeller.
+        let endpoint = [scheme, host, port, path, model]
+            .map { "\($0.utf8.count):\($0)" }
+            .joined(separator: "|")
+        return "\(AIProvider.local.rawValue):endpoint-v2:\(endpoint)"
     }
 }
 
@@ -222,6 +234,8 @@ public enum AIFailure: Error, Equatable, Sendable {
     /// Hizmete ulaşıldı ama şu an yoğun (5xx, Gemini 503 "overloaded", Claude 529), yanıt zamanında gelmedi ya da
     /// "Dene" dakikalık sınıra takıldı. Anahtar reddedilmedi, internet de çalışıyor.
     case busy
+    /// Test sonucu ne olursa olsun API anahtarı cihazın Anahtar Zinciri'ne kaydedilemedi.
+    case keychainWriteFailed
 }
 
 /// Hizmetin bildirdiği dakikalık istek sınırı aşımı (429). Gün sınırından farklı olarak kısa sürer; kullanıcıya hata
@@ -271,6 +285,9 @@ public enum AIRequest {
         "Doesn't 00k good."); translate the line the speaker clearly meant. \
         A subtitle may continue the previous one (it starts in lowercase or with a word like "and"); \
         translate it so that it reads as that continuation. \
+        Short menu items, objectives and button labels without a subject ("Make Money", "Find Donnie's Package") \
+        are commands to the player: translate them as short singular informal imperatives ("Para Kazan", \
+        "Donnie'nin Paketini Bul"), never polite or plural forms such as "Para Kazanın". \
         Reply with only the translation, no explanations, notes or quotes.
         """
 
@@ -625,7 +642,7 @@ public final class AITranslationCore: @unchecked Sendable {
     /// `instruction`: Ayarlardaki "Ek talimat"; sistem talimatının sonuna eklenir, boşsa hiçbir şey değişmez.
     public init(provider: AIProvider, key: String, model: String? = nil, server: LocalAIServer? = nil, session: URLSession? = nil,
                 cache: TranslationCache = TranslationCache(), budget: RequestBudget? = nil, game: (@Sendable () -> String?)? = nil,
-                instruction: String? = nil) {
+                instruction: String? = nil, paidTier: Bool = false) {
         self.provider = provider
         errorPause = provider.isLocal ? Self.localRetryAfter : Self.retryAfter
         self.game = game
@@ -638,7 +655,7 @@ public final class AITranslationCore: @unchecked Sendable {
         self.session = session ?? Self.makeSession(provider: provider)
         screenSession = session ?? Self.makeSession(timeout: provider.isLocal ? Self.localTestTimeout : Self.screenTimeout)
         self.cache = cache
-        self.budget = budget ?? RequestBudget.shared(provider: provider, model: resolved)
+        self.budget = budget ?? RequestBudget.shared(provider: provider, model: resolved, apiKey: self.key, paidTier: paidTier)
     }
 
     /// Bulut hizmetinde beklenen en uzun süre.
@@ -653,6 +670,7 @@ public final class AITranslationCore: @unchecked Sendable {
     public static let localTimeout: TimeInterval = 15
     /// "Bağlantıyı dene"de yerel model için beklenen süre: ilk istek modeli belleğe yükler, uzun sürebilir.
     public static let localTestTimeout: TimeInterval = 90
+    static let cloudKeyTestTimeout: TimeInterval = 15
 
     /// Kısa zaman aşımı: altyazı birkaç saniye ekranda kalır, geç gelen çeviri işe yaramaz.
     public static func makeSession(timeout: TimeInterval = AITranslationCore.timeout) -> URLSession {
@@ -664,6 +682,14 @@ public final class AITranslationCore: @unchecked Sendable {
     /// Hizmete uygun zaman aşımıyla oturum.
     public static func makeSession(provider: AIProvider) -> URLSession {
         makeSession(timeout: provider.isLocal ? localTimeout : timeout)
+    }
+
+    static func makeKeyTestSession(provider: AIProvider) -> URLSession {
+        let limit = provider.isLocal ? localTestTimeout : cloudKeyTestTimeout
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = limit
+        configuration.timeoutIntervalForResource = limit
+        return URLSession(configuration: configuration)
     }
 
     /// Hattın ayırdığı konuşan adı; istemde adıyla söylenir.
@@ -685,15 +711,25 @@ public final class AITranslationCore: @unchecked Sendable {
         // beklemede yerel çeviri yoksa (indirilmemiş, açılamadı) satır düşmesin: hizmet yine denenir. 429 beklemesi kalır.
         let (paused, pausedForLimit) = lock.withLock { (Date() < pausedUntil, pauseRateLimited) }
         if !sources.isEmpty, paused {
-            if pausedForLimit { return remember(try await fallback(text), for: text, game: game) }
-            if let local = try await Self.tryFallback(text, fallback: fallback) { return remember(local, for: text, game: game) }
+            if pausedForLimit {
+                TranslationProbe.current?.noteFallback("\(provider.rawValue) dakikalık hizmet sınırı")
+                return remember(try await fallback(text), for: text, game: game)
+            }
+            if let local = try await Self.tryFallback(text, fallback: fallback) {
+                let reason = lastFailure.map { String(describing: $0) } ?? "bekleme"
+                TranslationProbe.current?.noteFallback("\(provider.rawValue) yeniden deneme beklemesi (\(reason))")
+                return remember(local, for: text, game: game)
+            }
         }
         // Dakikalık hak bittiyse satır sessizce yerel çeviriyle çevrilir (hata değildir). Hak uygulamanın temkinli
         // tahminidir; yerel çeviri yoksa satır denenmeden düşmesin, istek yine gönderilir.
         let allowed = sources.isEmpty || budget?.take() != false
         lock.withLock { rateLimited = !allowed }
         if !allowed {
-            if let local = try await Self.tryFallback(text, fallback: fallback) { return remember(local, for: text, game: game) }
+            if let local = try await Self.tryFallback(text, fallback: fallback) {
+                TranslationProbe.current?.noteFallback("\(provider.rawValue) uygulama dakikalık sınırı")
+                return remember(local, for: text, game: game)
+            }
             lock.withLock { rateLimited = false }
         }
         let translated: [String]
@@ -714,13 +750,16 @@ public final class AITranslationCore: @unchecked Sendable {
                 pausedUntil = Date().addingTimeInterval(pause)
                 pauseRateLimited = true
             }
+            TranslationProbe.current?.noteFallback("\(provider.rawValue) dakikalık hizmet sınırı")
             return remember(try await fallback(text), for: text, game: game)
         } catch {
-            setFailure(error as? AIFailure ?? .unreachable)
+            let reason = error as? AIFailure ?? .unreachable
+            setFailure(reason)
             lock.withLock {
                 pausedUntil = Date().addingTimeInterval(errorPause)
                 pauseRateLimited = false
             }
+            TranslationProbe.current?.noteFallback("\(provider.rawValue) hizmet durumu: \(reason)")
             return remember(try await fallback(text), for: text, game: game)
         }
         var local = false
@@ -731,6 +770,7 @@ public final class AITranslationCore: @unchecked Sendable {
             if empty || Self.isEcho(piece, sentence), let retried = try await Self.tryFallback(piece, fallback: fallback),
                !retried.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !Self.isEcho(piece, retried) {
                 // Yerel çeviri bu motorun önbelleğine yazılmaz.
+                TranslationProbe.current?.noteFallback("\(provider.rawValue) boş veya değişmemiş yanıt")
                 translations[index] = retried
                 local = true
                 continue
@@ -930,7 +970,7 @@ public final class AITranslationCore: @unchecked Sendable {
                             sample: String = AITranslationCore.sample, session: URLSession? = nil) async -> Result<String, AIFailure> {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty || provider.isLocal else { return .failure(.invalidKey) }
-        let session = session ?? makeSession(timeout: provider.isLocal ? localTestTimeout : timeout)
+        let session = session ?? makeKeyTestSession(provider: provider)
         // Deneme tek istektir; çeviri hattının dakikalık hakkından yemez.
         let translator = AITranslationCore(provider: provider, key: key, model: model, server: server, session: session,
                                            budget: RequestBudget(perMinute: .max))

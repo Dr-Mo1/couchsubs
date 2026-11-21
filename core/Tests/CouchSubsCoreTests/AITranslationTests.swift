@@ -936,10 +936,20 @@ final class AITranslationTests: XCTestCase {
     func testTimeoutFallsBack() async throws {
         FakeAI.timeout = true
         let translator = make(.claude)
-        let result = try await translator.translate("Run!", fallback: local)
+        let probe = TranslationProbe()
+        let result = try await TranslationProbe.$current.withValue(probe) {
+            try await translator.translate("Run!", fallback: local)
+        }
         XCTAssertEqual(result, "yerel: Run!")
+        XCTAssertTrue(probe.outcome().contains("ücretsiz yedek: claude hizmet durumu: busy"))
         // Zaman aşımı: hizmete ulaşıldı ama yanıt zamanında gelmedi; "internet bağlantınızı denetleyin" denmez.
         XCTAssertEqual(translator.lastFailure, .busy)
+    }
+
+    func testClaudeKeyTestHasABoundedTotalTimeout() {
+        let session = AITranslationCore.makeKeyTestSession(provider: .claude)
+        XCTAssertGreaterThan(session.configuration.timeoutIntervalForRequest, AITranslationCore.timeout)
+        XCTAssertEqual(session.configuration.timeoutIntervalForResource, AITranslationCore.cloudKeyTestTimeout)
     }
 
     // MARK: - Ücretsiz katman
@@ -962,6 +972,30 @@ final class AITranslationTests: XCTestCase {
         let old = AIModel.parse(Data(#"{"gemini":[{"id":"g","label":"L"}]}"#.utf8))["gemini"]?.first
         XCTAssertEqual(old, AIModel(id: "g", label: "L"))
         XCTAssertEqual(old?.freeTier, false)
+    }
+
+    func testGeminiPaidTierDefaultsOffAndSurvivesSettingsSerialization() throws {
+        let legacy = try JSONDecoder().decode(UserSettings.self, from: Data("{}".utf8))
+        XCTAssertFalse(legacy.geminiPaidTier)
+        var enabled = legacy
+        enabled.geminiPaidTier = true
+        let restored = try JSONDecoder().decode(UserSettings.self, from: JSONEncoder().encode(enabled))
+        XCTAssertTrue(restored.geminiPaidTier)
+    }
+
+    func testGeminiPaidKeysSkipFreeTierBudgetAndFreeKeysStayIsolated() {
+        let model = AIProvider.gemini.defaultModel
+        let free = RequestBudget.shared(provider: .gemini, model: model, apiKey: "free-key-one")
+        XCTAssertNotNil(free)
+        XCTAssertTrue(free === RequestBudget.shared(provider: .gemini, model: model, apiKey: "free-key-one"))
+        XCTAssertFalse(free === RequestBudget.shared(provider: .gemini, model: model, apiKey: "free-key-two"))
+        let paid = RequestBudget.shared(provider: .gemini, model: model, apiKey: "paid-key", paidTier: true)
+        XCTAssertNotNil(paid)
+        XCTAssertFalse(paid === RequestBudget.shared(provider: .gemini, model: model, apiKey: "paid-key"))
+        XCTAssertEqual(paid?.perMinute, Int.max)
+        paid?.lower(to: 7) // the provider's actual 429 limit still applies
+        XCTAssertEqual(paid?.perMinute, 7)
+        XCTAssertTrue(paid === RequestBudget.shared(provider: .gemini, model: model, apiKey: "paid-key", paidTier: true))
     }
 
     /// Kayan bir dakikalık pencere: hak bitince istek verilmez, en eski istek pencereden çıkınca yeniden verilir.

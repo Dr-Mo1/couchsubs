@@ -28,6 +28,104 @@ public class SamsungTvTests
         Assert.Equal("http://1.2.3.4:8787", JsonNode.Parse(data["metaTag"]!.GetValue<string>())!["server"]!.GetValue<string>());
     }
 
+    /// <summary>
+    /// #637, #511: kurulu olmayan uygulamaya DEEP_LINK gidince Smart Hub "Sunucu bakım altında (1544007)" diyor; önce
+    /// TV'nin kurulu uygulama listesine bakılır.
+    /// </summary>
+    [Fact]
+    public void KnownInstalledAppLaunchesWithoutTheList()
+    {
+        // Uygulama bu TV'den daha önce bağlandı ya da bu cihaz kurdu: listeye bakılmaz, liste "yok" dese de açılır.
+        Assert.False(SamsungAppKnowledge.ChecksList(knownInstalled: true));
+        Assert.Equal("DEEP_LINK", SamsungAppKnowledge.ActionFor(true, SamsungAppPresence.Missing));
+        Assert.Equal("DEEP_LINK", SamsungAppKnowledge.ActionFor(true, null));
+        // Hiç bağlanmamış ve kurulum kaydı yok: liste belirler; listede yoksa komut gönderilmez (#637).
+        Assert.True(SamsungAppKnowledge.ChecksList(knownInstalled: false));
+        Assert.Null(SamsungAppKnowledge.ActionFor(false, SamsungAppPresence.Missing));
+        Assert.Equal("DEEP_LINK", SamsungAppKnowledge.ActionFor(false, SamsungAppPresence.Installed(2)));
+        Assert.Equal("NATIVE_LAUNCH", SamsungAppKnowledge.ActionFor(false, SamsungAppPresence.Installed(4)));
+        Assert.Equal("DEEP_LINK", SamsungAppKnowledge.ActionFor(false, null));
+    }
+
+    [Fact]
+    public void ConnectedTvIsRememberedAsInstalled()
+    {
+        var host = "192.0.2." + Random.Shared.Next(1, 250);
+        var saved = new List<string>();
+        var before = SamsungAppKnowledge.Changed;
+        SamsungAppKnowledge.Changed = saved.Add;
+        try
+        {
+            Assert.False(SamsungAppKnowledge.IsKnown(host));
+            SamsungAppKnowledge.Mark(host);
+            SamsungAppKnowledge.Mark(host);
+            Assert.True(SamsungAppKnowledge.IsKnown(" " + host + " "));
+            Assert.Equal([host], saved);
+            SamsungAppKnowledge.Forget(host);
+            Assert.False(SamsungAppKnowledge.IsKnown(host));
+            Assert.False(SamsungAppKnowledge.IsKnown(null));
+        }
+        finally { SamsungAppKnowledge.Changed = before; }
+    }
+
+    /// <summary>
+    /// Modem TV'ye yeni adres verince (TvLocator) kurulu olduğu bilgisi yeni adrese geçer: yoksa bekçi yeni adreste
+    /// listeye bakıyor, liste geliştirici moduyla kurulan uygulamayı içermiyorsa uygulamayı hiç açmıyordu.
+    /// </summary>
+    [Fact]
+    public void KnowledgeFollowsTheTvToItsNewAddress()
+    {
+        var old = "198.51.100." + Random.Shared.Next(1, 120);
+        var moved = "198.51.100." + Random.Shared.Next(130, 250);
+        var stranger = "203.0.113." + Random.Shared.Next(1, 250);
+        var saved = new List<string>();
+        var before = SamsungAppKnowledge.Changed;
+        SamsungAppKnowledge.Changed = saved.Add;
+        try
+        {
+            SamsungAppKnowledge.Mark(old, notify: false);
+            Assert.False(SamsungAppKnowledge.ChecksList(SamsungAppKnowledge.IsKnown(old)));
+            Assert.True(SamsungAppKnowledge.ChecksList(SamsungAppKnowledge.IsKnown(moved)));
+            SamsungAppKnowledge.Carry(old, moved);
+            Assert.True(SamsungAppKnowledge.IsKnown(moved));
+            Assert.Equal("DEEP_LINK", SamsungAppKnowledge.ActionFor(SamsungAppKnowledge.IsKnown(moved), SamsungAppPresence.Missing));
+            // Yeni adres saklanır (Windows'ta tvAppSeen); ikinci taşıma yeniden yazmaz.
+            Assert.Equal([moved], saved);
+            SamsungAppKnowledge.Carry(old, moved);
+            Assert.Equal([moved], saved);
+            // Bilinmeyen TV'den bilgi taşınmaz.
+            SamsungAppKnowledge.Carry(stranger, "203.0.113.251");
+            Assert.False(SamsungAppKnowledge.IsKnown("203.0.113.251"));
+            SamsungAppKnowledge.Carry(old, null);
+        }
+        finally
+        {
+            SamsungAppKnowledge.Changed = before;
+            SamsungAppKnowledge.Forget(old);
+            SamsungAppKnowledge.Forget(moved);
+        }
+    }
+
+    [Fact]
+    public void InstalledAppListDecidesLaunch()
+    {
+        var request = JsonNode.Parse(SamsungMessages.InstalledAppsRequest)!;
+        Assert.Equal("ed.installedApp.get", request["params"]!["event"]!.GetValue<string>());
+
+        const string listed = "{\"data\":{\"data\":[{\"appId\":\"111299001912\",\"app_type\":2,\"name\":\"YouTube\"}," +
+                              "{\"appId\":\"CouchSubsT.CouchSubs\",\"app_type\":2,\"name\":\"CouchSubs\"}]},\"event\":\"ed.installedApp.get\",\"from\":\"host\"}";
+        Assert.Equal(SamsungAppPresence.Installed(2), SamsungMessages.InstalledApp(listed, "CouchSubsT.CouchSubs"));
+        Assert.Equal(SamsungAppPresence.Missing, SamsungMessages.InstalledApp(listed.Replace("CouchSubsT.CouchSubs", "Baska.App"), "CouchSubsT.CouchSubs"));
+        Assert.Null(SamsungMessages.InstalledApp("{\"event\":\"ed.edenTV.update\",\"data\":{}}", "CouchSubsT.CouchSubs"));
+        Assert.Null(SamsungMessages.InstalledApp("not json", "CouchSubsT.CouchSubs"));
+
+        Assert.Equal("DEEP_LINK", SamsungMessages.ActionType(2));
+        Assert.Equal("DEEP_LINK", SamsungMessages.ActionType(null));
+        Assert.Equal("NATIVE_LAUNCH", SamsungMessages.ActionType(4));
+        var native = JsonNode.Parse(SamsungMessages.Launch("A.B", new Dictionary<string, string>(), "NATIVE_LAUNCH"))!;
+        Assert.Equal("NATIVE_LAUNCH", native["params"]!["data"]!["action_type"]!.GetValue<string>());
+    }
+
     [Fact]
     public void ConnectionResults()
     {

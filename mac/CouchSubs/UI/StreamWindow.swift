@@ -62,6 +62,8 @@ final class StreamWindowController: NSObject, NSWindowDelegate {
 /// Pencerenin içeriği: düz zemin ve TV'deki altyazı kutusu (yazı boyu 1080 satırlık ekrana göre pencereye ölçeklenir).
 struct StreamWindowView: View {
     @EnvironmentObject private var model: AppModel
+    /// Altyazı satırlarının penceredeki yeri: ekran yazısı kutuları onunla çakışırsa kayar (altyazı yerinde kalır).
+    @State private var subtitleFrame: CGRect?
 
     var body: some View {
         GeometryReader { proxy in
@@ -69,17 +71,41 @@ struct StreamWindowView: View {
             VStack(spacing: 14 * scale) {
                 // Sürekli okunan ek alanların çevirisi saydam penceredeki gibi üstte, alanın yanına yaslı.
                 VStack(spacing: 10 * scale) {
-                    ForEach(model.overlayRegions) { regionBox($0, scale: scale) }
+                    // Ekran yazıları (bloklu) aşağıda kendi yerlerinde çizilir.
+                    ForEach(model.overlayRegions.filter { $0.items == nil }) { regionBox($0, scale: scale) }
                 }
                 .padding(.top, 16 * scale)
                 Spacer(minLength: 0)
-                ForEach(model.overlayLines) { line(line: $0, scale: scale) }
+                VStack(spacing: 14 * scale) {
+                    // "Ekranı çevir" çevirileri aşağıda kendi yerlerinde: yığındaki düz listeleri gösterilmez.
+                    ForEach(Self.lines(model.overlayLines, without: model.overlayScreenItems.isEmpty ? nil : model.overlayScreenText)) {
+                        line(line: $0, scale: scale)
+                    }
+                }
+                .background(GeometryReader { lines in
+                    Color.clear.preference(key: SubtitleFrameKey.self,
+                                           value: model.overlayLines.isEmpty ? nil : lines.frame(in: .named("stream")))
+                })
             }
             .padding(.horizontal, 24 * scale)
             .padding(.bottom, proxy.size.height * 0.07)
             .frame(width: proxy.size.width, height: proxy.size.height)
+            .background {
+                if !model.overlayPhoneItems.isEmpty { GamePhoneBlocks(items: model.overlayPhoneItems) }
+                // Aynı yazıyı çizen iki kutudan yalnız biri: "Ekranı çevir" otomatik ekran yazısının üstüne geçer (#827).
+                let screenText = ScreenTranslation.layered(model.overlayRegions.flatMap { $0.items ?? [] } + model.overlayScreenItems)
+                if !screenText.isEmpty { ScreenTextBlocks(items: screenText, avoiding: subtitleFrame) }
+            }
         }
+        .coordinateSpace(name: "stream")
+        .onPreferenceChange(SubtitleFrameKey.self) { subtitleFrame = $0 }
         .background(Self.color(model.streamBackground))
+    }
+
+    /// Yığının satırları; `screen` verilirse o metinli ("Ekranı çevir" listesi) satır atlanır.
+    static func lines(_ lines: [SubtitleStack.Line], without screen: String?) -> [SubtitleStack.Line] {
+        guard let screen, !screen.isEmpty else { return lines }
+        return lines.filter { $0.text != screen }
     }
 
     static func color(_ background: StreamBackground) -> Color {
@@ -98,12 +124,14 @@ struct StreamWindowView: View {
         }
         return Text(verbatim: region.text)
             .font(.system(size: size, weight: .semibold))
-            .foregroundStyle(SubtitleOverlayView.color(style.textColor))
+            .foregroundStyle(model.settings.setTextApart ? .white : SubtitleOverlayView.color(style.textColor))
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.vertical, 6 * scale)
             .padding(.horizontal, 14 * scale)
-            .background(Color.black, in: RoundedRectangle(cornerRadius: 8 * scale))
+            // Ayrık gösterim: altyazı kutusundan farklı, zeminsiz ve koyu gölgeli.
+            .background(Color.black.opacity(model.settings.setTextApart ? 0 : 1), in: RoundedRectangle(cornerRadius: 8 * scale))
+            .shadow(color: .black.opacity(model.settings.setTextApart ? 1 : 0), radius: 3 * scale)
             .frame(maxWidth: .infinity, alignment: alignment)
     }
 
@@ -129,10 +157,12 @@ struct StreamWindowView: View {
         let textOpacity: Double = alpha > 0 ? opacity : 1
         let shadowRadius: CGFloat = alpha > 0 ? 0 : 2 * scale
         let shown: Double = line.fading ? 0 : 1
-        let text = Text(verbatim: wrapped.text)
+        let colored = model.settings.speakerColors && !line.paragraphs
+        let text = SubtitleOverlayView.subtitleText(wrapped.text, colored: colored,
+                                                    base: SubtitleOverlayView.color(style.textColor), book: model.speakerBook)
             .font(.system(size: size, weight: weight))
-            .foregroundStyle(SubtitleOverlayView.color(style.textColor).opacity(textOpacity))
         return text
+            .opacity(textOpacity)
             .multilineTextAlignment(alignment)
             .lineSpacing(size * 0.3)
             .shadow(color: .black, radius: shadowRadius, x: 0, y: shadowRadius)
@@ -143,4 +173,158 @@ struct StreamWindowView: View {
             .opacity(shown)
             .animation(.linear(duration: SubtitleStack.previousFade), value: line.fading)
     }
+}
+
+/// Yayın katmanının koordinatları telefondaki kaynak kutularıyla aynı, sol üst köşeye göre 0…1 aralığındadır.
+struct GamePhoneBlocks: View {
+    let items: [ScreenTranslation.Item]
+
+    var body: some View {
+        GeometryReader { proxy in
+            ForEach(items.indices, id: \.self) { i in
+                let item = items[i]
+                let box = item.box
+                let width = max(0, box.right - box.left) * proxy.size.width
+                let height = max(0, box.bottom - box.top) * proxy.size.height
+                Text(verbatim: item.translation)
+                    .font(.system(size: max(1, item.lineHeight * proxy.size.height * 0.85), weight: .semibold))
+                    .minimumScaleFactor(0.55)
+                    .foregroundStyle(Self.color(item.style?.foreground, fallback: .white))
+                    .frame(width: width, height: height, alignment: .leading)
+                    .background(Self.color(item.style?.background, fallback: .black))
+                    .clipped()
+                    .position(x: (box.left + box.right) * 0.5 * proxy.size.width,
+                              y: (box.top + box.bottom) * 0.5 * proxy.size.height)
+            }
+        }
+        .clipped()
+        .allowsHitTesting(false)
+    }
+
+    private static func color(_ hex: String?, fallback: Color) -> Color {
+        guard let hex, let (r, g, b) = DesignTokens.rgb(hex) else { return fallback }
+        return Color(.sRGB, red: r, green: g, blue: b)
+    }
+}
+
+/// Kendiliğinden bulunan ekran yazısının çevirisi özgün yazının stilinde: zemin ve yazı rengi, kalınlık, dar aile, hiza
+/// (`TextLook`; BÜYÜK HARF çeviriye zaten uygulanmış gelir). Kutu her zeminde tam opak: özgün yazı arasından görünmez
+/// (#827; "Örtsün" kutusu gibi).
+enum StyledScreenText {
+    static func label(_ item: ScreenTranslation.Item, size: CGFloat) -> some View {
+        let look = item.look
+        let alignment: TextAlignment = switch look?.align {
+        case .center: .center
+        case .right: .trailing
+        default: .leading
+        }
+        return Text(verbatim: item.translation)
+            .font(.system(size: size, weight: look?.bold == true ? .bold : .semibold).width(look?.condensed == true ? .condensed : .standard))
+            .foregroundStyle(color(item.style?.foreground, fallback: .white))
+            .multilineTextAlignment(alignment)
+    }
+
+    static func background(_ item: ScreenTranslation.Item) -> Color {
+        color(item.style?.background, fallback: .black)
+    }
+
+    static func frameAlignment(_ item: ScreenTranslation.Item) -> Alignment {
+        switch item.look?.align {
+        case .center: .center
+        case .right: .trailing
+        default: .leading
+        }
+    }
+
+    static func color(_ hex: String?, fallback: Color) -> Color {
+        guard let hex, let (r, g, b) = SpeakerColors.rgb(hex) else { return fallback }
+        return Color(.sRGB, red: r, green: g, blue: b)
+    }
+}
+
+/// Ekran yazısı blokları oyun karesindeki kendi yerlerinde (yayın penceresi 16:9 karenin kendisidir). Türkçe özgün
+/// bloğun genişliğini aşmaz: satır kırılır, gerekirse yazı en çok %20 küçülür; yine sığmazsa kutu aşağı uzar.
+struct ScreenTextBlocks: View {
+    let items: [ScreenTranslation.Item]
+    /// Altyazı satırlarının yeri (pencere koordinatında); ekran yazısı kutusu onunla çakışmaz.
+    var avoiding: CGRect? = nil
+
+    /// Kutunun üst kenarı: altyazıyla çakışıyorsa yalnız gerektiği kadar (en az %0,6 ekran yüksekliği boşlukla) yukarı ya
+    /// da aşağı kayar, hangisi daha azsa; altyazının yeri değişmez (TV #673 ile aynı kural). Sığmazsa yukarı yaslanır.
+    static func top(_ rect: CGRect, avoiding: CGRect?, height: CGFloat) -> CGFloat {
+        guard let avoiding, rect.intersects(avoiding.insetBy(dx: 0, dy: -height * 0.006)) else { return rect.minY }
+        let gap = height * 0.006
+        let up = avoiding.minY - gap - rect.height
+        let down = avoiding.maxY + gap
+        let upFits = up >= 0, downFits = down + rect.height <= height
+        if upFits && (!downFits || rect.minY - up <= down - rect.minY) { return up }
+        if downFits { return down }
+        return max(0, up)
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                ForEach(items.indices, id: \.self) { i in
+                    block(items[i], size: proxy.size)
+                }
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+        }
+        .clipped()
+        .allowsHitTesting(false)
+    }
+
+    /// Kısa etiket genişleyebilir: en çok özgün genişliğin bu katı (TV #673 gibi, hizasının ters yönüne doğru).
+    static let shortGrowth: CGFloat = 2.5
+
+    /// Bir blok. Yazı boyu ve kutu TV'deki gibi: boy satır yüksekliğinin 0,95'i, kutu en az özgün yazının yüksekliğinde
+    /// (özgün yazı altta görünmesin). Uzun yazı özgün genişlikte satır kırar (en çok %20 küçülür, sığmazsa aşağı uzar).
+    /// Kısa etiket (en çok iki sözcük; menü şeridi, tuş etiketi) tek satırdır: önce hizasının ters yönüne doğru genişler
+    /// (sağa yaslı tuş etiketi sola uzar, simgenin üstüne binmez), yine sığmazsa en çok %40 küçülür.
+    @ViewBuilder
+    private func block(_ item: ScreenTranslation.Item, size: CGSize) -> some View {
+        let line = max(1, item.lineHeight * size.height)
+        let pad = line * 0.15
+        let width = max(0, item.box.right - item.box.left) * size.width + 2 * pad
+        let boxHeight = max(0, item.box.bottom - item.box.top) * size.height
+        let short = !item.source.contains("\n") && item.source.split(separator: " ").count <= 2
+        let alignment = StyledScreenText.frameAlignment(item)
+        let left = item.box.left * size.width - pad
+        let top = Self.top(CGRect(x: left, y: item.box.top * size.height - pad, width: width, height: boxHeight + 2 * pad),
+                           avoiding: avoiding, height: size.height)
+        if short {
+            // Genişleme payı: hizaya göre kutunun soluna/sağına açılan görünmez çerçeve.
+            let room = width * Self.shortGrowth
+            let x: CGFloat = switch item.look?.align {
+            case .right: left + width - room
+            case .center: left + width / 2 - room / 2
+            default: left
+            }
+            StyledScreenText.label(item, size: line * 0.95)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .frame(minWidth: width, maxWidth: room, minHeight: boxHeight, alignment: alignment)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.vertical, pad)
+                .background(StyledScreenText.background(item))
+                .frame(width: room, alignment: alignment)
+                .offset(x: x, y: top)
+        } else {
+            StyledScreenText.label(item, size: line * 0.95)
+                .minimumScaleFactor(0.8)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: width, alignment: alignment)
+                .frame(minHeight: boxHeight, alignment: alignment)
+                .padding(.vertical, pad)
+                .background(StyledScreenText.background(item))
+                .offset(x: left, y: top)
+        }
+    }
+}
+
+/// Yayın penceresinde altyazı satırlarının yeri.
+private struct SubtitleFrameKey: PreferenceKey {
+    static let defaultValue: CGRect? = nil
+    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) { value = nextValue() ?? value }
 }

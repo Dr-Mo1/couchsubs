@@ -29,11 +29,13 @@ public sealed class StreamWindow : Window
     private readonly DispatcherTimer timer = new();
     private readonly StackPanel linesPanel = new() { VerticalAlignment = VerticalAlignment.Bottom };
     /// <summary>Ek alanların (görev, telefon mesajı, bildirim) çevirileri; saydam penceredeki gibi üstte, alanın yanına yaslı.</summary>
-    private readonly StackPanel regionsPanel = new() { VerticalAlignment = VerticalAlignment.Top };
-    private readonly Dictionary<string, (string Text, CouchSubs.Core.TextBox? Box)> regions = [];
+    private readonly DesktopRegionsPanel regionsPanel;
+    private readonly Dictionary<string, (string Text, CouchSubs.Core.TextBox? Box, IReadOnlyList<ScreenTranslation.Item>? Blocks)> regions = [];
     private readonly Border linesHost;
     private readonly Dictionary<int, Border> boxes = [];
     private double screenUntil;
+    /// <summary>Stilli "Ekranı çevir" kutularının kalkacağı an; yoksa 0 (yeni altyazı onları kaldırmaz, TV'deki gibi).</summary>
+    private double screenRegionUntil;
 
     private double Now => clock.Elapsed.TotalSeconds;
 
@@ -54,6 +56,9 @@ public sealed class StreamWindow : Window
     }
 
     public static bool IsOpen => open is not null;
+
+    /// <summary>Açık pencereyi kapatır (Ayarlar'daki "Akış penceresini kapat"; Mac ile aynı).</summary>
+    public static void CloseIfOpen() => open?.Close();
 
     /// <summary>Yayın programının pencere listesinde görünen ad; altyazıya göre değişmez (Türkçede "CouchSubs Yayın").</summary>
     public static string WindowTitle => Localizer.Current["CouchSubs Stream"];
@@ -76,6 +81,7 @@ public sealed class StreamWindow : Window
         // Video kaynağında renkli alt piksel yumuşatma kenarda renk saçağı bırakır; gri tonlu yumuşatma keskin kalır.
         TextOptions.SetTextRenderingMode(this, TextRenderingMode.Grayscale);
         var layers = new Grid();
+        regionsPanel = new DesktopRegionsPanel(linesPanel);
         layers.Children.Add(regionsPanel);
         layers.Children.Add(linesPanel);
         linesHost = new Border { Child = layers };
@@ -133,19 +139,29 @@ public sealed class StreamWindow : Window
                 stack.Show(e.Text, e.DurationMs, e.Paragraphs, Now, e.Replaces);
                 break;
             case SubtitleEventKind.Screen:
+                // Özgün stiliyle gelen çeviriler ekran yazısı gibi stilli kutularda (telefon kartı balonlarıyla);
+                // "Ekran yazılarını altyazıdan ayır" kapalıysa eskisi gibi satır satır.
+                if (ScreenRegions.Styled(e, controller.Settings.SetTextApart) is { } styled)
+                {
+                    regions[ScreenRegions.Id] = styled;
+                    screenRegionUntil = Now + e.DurationMs / 1000.0;
+                    break;
+                }
                 stack.Show(e.Text, e.DurationMs, paragraphs: true, Now);
                 screenUntil = Now + e.DurationMs / 1000.0;
                 break;
             case SubtitleEventKind.ScreenClear:
                 if (screenUntil > Now) stack.Hide();
                 screenUntil = 0;
+                regions.Remove(ScreenRegions.Id);
+                screenRegionUntil = 0;
                 break;
             // Ek alan olayı altyazıya dokunmaz: önceden "temizle" sayılıp yayındaki altyazıyı siliyordu ve çeviri hiç
             // görünmüyordu.
             case SubtitleEventKind.Region:
                 if (e.Id is null) break;
                 regions.Remove(e.Id);
-                if (e.Text.Length > 0) regions[e.Id] = (e.Text, e.Box);
+                if (e.Text.Length > 0) regions[e.Id] = (e.Text, e.Box, e.Blocks);
                 break;
             case SubtitleEventKind.RegionClear:
                 regions.Clear();
@@ -167,9 +183,13 @@ public sealed class StreamWindow : Window
     private void Refresh()
     {
         var now = Now;
+        if (screenRegionUntil > 0 && screenRegionUntil <= now)
+        {
+            regions.Remove(ScreenRegions.Id);
+            screenRegionUntil = 0;
+        }
         var lines = stack.Lines(now).ToList();
-        regionsPanel.Children.Clear();
-        foreach (var (text, area) in regions.Values.OrderBy(region => region.Box?.Top ?? 0)) regionsPanel.Children.Add(MakeRegionBox(text, area));
+        regionsPanel.ShowRegions(regions, MakeRegionBox);
         linesPanel.Children.Clear();
         foreach (var id in boxes.Keys.Except(lines.Select(l => l.Id)).ToList()) boxes.Remove(id);
         foreach (var line in lines)
@@ -187,7 +207,7 @@ public sealed class StreamWindow : Window
             linesPanel.Children.Add(box);
         }
         timer.Stop();
-        if (stack.NextChange(now) is { } next)
+        if (ScreenRegions.NextChange(stack.NextChange(now), screenRegionUntil) is { } next)
         {
             timer.Interval = TimeSpan.FromSeconds(Math.Max(0.01, next - now));
             timer.Start();
@@ -211,7 +231,6 @@ public sealed class StreamWindow : Window
         if (boxed) color.A = (byte)Math.Round(dim * 255);
         var text = new TextBlock
         {
-            Text = wrapped.Text,
             FontSize = size,
             FontWeight = style.Bold ? FontWeights.Bold : FontWeights.SemiBold,
             Foreground = new SolidColorBrush(color),
@@ -220,6 +239,8 @@ public sealed class StreamWindow : Window
             LineHeight = size * 1.3,
             Effect = boxed ? null : new DropShadowEffect { Color = Colors.Black, ShadowDepth = 2 * scale, BlurRadius = 4 * scale, Opacity = 1, Direction = 270 },
         };
+        // Konuşana göre renk: "Ad: …" satırı o konuşanın renginde (ayar kapalıysa düz metin).
+        SpeakerText.Fill(text, wrapped.Text, line.Text, controller.Settings.SpeakerColors, controller.SpeakerBook, color.A);
         return new Border
         {
             Background = boxed ? Brushes.Black : Brushes.Transparent,
@@ -232,11 +253,16 @@ public sealed class StreamWindow : Window
     }
 
     /// <summary>Ek alanın çevirisi: altyazıdan küçük, tam koyu kutu (düz zeminde chroma key bozulmasın); alanın yanına yaslı.</summary>
-    private Border MakeRegionBox(string text, CouchSubs.Core.TextBox? area)
+    private Border MakeRegionBox(string text, CouchSubs.Core.TextBox? area, IReadOnlyList<ScreenTranslation.Item>? blocks)
     {
         var style = controller.Settings.Style;
         var scale = Scale;
         var size = Math.Max(12, OverlayPlacement.FontSize(style.FontSize) * scale * 0.55);
+        // Otomatik bulunan ekran yazısı: çeviri özgün yazının stilinde.
+        var apart = controller.Settings.SetTextApart;
+        if (apart && StyledRegionBox.Make(blocks, size, scale) is { } styled) return styled;
+        // Ayrık gösterim: stili bilinmeyen ek alan kutusu altyazı kutusuna benzemesin, zeminsiz ve koyu gölgeli.
+        if (apart && StyledRegionBox.Plain(text, size, scale, area) is { } plain) return plain;
         var middle = area is { } box ? (box.Left + box.Right) / 2 : 0.5;
         return new Border
         {
