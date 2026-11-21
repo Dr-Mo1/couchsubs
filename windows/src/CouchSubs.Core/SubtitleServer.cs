@@ -206,7 +206,7 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
         {
             ["at"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             ["duration"] = durationMs,
-            ["text"] = text,
+            ["text"] = IsolateLatin(text),
         };
         if (paragraphs) json["paragraphs"] = true;
         if (replaces) json["replace"] = true;
@@ -214,6 +214,21 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
         Broadcast(Frame("subtitle", json), subtitle: true);
         EventSent?.Invoke(new SubtitleEvent(SubtitleEventKind.Subtitle, text, durationMs, paragraphs, replaces));
     }
+
+    private static readonly System.Text.RegularExpressions.Regex ArabicLetter = new(@"\p{IsArabic}");
+    /// <summary>English text inside an Arabic line: Latin letters, digits and the signs that join them, with no brackets.</summary>
+    private static readonly System.Text.RegularExpressions.Regex LatinRun =
+        new(@"[A-Za-z0-9][A-Za-z0-9 .,'’&@#%+:/_\-]*[A-Za-z0-9/%]|[A-Za-z]");
+
+    /// <summary>
+    /// Arabic fork: in a line with Arabic, each run of English (a name, a link, "VCPD") goes inside a left-to-right isolate
+    /// (U+2066…U+2069). The TV lays out each line with unicode-bidi: plaintext. Without the isolate, a line starting with
+    /// English turned left-to-right as a whole, and a sign next to English ("/", "!") jumped to the wrong side. Lines
+    /// without Arabic, and runs of digits alone, are untouched. Only the TV gets this, not the computer overlay.
+    /// </summary>
+    internal static string IsolateLatin(string text) =>
+        !ArabicLetter.IsMatch(text) ? text : string.Join('\n', text.Split('\n').Select(line => !ArabicLetter.IsMatch(line) ? line
+            : LatinRun.Replace(line, run => run.Value.Any(char.IsAsciiLetter) ? "\u2066" + run.Value + "\u2069" : run.Value)));
 
     /// <summary>Dört basamağa yuvarlanır (decimal: JSON'da 0.8 olarak yazılsın).</summary>
     /// Bölme sondaki sıfırları atar (0.8750 → 0.875).
@@ -257,7 +272,7 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
             {
                 ["box"] = BoxJson(item.Box),
                 ["line"] = Round(item.LineHeight),
-                ["text"] = item.Translation,
+                ["text"] = IsolateLatin(item.Translation),
             };
             if (item.Paragraphs) json["paragraphs"] = true;
             return json;
@@ -276,7 +291,7 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
     /// </summary>
     public void SendRegion(string id, string text, TextBox? box, double? lineHeight = null)
     {
-        var json = new SortedDictionary<string, object> { ["id"] = id, ["text"] = text };
+        var json = new SortedDictionary<string, object> { ["id"] = id, ["text"] = IsolateLatin(text) };
         if (box is { } b) json["box"] = BoxJson(b);
         if (lineHeight is { } line) json["line"] = Round(line);
         Broadcast(Frame("region", json), subtitle: true);

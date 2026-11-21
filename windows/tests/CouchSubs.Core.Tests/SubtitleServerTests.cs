@@ -30,6 +30,18 @@ public class SubtitleServerTests
         return lines;
     }
 
+    /// <summary>Arabic fork: English inside an Arabic line keeps its own direction on the TV.</summary>
+    [Theory]
+    [InlineData("ادخل على support.rockstargames.com/", "ادخل على \u2066support.rockstargames.com/\u2069")]
+    [InlineData("إنت خول يا ظابط Door Cop!", "إنت خول يا ظابط \u2066Door Cop\u2069!")]
+    [InlineData("امسح رمز (QR) بالموبايل", "امسح رمز (\u2066QR\u2069) بالموبايل")]
+    [InlineData("VCPD ضابط مذنب", "\u2066VCPD\u2069 ضابط مذنب")]
+    [InlineData("برايان\nفي GTA 6 كده", "برايان\nفي \u2066GTA 6\u2069 كده")]
+    [InlineData("Brian\nبرايان", "Brian\nبرايان")]
+    [InlineData("عندك 5 دقايق", "عندك 5 دقايق")]
+    [InlineData("Hold the gate. (Kapıyı tut)", "Hold the gate. (Kapıyı tut)")]
+    public void LatinInsideArabicIsIsolated(string text, string sent) => Assert.Equal(sent, SubtitleServer.IsolateLatin(text));
+
     [Fact]
     public async Task StreamsSubtitleAndClearEventsWithCors()
     {
