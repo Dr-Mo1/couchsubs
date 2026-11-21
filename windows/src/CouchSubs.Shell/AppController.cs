@@ -2947,7 +2947,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             ShowSpeakerNames = settings.ShowSpeakerNames,
             SkipsTurkish = settings.TargetLanguage == "tr",
             WatchSubtitleBackground = settings.WatchSubtitleBackground,
-            DropsScreenText = () => !demoMode && ScreenText.IsGta(gameSense.Current?.Name),
+            // Arabic fork: the Arabic packs are GTA 6 only, so screen text is dropped even before the game is known.
+            DropsScreenText = () => !demoMode && (settings.TargetLanguage == "ar" || ScreenText.IsGta(gameSense.Current?.Name)),
             Echo = SubtitleEcho,
             EchoPaused = () => Volatile.Read(ref screenText)?.InMenu == true,
         };

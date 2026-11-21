@@ -37,6 +37,29 @@ public class ScreenTextTests
         Assert.Equal("I swear they got our cash in here, man, grab it!", reading.Text);
     }
 
+    // Arabic fork: shop signs, a mission objective and a HUD code glued to the dialogue (GTA 6 clothing store).
+    [Theory]
+    [InlineData("COATREZI|You like it? It's so you.|GONE FISHIN'", "You like it? It's so you.")]
+    [InlineData("GET LUCIA'S CLOTHES|Lucia: Okay, let's see what they got.", "Lucia: Okay, let's see what they got.")]
+    [InlineData("J26 487|COLLECTION|Hey, can I help you?", "Hey, can I help you?")]
+    [InlineData("You got 2 minutes.|NO!", "You got 2 minutes.|NO!")]
+    public void ArabicDropsSignsAndCodesFromTheDialogue(string read, string expected)
+    {
+        // "|" = a line break of the read.
+        var dropped = new List<string>();
+        var kept = SubtitlePipeline.WithoutScreenText(Reading.FromText(read.Replace('|', '\n')), dropped.Add);
+        Assert.Equal(expected.Replace('|', '\n'), kept.Text);
+        Assert.Equal(read.Split('|').Length - expected.Split('|').Length, dropped.Count);
+    }
+
+    [Theory]
+    [InlineData("J26 487", true)]
+    [InlineData("1/3", true)]
+    [InlineData("4", true)]
+    [InlineData("You got 2 minutes.", false)]
+    [InlineData("I'LL BE THERE IN 5, OKAY?", false)]
+    public void RecognizesHudCodes(string line, bool expected) => Assert.Equal(expected, SubtitlePipeline.IsHudCode(line));
+
     private static async Task<(List<string> sent, string? origin)> Run(Func<bool>? drop)
     {
         var sender = new FakeSender();

@@ -221,14 +221,38 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     private void Write(string message) => Log?.Invoke(message);
 
     /// <summary>Sahne yazısı sayılıp atılan blok günlüğe nedeniyle bir kez yazılır (GitHub #822).</summary>
-    private void LogSceneText(string text, string reason)
+    private void LogSceneText(string text, string reason) =>
+        LogOnce(text + "|" + reason, $"sahne yazısı: {SubtitleLog.Excerpt(text)} altyazı sayılmadı ({reason})");
+
+    private void LogOnce(string key, string message)
     {
-        var key = text + "|" + reason;
         if (loggedSceneText.Contains(key)) return;
         loggedSceneText.Add(key);
         if (loggedSceneText.Count > 20) loggedSceneText.RemoveAt(0);
-        Write($"sahne yazısı: {SubtitleLog.Excerpt(text)} altyazı sayılmadı ({reason})");
+        Write(message);
     }
+
+    /// <summary>
+    /// Arabic fork: <see cref="ScreenText.WithoutScreenText"/> plus short HUD codes ("J26 487": one letter, so not screen
+    /// text upstream). GTA 6 shop signs ("COATREZI", "GONE FISHIN'") glued to the dialogue were read a little differently
+    /// every time, so the same lines went to translation again and again and showed late (2026-11-21: 30 of 289).
+    /// Each dropped line is reported (<paramref name="dropped"/>) for the session report.
+    /// </summary>
+    internal static Reading WithoutScreenText(Reading reading, Action<string>? dropped = null)
+    {
+        var kept = new List<TextLine>();
+        foreach (var line in reading.Lines)
+        {
+            if (ScreenText.IsScreenText(line.Text) || IsHudCode(line.Text)) dropped?.Invoke(line.Text);
+            else kept.Add(line);
+        }
+        return kept.Count == reading.Lines.Count ? reading : new Reading(kept);
+    }
+
+    /// <summary>No lowercase, a digit, at most three words, no sentence punctuation ("J26 487", "1/3").</summary>
+    internal static bool IsHudCode(string line) =>
+        line.Any(char.IsDigit) && !line.Any(char.IsLower) && !".!?…,".Any(line.Contains)
+        && line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length is > 0 and <= 3;
 
     private void Write(Request request, string message) => Log?.Invoke($"#{request.Number} {message}");
 
@@ -315,7 +339,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         // Konuşma değişirken sabit duran görev/HUD satırı ("Get in the sea plane", GTA 6) altyazı bloğuna katılmaz.
         var cleaned = raw.WithoutButtonPrompts().WithoutOcrNoise();
         // GTA ekran yazısı (silah adı, plaka, tabela, menü) altyazı değildir; konuşmaya yapışsa da çevrilmez.
-        if (DropsScreenText?.Invoke() == true) cleaned = cleaned.WithoutScreenText();
+        if (DropsScreenText?.Invoke() == true) cleaned = WithoutScreenText(cleaned, line => LogOnce("tabela|" + line, $"tabela atıldı: {SubtitleLog.Excerpt(line)}"));
         var rows = cleaned.JoiningRows();
         bool missionMoved;
         CropRegion? missionRegion;
