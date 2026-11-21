@@ -390,7 +390,8 @@ public sealed record UserSettings
     /// <summary>Oynanan oyun paketle tanınmazsa çeviri başladıktan iki dakika sonra bir kez sorulur (bkz. <see cref="GameSense"/>).</summary>
     public bool AskGame { get; init; } = true;
     /// <summary>Kullanım verisi: telefonlardaki gibi kimliğe bağlanmayan kullanım istatistikleri gönderilir (bkz. <see cref="UsageStats"/>).</summary>
-    public bool UsageData { get; init; } = UsageStats.EnabledByDefault;
+    // Arabic fork: off unless turned on in Settings (DocMo's decision, 2026-11-21); upstream defaults to on.
+    public bool UsageData { get; init; }
     /// <summary>Kullanım verisi bilgi notu gösterildi (ilk açılışta bir kez). Eski ayar dosyalarında yoktur (false).</summary>
     public bool UsageNoticeSeen { get; init; }
     /// <summary>Altyazıdaki konuşan adı ("ARTHUR: …") çeviride gösterilir; kapalıysa yalnız Türkçe cümle görünür.</summary>
