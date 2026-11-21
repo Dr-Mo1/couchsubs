@@ -908,6 +908,13 @@ public class AiTranslatorTests
         Assert.Equal(["Ona \"dur\" dedim."], AiRequest.Translations("[\"Ona \"dur\" dedim.\"]", 1));
         // Köşeli parantez yalnız başta: düz metin olduğu gibi kalır.
         Assert.Equal(["[gülüyor] Hadi gidelim."], AiRequest.Translations("[gülüyor] Hadi gidelim.", 1));
+        // Arabic fork: the nested answer that reached the TV on 2026-11-21 as «json ["يا جيسون!", "نسيت السواقة ولا إيه؟"]».
+        Assert.Equal(["يا جيسون!\nنسيت السواقة ولا إيه؟"],
+            AiRequest.Translations("[\"json [\"يا جيسون!\", \"نسيت السواقة ولا إيه؟\"]\"]", 1));
+        // A bare "json" tag: two items for one sentence is a wrong count (the next link answers), never the raw text.
+        Assert.Throws<AiException>(() => AiRequest.Translations("json [\"يا جيسون!\", \"نسيت السواقة ولا إيه؟\"]", 1));
+        Assert.Equal(["يا جيسون!", "نسيت السواقة ولا إيه؟"], AiRequest.Translations("json [\"يا جيسون!\", \"نسيت السواقة ولا إيه؟\"]", 2));
+        Assert.Equal("يا جيسون!\nنسيت السواقة ولا إيه؟", AiRequest.Unwrapped("json [\"يا جيسون!\", \"نسيت السواقة ولا إيه؟\"]"));
     }
 
     /// <summary>Yerel modellerin bitiş işaretleri (<c>&lt;/s&gt;</c>, <c>&lt;|im_end|&gt;</c>) ekranda kalmaz; sondaki fazla virgül diziyi bozmaz (#27).</summary>

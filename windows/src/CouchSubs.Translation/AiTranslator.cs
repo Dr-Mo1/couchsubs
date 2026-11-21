@@ -374,7 +374,30 @@ public static class AiRequest
     }
 
     /// <summary>Yanıttaki JSON dizisi; tek cümlede model diziyi unutup düz metin dönerse o metin alınır.</summary>
-    public static string[] Translations(string text, int count)
+    public static string[] Translations(string text, int count) => [.. ReplyItems(text, count).Select(Unwrapped)];
+
+    /// <summary>
+    /// Arabic fork: a model once nested its answer, <c>["json ["يا جيسون!", "نسيت السواقة ولا إيه؟"]"]</c>, and the raw
+    /// <c>json [...]</c> text reached the TV (2026-11-21). An item that is itself a quoted array (with or without a leading
+    /// "json") becomes its strings, one per row. Any other text is left as it is.
+    /// </summary>
+    internal static string Unwrapped(string item)
+    {
+        var text = System.Text.RegularExpressions.Regex.Replace(item.Trim(), @"^(?:```)?json\s*", "",
+                                                                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!(text.StartsWith('[') && text.EndsWith(']') && text.Contains('"'))) return item;
+        try
+        {
+            if (JsonNode.Parse(text) is JsonArray array && array.Count > 0 && array.All(n => n?.GetValueKind() == JsonValueKind.String))
+                return string.Join("\n", array.Select(n => n!.GetValue<string>().Trim()));
+        }
+        catch (JsonException) { /* unescaped quotes inside: take the quoted parts */ }
+        var parts = System.Text.RegularExpressions.Regex.Matches(text, "\"([^\"]+)\"").Select(m => m.Groups[1].Value.Trim())
+            .Where(part => part.Length > 0 && part != ",").ToList();
+        return parts.Count > 0 ? string.Join("\n", parts) : item;
+    }
+
+    private static string[] ReplyItems(string text, int count)
     {
         var trimmed = text.Trim();
         // Düşünen yerel modeller (ör. Qwen3, DeepSeek-R1) yanıtın başına <think>…</think> koyar; yalnız sonrası alınır.
@@ -384,6 +407,9 @@ public static class AiRequest
         // ```json … ``` çitini at.
         if (trimmed.StartsWith("```", StringComparison.Ordinal))
             trimmed = string.Join("\n", trimmed.Split('\n').Skip(1).Where(l => !l.StartsWith("```", StringComparison.Ordinal))).Trim();
+        // Arabic fork: the fence's language tag without the fence ("json [...]").
+        if (System.Text.RegularExpressions.Regex.Match(trimmed, @"^json\s*(?=\[)", System.Text.RegularExpressions.RegexOptions.IgnoreCase) is { Success: true } tag)
+            trimmed = trimmed[tag.Length..];
         int start = trimmed.IndexOf('['), end = trimmed.LastIndexOf(']');
         if (start >= 0 && end > start)
         {
