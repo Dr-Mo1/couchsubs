@@ -11,6 +11,33 @@ public class ScreenTranslationTests
     private static TextLine Line(string text, double left, double top, double right, double height = 0.03) =>
         new(text, new TextBox(left, top, right, top + height));
 
+    /// <summary>Arabic fork: Num 9's one bottom block keeps sentences only, top to bottom, at most 6.</summary>
+    [Fact]
+    public void SubtitleBlockKeepsOnlySentencesTopToBottom()
+    {
+        static ScreenTranslation.Item Item(string source, double top) => new(source, "ar:" + source, new TextBox(0.1, top, 0.5, top + 0.03), 0.03);
+        Assert.Null(ScreenTranslation.SubtitleBlock([]));
+        Assert.Null(ScreenTranslation.SubtitleBlock([
+            Item("Settings", 0.1),                  // fewer than 3 words
+            Item("FENG SHUI (12%)", 0.2),           // counter / action label
+            Item("TAKE AMMO PACK (0/3)", 0.3),      // action label
+            Item("PHOTO MODE L1 + R1", 0.4),        // button prompt
+            Item("100 / 250 / 75%", 0.5),           // digits
+        ]));
+        Assert.Equal("ar:You have a new message from Jason.\nar:Unowned weapons are lost after you die.",
+            ScreenTranslation.SubtitleBlock([
+                Item("Unowned weapons are lost after you die.", 0.7),
+                Item("FENG SHUI (12%)", 0.05),
+                Item("You have a new message from Jason.", 0.2),
+            ]));
+        var many = Enumerable.Range(0, 9).Select(i => Item($"Line number {i} is here.", 0.9 - (i * 0.1))).ToList();
+        Assert.Equal(6, ScreenTranslation.SubtitleBlock(many)!.Split('\n').Length);
+        Assert.StartsWith("ar:Line number 8", ScreenTranslation.SubtitleBlock(many));
+        Assert.Equal(6000, ScreenTranslation.BlockMilliseconds("short"));
+        Assert.Equal(2500 + (90 * 50), ScreenTranslation.BlockMilliseconds(new string('a', 50)));
+        Assert.Equal(20000, ScreenTranslation.BlockMilliseconds(new string('a', 500)));
+    }
+
     [Fact]
     public void LinesFarApartBecomeSeparateGroups()
     {

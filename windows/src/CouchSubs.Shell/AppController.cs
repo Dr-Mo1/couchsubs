@@ -1232,19 +1232,29 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         {
             translator = MakeTranslator();
             // Yapay zekâda ekranın bütün yazıları tek istekte gider (bkz. AiTranslator.TranslateAllAsync).
+            // Arabic fork: in Arabic the result is one subtitle block at the bottom (ScreenTranslation.SubtitleBlock), not
+            // every item in its own box on the TV.
+            var block = settings.TargetLanguage == "ar";
             var items = await ScreenTranslation.TranslateAsync(frame, reader, translator, shown =>
             {
-                if (work.IsCancellationRequested) return;
+                if (work.IsCancellationRequested || block) return;
                 server.SendScreen(shown, ScreenTranslation.DisplayMilliseconds(shown));
                 screenShownUntil = DateTime.UtcNow.AddMilliseconds(ScreenTranslation.DisplayMilliseconds(shown));
             }, work.Token);
             server.Clear();
+            var joined = block ? ScreenTranslation.SubtitleBlock(items) : null;
             // Arabic fork: Num 9 shows up in altyazi.log (session report).
-            SubtitleLog.Write($"ekran çevirisi: {items.Count} parça");
-            if (items.Count == 0)
+            SubtitleLog.Write($"ekran çevirisi: {items.Count} parça" + (block ? $", blok {joined?.Split('\n').Length ?? 0} satır" : ""));
+            if (items.Count == 0 || (block && joined is null))
             {
                 server.SendSubtitle(text["No text found on the screen."], 2500);
                 return ScreenOutcome.NoText;
+            }
+            if (joined is not null)
+            {
+                var ms = ScreenTranslation.BlockMilliseconds(joined);
+                server.SendSubtitle(joined, ms, paragraphs: true);
+                screenShownUntil = DateTime.UtcNow.AddMilliseconds(ms);
             }
             return ScreenOutcome.Shown;
         }

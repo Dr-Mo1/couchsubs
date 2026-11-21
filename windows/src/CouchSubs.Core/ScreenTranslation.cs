@@ -175,6 +175,24 @@ public static class ScreenTranslation
 
     private static int WordCount(string text) => text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
 
+    /// <summary>
+    /// Arabic fork: Num 9 shows one subtitle block at the bottom instead of every item in its own box. Each corner label,
+    /// button prompt and counter ("FENG SHUI (12%)") stood on the TV for 12–60 s and cluttered the game. Only sentences
+    /// stay: no prompts or action labels, at least 3 words, not mostly digits. At most 6 of them, top to bottom.
+    /// Null when nothing is left.
+    /// </summary>
+    public static string? SubtitleBlock(IReadOnlyList<Item> items)
+    {
+        var kept = items.Where(item => WordCount(item.Source) >= 3
+                                       && item.Source.Count(char.IsLetter) > item.Source.Count(c => char.IsDigit(c) || c == '%')
+                                       && !item.Source.Split('\n').All(line => ButtonPrompts.IsPrompt(line) || ButtonPrompts.IsActionLabel(line)))
+            .OrderBy(item => item.Box.Top).Take(6).Select(item => item.Translation).ToList();
+        return kept.Count == 0 ? null : string.Join("\n", kept);
+    }
+
+    /// <summary>Arabic fork: how long <see cref="SubtitleBlock"/> stays (the TV's reading rule, 6–20 s).</summary>
+    public static int BlockMilliseconds(string block) => Math.Clamp(2500 + (90 * block.Length), 6000, 20000);
+
     /// <summary>Çevirilerin TV'de kalma süresi (ms): yazı çoksa daha uzun; tuşa yeniden basınca hemen kalkar.</summary>
     public static int DisplayMilliseconds(IReadOnlyList<Item> items) =>
         Math.Clamp(8000 + (items.Sum(item => item.Translation.Length) * 50), 12000, 60000);
