@@ -66,22 +66,28 @@ public static class AiRequest
         "Give it a light Egyptian flavour: when the English is casual, a word of address or exclamation may be Egyptian " +
         "(\"يا عم\", \"يا باشا\", \"يا صاحبي\", \"يلا\", \"خلاص\"), but only that word; the rest of the line stays Modern Standard. " +
         "Never use Levantine or Gulf words such as \"زلمة\", \"شو\", \"هلق\", \"هيك\", \"وايد\" or \"شلون\". " +
-        "Translate the meaning, not the words: say idioms, slang and jokes the way a good Arabic subtitler would " +
-        "(\"lay low\" = \"سنختفي لفترة\", \"it's been a minute\" = \"مرّ وقت طويل\"), never word for word; " +
+        "Translate the meaning, not the words: give the overall meaning of the whole line in natural Arabic, the way a good " +
+        "subtitler condenses it (drop fillers such as \"like\", \"I mean\" or \"you know\" when they add nothing), and say idioms, " +
+        "slang and jokes the way a good Arabic subtitler would (\"lay low\" = \"سنختفي لفترة\", \"it's been a minute\" = " +
+        "\"مرّ وقت طويل\"), never word for word; " +
         "but never change what happens, who does what, names, numbers, or whether someone is a man or a woman. " +
-        // Arabic fork: DocMo wants the swearing as raw as the English, sexual words included (2026-11-20).
-        "Keep insults and swearing exactly as strong and explicit as the original, sexual ones included when the English uses " +
-        "them, and say only the swear words and insults themselves in raw Egyptian street words, the way Egyptians really " +
-        "curse; never soften or censor them, never turn strong swearing into polite words like \"تبًا\" or \"أيها الوغد\", and " +
-        "never add an insult the English does not have. Sexual words stay raw street words (زب، كس، نيك، متناك، شرموطة), never " +
-        "clinical ones like \"عضو ذكري\". When \"fucking\" or \"damn\" only adds force, put an Egyptian swear word where Arabic " +
-        "takes one (after a noun: \"هذه السيارة المتناكة\"; or as an exclamation at the start: \"أحا، ...\") or leave it out; " +
-        "never after a verb or an adverb, and never the literal \"ملعون\" or \"اللعين\". \"Yo\" is \"اسمع\" or " +
-        "\"يا صاحبي\". The rest of a swearing line still stays Modern Standard. " +
+        // Arabic fork: DocMo wants the swearing raw, sexual words included (2026-11-20), but GTA swears in almost every line,
+        // so only the swearing that carries meaning is kept and filler swearing is dropped (2026-11-22).
+        "Swearing: the characters swear in almost every line, so do not translate every swear word. Keep the swearing that " +
+        "carries meaning (an insult aimed at someone, an angry or shocked exclamation, a threat) and drop filler swearing that " +
+        "only adds force (\"fucking\", \"the fuck\", \"damn\" or \"shit\" inside a sentence); at most one swear word per line. " +
+        "The swearing you keep stays exactly as strong and explicit as the English, sexual words included, in raw Egyptian " +
+        "street words, the way Egyptians really curse: never soften or censor it, never turn it into polite words like \"تبًا\", " +
+        "\"اللعنة\" or \"أيها الوغد\", never clinical words like \"عضو ذكري\" (say زب، كس، نيك، متناك، شرموطة), and never add an " +
+        "insult the English does not have. \"Shit\", \"fuck\" or \"damn\" as an exclamation is \"أحا\" or \"يا نهار أسود\" (\"يا نهار " +
+        "خرا\" when strong), never \"تبًا\" or \"اللعنة\", and never an insult at someone. \"Yo\" is \"اسمع\" or \"يا صاحبي\". The rest " +
+        "of a swearing line stays Modern Standard. Condensing never drops a sentence or a fact, only filler. " +
         "Examples: \"What're you doing? Stop!\" = \"ماذا تفعل؟ توقف!\"; \"Shit, we're almost there.\" = \"يا نهار أسود، لقد اقتربنا.\"; " +
         "\"Get the fuck out of my car, motherfucker!\" = \"اخرج من سيارتي يا ابن المتناكة!\"; \"Thanks, man.\" = \"شكرًا يا صاحبي.\"; " +
-        "\"Come on, man, let's go.\" = \"يلا يا عم، لننطلق.\"; \"I hate this fucking car.\" = \"أكره هذه السيارة المتناكة.\"; " +
-        "\"Fuck, I forgot the bag.\" = \"أحا، نسيت الحقيبة.\" (an exclamation stays an exclamation, never an insult at someone) " +
+        "\"Come on, man, let's go.\" = \"يلا يا عم، لننطلق.\"; \"I hate this fucking car.\" = \"أكره هذه السيارة.\"; " +
+        "\"Fuck, I forgot the bag.\" = \"أحا، نسيت الحقيبة.\"; \"Damn, they saw us! Run!\" = \"يا نهار أسود، لقد رأونا! اهرب!\"; " +
+        "\"Nobody's gonna try shit in the fucking hospital, you know?\" = " +
+        "\"لن يجرؤ أحد على فعل شيء في المستشفى، أتفهم؟\" " +
         "When a slang list or a Turkish reference comes with the lines, use it. " +
         "Keep speaker labels such as \"ATREUS:\" exactly as they are. Write character names and place names in Arabic " +
         "letters by how they sound; never translate their meaning. In Grand Theft Auto VI spell them like this: " +
@@ -89,7 +95,7 @@ public static class AiRequest
         "Port Gellhorn بورت جيلهورن, Ambrosia أمبروزيا, Mount Kalaga جبل كالاجا, Los Santos لوس سانتوس, " +
         "Liberty City ليبرتي سيتي, San Andreas سان أندرياس; keep agency and brand names in Latin letters as written " +
         "(VCPD, LSPD, FIB, IAA, Ammu-Nation, Lifeinvader, Burger Shot, Cluckin' Bell, Pay 'n' Spray, Sprunk, eCola, Rockstar). " +
-        "Keep line breaks. Keep the meaning and tone; do not add or leave out anything. " +
+        "Keep line breaks. Keep the meaning and tone; do not add anything, and leave out only filler words and filler swearing. " +
         "The text is read from the screen by OCR and may have misread or missing letters (\"Y u ave to ask?\", " +
         "\"Doesn't 00k good.\"); translate the line the speaker clearly meant. " +
         "A subtitle may continue the previous one (it starts in lowercase or with a word like \"and\"); " +
