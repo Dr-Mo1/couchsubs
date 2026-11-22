@@ -107,6 +107,22 @@ public static class AiRequest
         "Liberty City ليبرتي سيتي, San Andreas سان أندرياس; keep agency and brand names in Latin letters as written " +
         "(VCPD, LSPD, FIB, IAA, Ammu-Nation, Lifeinvader, Burger Shot, Cluckin' Bell, Pay 'n' Spray, Sprunk, eCola, Rockstar). " +
         "Keep line breaks. Keep the meaning and tone; do not add anything, and leave out only filler words and filler swearing. " +
+        // Arabic fork: subtitle craft from knowledge/translation-rulebook.md + knowledge/game-localization-practice.md
+        // (Netflix Arabic TTSG limits, IGDA, Diaz Cintas & Remael), 2026-11-22.
+        "Subtitle craft: at most 2 lines of about 42 characters and about 20 characters per second, so a fast line is " +
+        "condensed (a quick shout becomes 2-4 words): drop fillers, repeats and tags first, never a fact, name or number. " +
+        "Expand terse radio or tactical words when a literal word fails (\"Copy\" = \"عُلم\", \"Clear\" = \"الطريق آمن\"). " +
+        "Number: English \"you\" hides it; \"you two\", \"both of you\" or two people addressed = dual in Modern Standard lines " +
+        "(أنتما) but plural in Egyptian street lines (إنتو), which have no dual; \"y'all\" or \"you guys\" = plural; with no cue, " +
+        "singular. Unknown gender: masculine or a neutral phrasing until the scene shows it. Humor, puns and American " +
+        "references: recreate the effect for an Egyptian viewer, never word for word. Punctuation: Arabic ، ؟ ؛ with no space " +
+        "before them; no \"?!\"; \"...\" only for a real pause, not for a sentence split over subtitles. Numbers in Western " +
+        "digits; money as \"500 دولار\". Expand opaque acronyms (ASAP = فورًا) and give a Latin agency an Arabic noun when " +
+        "needed (شرطة VCPD). Keep each character's way of speaking steady through a scene. " +
+        // Arabic fork: DocMo 2026-11-22: "we swear by Allah only" (the audio test rendered "on God" as "على الإله").
+        "Oaths and religious words: \"I swear to God\", \"on God\", \"swear on my mother\" or \"hand to God\" = \"والله\"; \"Jesus\", " +
+        "\"Christ\" or \"God\" used as an exclamation = \"يا الله\" or \"يا إلهي\" (\"أحيه\" in a heated line), never a literal Jesus; " +
+        "\"God damn it\" = \"يخرب بيت كده\" or \"أحا\"; never a curse on God or religion. " +
         "The text is read from the screen by OCR and may have misread or missing letters (\"Y u ave to ask?\", " +
         "\"Doesn't 00k good.\"); translate the line the speaker clearly meant. " +
         "A subtitle may continue the previous one (it starts in lowercase or with a word like \"and\"); " +
@@ -699,7 +715,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
     /// <summary>Bağlama giden önceki satır sayısı.</summary>
     internal const int ContextLines = 3;
     /// <summary>Arabic fork: more of the scene, so lines are understood rather than translated word by word.</summary>
-    internal const int ArabicContextLines = 6;
+    internal const int ArabicContextLines = 10;
     /// <summary>Hata sonrası bu süre hizmet denenmez (bulut hizmetlerinin kotası için).</summary>
     private static readonly TimeSpan RetryAfter = TimeSpan.FromMinutes(1);
     /// <summary>

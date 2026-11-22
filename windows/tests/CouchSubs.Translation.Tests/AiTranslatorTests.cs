@@ -1035,6 +1035,36 @@ public class AiTranslatorTests
     }
 
     [Fact]
+    public async Task ArabicContextKeepsTenPreviousPairsWithTheirSpeakers()
+    {
+        var fake = new FakeAi();
+        var translator = new AiTranslator(AiProvider.OpenAi, Secret, null, null, new HttpClient(fake),
+            budget: new RequestBudget(1000), target: "ar");
+        string[] lines = ["Stay by the car.", "Where is the money?", "We left it upstairs.", "I hear sirens!",
+            "Nobody followed us.", "Check the window.", "The bridge is closed.", "Call your brother.",
+            "He lost his phone.", "Look behind you!", "They found the boat.", "Meet me at the airport."];
+        var old = TranslationDialogue.CurrentSpeaker;
+        try
+        {
+            for (var i = 0; i < 12; i++)
+            {
+                TranslationDialogue.CurrentSpeaker = i % 2 == 0 ? "LUCIA" : "JASON";
+                await translator.TranslateAsync(lines[i]);
+            }
+            Assert.Equal(12, fake.Requests.Count);
+            var user = User(fake, 11);
+            var previous = user.Split("Previous subtitles, for context only (do not translate them again):\n")[1]
+                .Split("\n\nTranslate each string")[0];
+            var expected = string.Join('\n', Enumerable.Range(1, 10).Select(i =>
+                $"Speaker: {(i % 2 == 0 ? "LUCIA" : "JASON")}\nEnglish: {lines[i]}\nArabic: [tr] {lines[i]}"));
+            Assert.Equal(expected, previous);
+            Assert.DoesNotContain($"English: {lines[0]}", user);
+            Assert.DoesNotContain($"English: {lines[11]}", user);
+        }
+        finally { TranslationDialogue.CurrentSpeaker = old; }
+    }
+
+    [Fact]
     public async Task ContextDoesNotCrossGameChanges()
     {
         string? game = "First game";
