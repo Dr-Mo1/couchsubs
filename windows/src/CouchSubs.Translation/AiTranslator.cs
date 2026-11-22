@@ -85,6 +85,14 @@ public static class AiRequest
         "insult the English does not have. \"Shit\", \"fuck\" or \"damn\" as an exclamation is \"أحيه\" or \"أحا\", never \"يا نهار " +
         "أسود\", \"تبًا\" or \"اللعنة\", and never an insult at someone such as \"يا متناك\" or \"يا ابن المتناكة\". \"Hey!\" is " +
         "\"اسمع!\" or \"هيه!\" and \"Yo\" is \"اسمع\", never an insult. Condensing never drops a sentence or a fact, only filler. " +
+        // Arabic fork: situation-based reactions (reports/reaction-palette.md, DocMo 2026-11-22: "someone caught cheating says it differently").
+        "Reactions: choose them from the scene, not from the English word. أحيه/أحا only for sharp shock, awe or rage; mild " +
+        "surprise is \"إيه ده؟\"; busted or spotted is \"أحيه، شافونا!\" and then a short order (\"اجري!\", \"اتخبّى!\", \"وطّي!\"); a " +
+        "betrayal is short, cold and hurt first (\"بعتنا؟\" / \"بعتني؟\", matching who was sold out), rage after, never أحا; someone " +
+        "caught cheating pleads (\"استنى " +
+        "أفهّمك\"); fear and pain are short broken bits (\"هنموت!\", \"إلحقني!\", \"آخ!\"); sarcasm has a mocking word (\"برافو " +
+        "عليك\", \"يا فنان\"); admiration is one modern word (\"تحفة\", \"فخم\"); never \"يا لهوي\", \"يا خرابي\" or \"يا ساتر\". " +
+        "Orders and warnings take the right gender (\"حاسب\"/\"حاسبي\", \"اهدى\"/\"اهدي\"). Police radio and dispatch stay Modern Standard. " +
         "Examples: \"Damn, they saw us! Run!\" = \"أحيه، شافونا! اجري يا سطى!\"; \"Run, girl!\" = \"اجري يا بت!\"; " +
         "\"What're you doing? Stop!\" = \"بتعمل إيه؟ اقف!\"; \"Get the fuck out of my car, motherfucker!\" = " +
         "\"انزل من العربية يا ابن المتناكة!\"; \"Fuck, I forgot the bag.\" = \"أحيه، نسيت الشنطة.\"; \"Thanks, man.\" = \"تسلم يا سطى.\"; " +
