@@ -54,19 +54,35 @@ public static class AiRequest
         "\"Donnie'nin Paketini Bul\"), never polite or plural forms such as \"Para Kazanın\". " +
         "Reply with only the translation, no explanations, notes or quotes.";
 
-    /// <summary>Arabic fork: the system prompt for target "ar" (Egyptian colloquial Arabic).</summary>
+    /// <summary>Arabic fork: the system prompt for target "ar" (Modern Standard Arabic, swearing in raw Egyptian).</summary>
     public const string ArabicSystemPrompt =
-        "You translate English video game subtitles into natural, spoken Egyptian Arabic (Masri), the way people in Cairo " +
-        "really talk, written in Arabic script. Use everyday Egyptian words and grammar (\"عايز\", \"دلوقتي\", \"إيه\", " +
-        "\"مش\", \"ليه\", \"يا عم\"), not Modern Standard Arabic, unless the line is clearly formal (a letter, a sign, a news report). " +
-        "Use Egyptian words only, never Levantine or Gulf ones such as \"زلمة\", \"شو\", \"هلق\", \"هيك\", \"وايد\", \"شلون\" or \"يا رجل\". " +
-        "Translate the meaning, not the words: say idioms, slang and jokes the way an Egyptian would really say the same thing " +
-        "(\"lay low\" = \"نختفي شوية\", \"my guy\" = \"يا صاحبي\", \"it's been a minute\" = \"بقالنا كتير\"), never word for word; " +
+        // Arabic fork: DocMo switched from Egyptian colloquial to Modern Standard Arabic with a light Egyptian flavour,
+        // the swearing staying raw Egyptian (2026-11-22). gemini-flash-lite drifts back to full Egyptian without the word lists.
+        "You translate English video game subtitles into Arabic subtitles written in Modern Standard Arabic (الفصحى), the way " +
+        "the best Arabic film and game subtitles read: simple, flowing and quick to read at a glance, never stiff or " +
+        "old-fashioned (\"ماذا تفعل؟\", not \"ما الذي تقوم بفعله؟\"). Every line uses Modern Standard grammar and words: " +
+        "ماذا/لماذا/أين/متى/الآن/هذا/هذه/أريد/لا/ليس/الذي, never the Egyptian إيه/ليه/فين/إمتى/دلوقتي/ده/دي/عايز/مش/اللي/كده/بتاع, " +
+        "and never the Egyptian verb prefixes بـ (بتعمل) or هـ (هياخد); use سـ/سوف for the future. " +
+        "Give it a light Egyptian flavour: when the English is casual, a word of address or exclamation may be Egyptian " +
+        "(\"يا عم\", \"يا باشا\", \"يا صاحبي\", \"يلا\", \"خلاص\"), but only that word; the rest of the line stays Modern Standard. " +
+        "Never use Levantine or Gulf words such as \"زلمة\", \"شو\", \"هلق\", \"هيك\", \"وايد\" or \"شلون\". " +
+        "Translate the meaning, not the words: say idioms, slang and jokes the way a good Arabic subtitler would " +
+        "(\"lay low\" = \"سنختفي لفترة\", \"it's been a minute\" = \"مرّ وقت طويل\"), never word for word; " +
         "but never change what happens, who does what, names, numbers, or whether someone is a man or a woman. " +
-        "When a slang list or a Turkish reference comes with the lines, use it. " +
         // Arabic fork: DocMo wants the swearing as raw as the English, sexual words included (2026-11-20).
-        "Keep insults and swearing exactly as strong and explicit as the original, in real Egyptian street words, " +
-        "sexual ones included when the English uses them; never soften or censor them. " +
+        "Keep insults and swearing exactly as strong and explicit as the original, sexual ones included when the English uses " +
+        "them, and say only the swear words and insults themselves in raw Egyptian street words, the way Egyptians really " +
+        "curse; never soften or censor them, never turn strong swearing into polite words like \"تبًا\" or \"أيها الوغد\", and " +
+        "never add an insult the English does not have. Sexual words stay raw street words (زب، كس، نيك، متناك، شرموطة), never " +
+        "clinical ones like \"عضو ذكري\". When \"fucking\" or \"damn\" only adds force, put an Egyptian swear word where Arabic " +
+        "takes one (after a noun: \"هذه السيارة المتناكة\"; or as an exclamation at the start: \"أحا، ...\") or leave it out; " +
+        "never after a verb or an adverb, and never the literal \"ملعون\" or \"اللعين\". \"Yo\" is \"اسمع\" or " +
+        "\"يا صاحبي\". The rest of a swearing line still stays Modern Standard. " +
+        "Examples: \"What're you doing? Stop!\" = \"ماذا تفعل؟ توقف!\"; \"Shit, we're almost there.\" = \"يا نهار أسود، لقد اقتربنا.\"; " +
+        "\"Get the fuck out of my car, motherfucker!\" = \"اخرج من سيارتي يا ابن المتناكة!\"; \"Thanks, man.\" = \"شكرًا يا صاحبي.\"; " +
+        "\"Come on, man, let's go.\" = \"يلا يا عم، لننطلق.\"; \"I hate this fucking car.\" = \"أكره هذه السيارة المتناكة.\"; " +
+        "\"Fuck, I forgot the bag.\" = \"أحا، نسيت الحقيبة.\" (an exclamation stays an exclamation, never an insult at someone) " +
+        "When a slang list or a Turkish reference comes with the lines, use it. " +
         "Keep speaker labels such as \"ATREUS:\" exactly as they are. Write character names and place names in Arabic " +
         "letters by how they sound; never translate their meaning. In Grand Theft Auto VI spell them like this: " +
         "Lucia لوسيا, Jason جيسون, Vice City فايس سيتي, Leonida ليونيدا, Leonida Keys ليونيدا كيز, Grassrivers جراس ريفرز, " +
@@ -81,7 +97,7 @@ public static class AiRequest
         "Reply with only the translation, no explanations, notes or quotes.";
 
     /// <summary>Arabic fork: the target language as named in the prompt ("tr" and anything else stays Turkish).</summary>
-    public static string LanguageName(string target) => target == "ar" ? "Egyptian Arabic" : "Turkish";
+    public static string LanguageName(string target) => target == "ar" ? "Arabic" : "Turkish";
 
     /// <summary>Kullanıcının ek talimatında en çok bu kadar karakter gider (fazlası kesilir).</summary>
     public const int MaxInstructionLength = 1000;
@@ -205,7 +221,7 @@ public static class AiRequest
                 : $"Character names (keep them exactly as written, do not translate them): {string.Join(", ", names)}");
         // Arabic fork: glossary entries found in these lines, and the game pack's Turkish line (made from the clean English).
         if (slang is { Count: > 0 })
-            parts.Add("Slang and idioms in these lines; say them with these Egyptian expressions (the meaning, not the words): " +
+            parts.Add("Slang and idioms in these lines; say them with these expressions (the meaning, not the words): " +
                       string.Join("; ", slang.Select(entry => $"\"{entry.Key}\" = \"{entry.Value}\"")));
         if (!string.IsNullOrWhiteSpace(reference))
             parts.Add($"Turkish translation of what is probably the same line, from the game's translation pack: \"{reference}\". " +
