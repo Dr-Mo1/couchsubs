@@ -1567,12 +1567,12 @@
       var alpha = Math.max(0, Math.min(100, style.background)) / 100;
       // Zemin saydamsa yazıya sert kontur eklenir (style.css, body.thin-bg).
       setBodyClass('thin-bg', alpha < 0.5);
-      // Saf siyah değil, hafif mavimsi siyah (#0c0e12): oyun görüntüsünün üstünde daha yumuşak durur.
-      textBackground = 'rgba(12, 14, 18, ' + alpha + ')';
-      coverBackground = style.background >= 100 ? '#0c0e12' : textBackground;
+      // Arabic fork: near-black with a violet tint (#0b0714), as in Basharkk's subtitle box (was the bluish #0c0e12).
+      textBackground = 'rgba(11, 7, 20, ' + alpha + ')';
+      coverBackground = style.background >= 100 ? '#0b0714' : textBackground;
       $('subtitle-text').style.background = textBackground;
-      $('subtitle-prev-text').style.background = 'rgba(12, 14, 18, ' + (alpha * 0.83).toFixed(2) + ')';
-      $('subtitle-prev2-text').style.background = 'rgba(12, 14, 18, ' + (alpha * 0.83).toFixed(2) + ')';
+      $('subtitle-prev-text').style.background = 'rgba(11, 7, 20, ' + (alpha * 0.83).toFixed(2) + ')';
+      $('subtitle-prev2-text').style.background = 'rgba(11, 7, 20, ' + (alpha * 0.83).toFixed(2) + ')';
     }
     // Ayarı göndermeyen bilgisayar (eski Windows sürümü, Mac) eski davranışı bekler: önceki satırlar üstte kalır.
     // Yoksa bir kez kapatılan ayar başka bilgisayara bağlanınca da kapalı kalırdı.

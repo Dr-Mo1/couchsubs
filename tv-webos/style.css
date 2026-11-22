@@ -1,4 +1,12 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
+/* Arabic fork: Cairo (SIL OFL 1.1, fonts/OFL.txt) for the subtitle lines only: DocMo liked the modern geometric Arabic
+   of Arab YouTubers' subtitles more than the TV's own font (2026-11-22). Screen-translation boxes keep the TV font. */
+@font-face {
+  font-family: "Cairo Subtitles";
+  src: url("fonts/Cairo.ttf") format("truetype");
+  font-weight: 200 1000;
+}
+
 html, body {
   margin: 0;
   width: 100%;
@@ -38,8 +46,11 @@ html, body {
 #subtitle-cover {
   position: absolute;
   z-index: 9;
-  border-radius: 1.4vh;
-  background: rgba(12, 14, 18, 0.97);
+  /* Arabic fork: the look of Basharkk's subtitle box (measured on his video): near-black with a violet tint, small
+     corners, and a soft dark glow around the box. */
+  border-radius: 0.6vh;
+  background: rgba(11, 7, 20, 0.97);
+  box-shadow: 0 0 2.2vh rgba(0, 0, 0, 0.6);
 }
 #subtitle-cover.hidden { display: none; }
 
@@ -140,15 +151,17 @@ html, body {
 #subtitle-prev-text, #subtitle-prev2-text {
   display: inline-block;
   padding: 0.24em 0.5em;
-  border-radius: 0.33em;
-  background: rgba(12, 14, 18, 0.75);
+  border-radius: 0.18em;
+  background: rgba(11, 7, 20, 0.75);
+  box-shadow: 0 0 0.4em rgba(0, 0, 0, 0.45);
   max-width: 100%;
   box-sizing: border-box;
   word-wrap: break-word;
   overflow-wrap: anywhere;
+  font-family: "Cairo Subtitles", "LG Smart UI", "Museo Sans", "SamsungOne", "Tizen Sans", Roboto, Arial, sans-serif;
   font-size: 37px;
   line-height: 1.25;
-  font-weight: 400;
+  font-weight: 600;
   text-shadow: 0 2px 4px #000;
 }
 
@@ -159,15 +172,17 @@ html, body {
 #subtitle-text {
   display: inline-block;
   padding: 0.24em 0.5em;
-  border-radius: 0.33em;
-  background: rgba(12, 14, 18, 0.9);
+  border-radius: 0.18em;
+  background: rgba(11, 7, 20, 0.9);
+  box-shadow: 0 0 0.5em rgba(0, 0, 0, 0.6);
   max-width: 100%;
   box-sizing: border-box;
   word-wrap: break-word;
   overflow-wrap: anywhere;
+  font-family: "Cairo Subtitles", "LG Smart UI", "Museo Sans", "SamsungOne", "Tizen Sans", Roboto, Arial, sans-serif;
   font-size: 46px;
   line-height: 1.25;
-  font-weight: 400;
+  font-weight: 600;
   text-shadow: 0 2px 4px #000;
 }
 
