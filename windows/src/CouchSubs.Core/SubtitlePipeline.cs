@@ -134,6 +134,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
 
     /// <summary>Yeni çeviri gösterilince çağrılır (kaynak, çeviri).</summary>
     public event Action<string, string>? PairShown;
+    public event Action? DialogueArrived;
     /// <summary>TV'ye giden her yeni satırın ölçümleri; <see cref="PairShown"/>'dan hemen önce çağrılır.</summary>
     public event Action<LineMetrics>? MetricsReady;
     /// <summary>TV'ye giden son satırın ölçümleri (henüz satır gitmediyse null).</summary>
@@ -156,6 +157,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     public Func<string, PackPartial?>? PartialPackLookup { get; set; }
     /// <summary>Konuşan adı ("ARTHUR: …") TV'ye giden çeviride gösterilir; kapalıysa yalnız cümle gider.</summary>
     public bool ShowSpeakerNames { get; set; } = true;
+    public string TargetLanguage { get; set; } = "tr";
     /// <summary>
     /// Hedef dil Türkçe: yüksek güvenle Türkçe olan satır (<see cref="TurkishText.IsSure"/>) çevirmene gönderilmez (#289).
     /// Uygulama hedef dil Türkçe değilse kapatır.
@@ -178,8 +180,16 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         return bare with { Spoken = SpeakerPrefix.Voiced(bare.Spoken, prefix) };
     }
 
+    // Keep the English identity alongside the localized display label, including restored lines.
+    private void SendSubtitle(string text, string source, int durationMs, TextBox? box, bool replaces)
+    {
+        DialogueArrived?.Invoke();
+        if (TargetLanguage == "ar") sender.SendPresentedSubtitle(text, source, TargetLanguage, durationMs, box, replaces);
+        else sender.SendSubtitle(text, durationMs, box, replaces: replaces);
+    }
+
     /// <summary>Gösterilecek çeviri: konuşan adı ayara göre başa eklenir ya da atılır.</summary>
-    private string Present(string translation, Request request) => SpeakerPrefix.Present(translation, request.Source, ShowSpeakerNames);
+    private string Present(string translation, Request request) => SpeakerPrefix.Present(translation, request.Source, ShowSpeakerNames, TargetLanguage);
     /// <summary>Hiçbir pakette bulunmayan kararlı satır (ortak havuz için).</summary>
     public event Action<string>? PackMissed;
 
@@ -337,10 +347,12 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         // Alandaki menü ve köşe göstergeleri de altyazı değildir; yalnız altyazı bloğu çevrilir ve kutusu ona göre olur.
         var area = new TextBox(region.Left, region.Top, region.Right, region.Bottom);
         // Konuşma değişirken sabit duran görev/HUD satırı ("Get in the sea plane", GTA 6) altyazı bloğuna katılmaz.
-        var cleaned = raw.WithoutButtonPrompts().WithoutOcrNoise();
+        // Route controller instructions before the short-button filter discards their location.
+        var controllerRows = raw.Lines.Where(line => ControllerPrompt.IsPrompt(line.Text)).ToList();
+        var cleaned = new Reading(raw.Lines.Except(controllerRows)).WithoutButtonPrompts().WithoutOcrNoise();
         // GTA ekran yazısı (silah adı, plaka, tabela, menü) altyazı değildir; konuşmaya yapışsa da çevrilmez.
         if (DropsScreenText?.Invoke() == true) cleaned = WithoutScreenText(cleaned, line => LogOnce("tabela|" + line, $"tabela atıldı: {SubtitleLog.Excerpt(line)}"));
-        var rows = cleaned.JoiningRows();
+        var rows = new Reading(cleaned.JoiningRows().Lines.Concat(controllerRows));
         bool missionMoved;
         CropRegion? missionRegion;
         lock (gate)
@@ -391,6 +403,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
             currentRead = new ReadInfo(captured, ocrMs, reading.Confidence);
             // Bölge izi ve satırın yeri: okuma boş dönse de satırın yeri değişmediyse satır silinmez (parlak zemin).
             var action = stabilizer.Feed(reading.Text, signature, reading.Box);
+            if (action.Kind == StabilizerKind.Translate) DialogueArrived?.Invoke();
             // Ekranda duran kötü yeniden okuma her karede not edilir; günlüğe bir kez yazılır.
             if (stabilizer.Note is { } note && note != lastNote)
             {
@@ -789,7 +802,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
 
     /// <summary>Kısmi eşleşmenin Türkçesi: paketteki satırlar ve motorun çevirdiği eksik satır, okunan sırayla.</summary>
     private string Combine(PackPartial partial, string sentence) =>
-        string.Join("\n", partial.Lines.Select(line => SpeakerPrefix.Present(line.Turkish ?? sentence, line.Source, ShowSpeakerNames)));
+        string.Join("\n", partial.Lines.Select(line => SpeakerPrefix.Present(line.Turkish ?? sentence, line.Source, ShowSpeakerNames, TargetLanguage)));
 
     // Tam okuma sıradayken geri geldiyse aradaki kısalmış okumaları birleştir; sıra ve okuma zamanı korunur.
     // Gerçek bir boş bölgeyi aşma: sonra gelen kısa metin ayrı bir replik olabilir.
@@ -833,7 +846,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         }
         Write(request, $"{SubtitleLog.Excerpt(source)} → {pack}");
         lastShown = request.Number;
-        sender.SendSubtitle(translated, 15000, request.Box, replaces: RevisesShown(source));
+        SendSubtitle(translated, source, 15000, request.Box, replaces: RevisesShown(source));
         LastPair = (source, translated);
         LastBox = request.Box;
         LastOrigin = "paket";
@@ -873,7 +886,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
                     Write($"#{number} geri geldi (yarım okuması): {SubtitleLog.Excerpt(source)}");
                     if (translation is not null)
                     {
-                        sender.SendSubtitle(translation, 15000, box, replaces: true);
+                        SendSubtitle(translation, last.Source, 15000, box, replaces: true);
                         LastPair = (last.Source, translation);
                         LastBox = box;
                     }
@@ -888,7 +901,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
             lineOnScreen = number;
             Write($"#{number} geri geldi: {SubtitleLog.Excerpt(source)}");
             if (translation is null) return null;
-            sender.SendSubtitle(translation, 15000, box, replaces: RevisesShown(source));
+            SendSubtitle(translation, source, 15000, box, replaces: RevisesShown(source));
             LastPair = (source, translation);
             LastBox = box;
             return null;
@@ -1039,7 +1052,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
             Write(request, $"{result}, gösterildi{(onScreen ? "" : " (satır kalkmıştı)")}{PartialNote(request)}");
             lastShown = request.Number;
             // Satır hâlâ ekrandaysa kalkınca silinir; kalktıysa okunacak kadar gösterilir.
-            sender.SendSubtitle(translated, onScreen ? 15000 : ReadingTime(translated), request.Box, replaces: RevisesShown(source));
+            SendSubtitle(translated, source, onScreen ? 15000 : ReadingTime(translated), request.Box, replaces: RevisesShown(source));
             LastPair = (source, translated);
             LastBox = request.Box;
             LastOrigin = "motor";

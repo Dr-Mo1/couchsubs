@@ -115,6 +115,34 @@ public class SubtitleServerTests
         Assert.Contains(lines, l => l.Contains("Adsız satır.") && !l.Contains("speakers"));
     }
 
+    [Fact]
+    public async Task ArabicLabelsCarryTheOriginalEnglishSessionColor()
+    {
+        using var server = new SubtitleServer(0) { SpeakerColors = true };
+        var port = await server.StartAsync();
+        using var response = await Http.GetAsync($"http://127.0.0.1:{port}/events", HttpCompletionOption.ResponseHeadersRead);
+        await WaitUntil(() => server.ConnectedClients == 1);
+        const string source = "Lucia: Come.\nJason: Okay.\nBrian's: Arrived.\nStranger: Stop.";
+        var shown = SpeakerPrefix.Present("Lucia: تعالي.\nJason: حاضر.\nBrian's: وصل.\nStranger: توقف.", source, true, "ar");
+        var names = new[] { "Lucia", "Jason", "Brian's", "Stranger" };
+        var colors = names.Select(name => server.SpeakerBook.Color(name)).ToArray();
+        server.SendPresentedSubtitle(shown, source, "ar", 4000, null, false);
+        server.Clear();
+        using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
+        var lines = await ReadLines(reader, "event: clear");
+        var payload = Assert.Single(lines, line => line.StartsWith("data: ") && line.Contains("speakers"));
+        using var json = System.Text.Json.JsonDocument.Parse(payload[6..]);
+        Assert.Equal(SubtitleServer.IsolateLatin(shown), json.RootElement.GetProperty("text").GetString());
+        var speakers = json.RootElement.GetProperty("speakers").EnumerateArray().ToArray();
+        Assert.Equal(names.Length, speakers.Length);
+        for (var i = 0; i < names.Length; i++)
+        {
+            var expectedName = names[i] == "Stranger" ? "\u2066Stranger\u2069" : ArabicSpeakerNames.Display(names[i]);
+            Assert.Equal(expectedName, speakers[i].GetProperty("name").GetString());
+            Assert.Equal(colors[i], speakers[i].GetProperty("color").GetString());
+        }
+    }
+
     /// TV yarı açık bağlantıyı adlı "ping" olayının gelmemesinden anlar; yorum satırını EventSource görmez.
     [Fact]
     public async Task PingIsSentAsNamedEvent()

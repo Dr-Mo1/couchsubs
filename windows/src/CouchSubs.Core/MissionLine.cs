@@ -23,6 +23,7 @@ public sealed class MissionLine
         public long Since { get; } = since;
         public long LastSeen { get; set; } = since;
         public TextBox Box { get; set; } = box;
+        public bool Controller { get; set; }
     }
 
     private readonly List<Track> tracks = [];
@@ -38,16 +39,18 @@ public sealed class MissionLine
         foreach (var line in removed)
         {
             if (line.Box is not { } box || SpeakerPrefix.Parse(line.Text) is not null) continue;
-            var text = TextMatch.Normalize(line.Text);
+            var text = ControllerPrompt.Identity(line.Text);
             if (text.Length < 3) continue;
             var placed = box.PlacedIn(area);
-            var track = tracks.FirstOrDefault(item => TextMatch.IsSimilar(item.Text, text));
+            var track = tracks.FirstOrDefault(item => TextMatch.IsSimilar(item.Text, text,
+                ControllerPrompt.IsPrompt(line.Text) ? 0.9 : 0.85));
             if (track is null) tracks.Add(track = new Track(text, time, placed));
             track.LastSeen = time;
+            track.Controller |= ControllerPrompt.IsPrompt(line.Text);
             track.Box = placed;
         }
         tracks.RemoveAll(item => time - item.LastSeen > ForgetMs);
-        var settled = tracks.Where(item => time - item.Since >= SettleMs).ToList();
+        var settled = tracks.Where(item => item.Controller || time - item.Since >= SettleMs).ToList();
         CropRegion? next = null;
         if (settled.Count > 0)
         {

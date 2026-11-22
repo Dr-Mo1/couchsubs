@@ -61,6 +61,33 @@ public static partial class SpeakerPrefix
         return string.Join("\n", text.Split('\n').Select(line => Parse(line) is { } found && names.Contains(found.Name) ? found.Body : line));
     }
 
+    /// <summary>Arabic display labels; other targets use the original presentation unchanged.</summary>
+    public static string Present(string translation, string source, bool show, string target)
+    {
+        if (target != "ar") return Present(translation, source, show);
+        var names = SpeakerColors.Speakers(source);
+        // Normalize an already localized label before the original add/hide logic.
+        var normalized = string.Join("\n", translation.Split('\n').Select(line =>
+        {
+            foreach (var name in names)
+                if (LabelBody(line, ArabicSpeakerNames.Display(name)) is { } body) return $"{name}: {body}";
+            return line;
+        }));
+        return string.Join("\n", Present(normalized, source, show).Split('\n').Select(line =>
+        {
+            if (Parse(line) is not { } prefix || !names.Contains(prefix.Name)) return line;
+            return $"{ArabicSpeakerNames.Display(prefix.Name)}: {prefix.Body}";
+        }));
+    }
+
+    internal static string? LabelBody(string line, string name)
+    {
+        var trimmed = line.TrimStart();
+        if (!trimmed.StartsWith(name, StringComparison.Ordinal)) return null;
+        var rest = trimmed[name.Length..].TrimStart();
+        return rest.StartsWith(':') || rest.StartsWith('：') ? rest[1..].TrimStart() : null;
+    }
+
     /// <summary>Cümlenin seslendirme satırları adı taşımıyorsa konuşan, baştaki addır.</summary>
     public static IReadOnlyList<SpokenLine> Voiced(IReadOnlyList<SpokenLine> lines, Split? prefix)
     {

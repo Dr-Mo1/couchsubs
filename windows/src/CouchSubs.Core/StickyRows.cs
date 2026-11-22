@@ -76,15 +76,21 @@ public sealed class StickyRows
         var created = new List<int>();
         foreach (var line in reading.Lines)
         {
-            var text = TextMatch.Normalize(line.Text);
+            var text = ControllerPrompt.Identity(line.Text);
             if (text.Length < 3) { matched.Add(null); continue; }
-            var row = rows.FirstOrDefault(r => !used.Contains(r) && TextMatch.IsSimilar(text, r.Text));
+            var row = rows.FirstOrDefault(r => !used.Contains(r) && TextMatch.IsSimilar(text, r.Text,
+                ControllerPrompt.IsPrompt(line.Text) ? 0.9 : 0.85));
             if (row is null) { row = new Row(text, time); rows.Add(row); created.Add(matched.Count); }
             else if (text.Length >= row.Text.Length + 3)
             {
                 // Satır büyüdü (yazı yazılır gibi): yaşı yeniden başlar; okuma sapmaları (kısalıp uzama) saymaz.
                 row.Text = text;
                 row.Grown = time;
+            }
+            if (ControllerPrompt.IsPrompt(line.Text) && !row.Sticky)
+            {
+                row.Sticky = true;
+                newly.Add(line.Text);
             }
             row.LastSeen = time;
             used.Add(row);

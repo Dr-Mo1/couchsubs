@@ -81,6 +81,9 @@ public interface ISubtitleSender
     /// <param name="paragraphs">true ise metin satır satır, sola yaslı gösterilir (görev paneli gibi başlık ve maddeli yazılar).</param>
     /// <param name="replaces">Satır az önce gösterilenin uzamış ya da düzelmiş okumasıdır (<see cref="TextMatch.IsRevision"/>); TV onu öncekinin üstüne yığmaz.</param>
     void SendSubtitle(string text, int durationMs = 15000, TextBox? box = null, bool paragraphs = false, bool replaces = false);
+    // Preserve the source identity when the displayed speaker label is localized.
+    void SendPresentedSubtitle(string text, string source, string target, int durationMs, TextBox? box, bool replaces) =>
+        SendSubtitle(text, durationMs, box, replaces: replaces);
     void Clear();
 }
 
@@ -293,21 +296,37 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
 
     /// <param name="paragraphs">true ise metin satır satır, sola yaslı gösterilir (görev paneli gibi başlık ve maddeli yazılar).</param>
     /// <param name="replaces">TV satırı öncekinin üstüne yığmaz, yerine koyar (<c>replace</c> alanı; eski TV uygulamaları yok sayar).</param>
-    public void SendSubtitle(string text, int durationMs = 15000, TextBox? box = null, bool paragraphs = false, bool replaces = false)
+    public void SendPresentedSubtitle(string text, string source, string target, int durationMs, TextBox? box, bool replaces) =>
+        SendSubtitleCore(text, durationMs, box, false, replaces, target == "ar" ? source : null);
+
+    public void SendSubtitle(string text, int durationMs = 15000, TextBox? box = null, bool paragraphs = false, bool replaces = false) =>
+        SendSubtitleCore(text, durationMs, box, paragraphs, replaces, null);
+
+    private void SendSubtitleCore(string text, int durationMs, TextBox? box, bool paragraphs, bool replaces, string? arabicSource)
     {
+        var sent = IsolateLatin(text);
         var json = new SortedDictionary<string, object>
         {
             ["at"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             ["duration"] = durationMs,
-            ["text"] = IsolateLatin(text),
+            ["text"] = sent,
         };
         if (paragraphs) json["paragraphs"] = true;
         if (replaces) json["replace"] = true;
         if (box is { } b) json["box"] = BoxJson(b);
-        if (SpeakerColors && Core.SpeakerColors.Speakers(text) is { Count: > 0 } speakers)
-            json["speakers"] = speakers.Select(name => new SortedDictionary<string, object> { ["name"] = name, ["color"] = SpeakerBook.Color(name)! }).ToList();
+        if (SpeakerColors && Core.SpeakerColors.Speakers(arabicSource ?? text) is { Count: > 0 } speakers)
+            json["speakers"] = speakers.Select(name => (Original: name, Display: arabicSource is null ? name : TvSpeakerName(sent, ArabicSpeakerNames.Display(name))))
+                .Where(name => arabicSource is null || sent.Split('\n').Any(line => SpeakerPrefix.LabelBody(line, name.Display) is not null))
+                .Select(name => new SortedDictionary<string, object> { ["name"] = name.Display, ["color"] = SpeakerBook.Color(name.Original)! }).ToList();
         Broadcast(Frame("subtitle", json), subtitle: true);
         EventSent?.Invoke(new SubtitleEvent(SubtitleEventKind.Subtitle, text, durationMs, paragraphs, replaces, Box: box));
+    }
+
+    // Unknown Latin names retain the existing bidi isolates; match the exact transmitted prefix too.
+    private static string TvSpeakerName(string sent, string name)
+    {
+        var isolated = "\u2066" + name + "\u2069";
+        return sent.Split('\n').Any(line => SpeakerPrefix.LabelBody(line, isolated) is not null) ? isolated : name;
     }
 
     private static readonly System.Text.RegularExpressions.Regex ArabicLetter = new(@"\p{IsArabic}");

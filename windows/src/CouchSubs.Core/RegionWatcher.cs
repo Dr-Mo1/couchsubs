@@ -93,6 +93,7 @@ public sealed partial class RegionWatcher
         public string Shown = "";
         /// <summary>Gösterilen yazının <see cref="Candidate.Text"/>'i.</summary>
         public string ShownText = "";
+        public int HintDialogueVersion;
         /// <summary>Gösterilen yazıdaki tuş simgesi sayısı.</summary>
         public int ShownIcons;
         /// <summary>Son gösterilen (boş olmayan) yazı; alan boşalınca da hatırlanır (yarım okumayı tanımak için).</summary>
@@ -220,6 +221,7 @@ public sealed partial class RegionWatcher
     /// <summary>Her karede çağrılır; tur zamanı geldiyse ve önceki tur bittiyse turu arka planda başlatır, hemen döner.</summary>
     public void Offer(Frame frame, IReadOnlyList<WatchedArea> areas)
     {
+        ExpireInstruction();
         var time = now();
         bool confirmOnly, regularDue, phoneDue;
         int started;
@@ -289,6 +291,7 @@ public sealed partial class RegionWatcher
 
     private async Task PassAsync(Frame frame, IReadOnlyList<WatchedArea> all, int started, bool regularDue, bool confirmOnly, bool phoneDue)
     {
+        ExpireInstruction();
         if (Volatile.Read(ref session) != started) return;
         // Ayarlar'da kapalı türün alanı (menü, hazır yardım/mesaj alanı, görev satırı) okunmaz; kutusu kalkar.
         var areas = Allows is { } allows ? [.. all.Where(area => ScreenTextKinds.Reads(area, allows))] : all;
@@ -719,6 +722,17 @@ public sealed partial class RegionWatcher
 
     private async Task CommitAsync(Candidate candidate, WatchedArea area, State state, int started)
     {
+        if (area.Id == MissionLine.AreaId && candidate.Text.Length > 0)
+        {
+            lock (hintGate)
+            {
+                if (recentInstructions.Any(text => ControllerPrompt.Same(text, candidate.Text))) return;
+                state.HintDialogueVersion = dialogueVersion;
+            }
+        }
+        // A mission reread must neither request another translation nor repaint its existing hint.
+        if (area.Id == MissionLine.AreaId && state.ShownText.Length > 0
+            && ControllerPrompt.Same(state.ShownText, candidate.Text)) return;
         // Menü dışındaki otomatik alanın türü okunan yazıdan çıkar (yardım/eylem ya da diğer); kapalı tür gürültü gibi
         // çizilmez, dedektöre bildirilir.
         var unwanted = area.Auto && Allows is { } allows && Kind(area, candidate) is { } kind && !allows(kind);
@@ -845,7 +859,9 @@ public sealed partial class RegionWatcher
             if (PixelsChanged(state, crop, signature))
             {
                 var fresh = ReadCandidate(newest.Frame, crop, signature, area, state, started);
-                if (fresh is null || fresh.Key != candidate.Key || TranslationKey(fresh) != key)
+                var sameMission = fresh is not null && area.Id == MissionLine.AreaId
+                    && ControllerPrompt.Same(fresh.Text, candidate.Text);
+                if (fresh is null || (!sameMission && (fresh.Key != candidate.Key || TranslationKey(fresh) != key)))
                 {
                     (state.Shown, state.ShownText, state.ShownIcons) = previous;
                     if (fresh is not null) Stage(fresh, state);
@@ -893,7 +909,23 @@ public sealed partial class RegionWatcher
                     blocks = StablePhoneBlocks(blocks, previous);
                 state.SentPhoneBlocks = blocks;
             }
-            server.SendRegion(area.Id, text, box, lineHeight, icons, blocks);
+            if (area.Id == MissionLine.AreaId && text.Length > 0)
+            {
+                lock (hintGate)
+                {
+                    if (recentInstructions.Any(old => ControllerPrompt.Same(old, state.ShownText))) return;
+                    recentInstructions.Enqueue(state.ShownText);
+                    while (recentInstructions.Count > RecentInstructionLimit) recentInstructions.Dequeue();
+                    // A dialogue arriving during translation also consumes this hint's one display opportunity.
+                    if (state.HintDialogueVersion != dialogueVersion) return;
+                    server.SendRegion(area.Id, text, box, lineHeight, icons, blocks);
+                    instructionVisible = true;
+                    instructionUntil = now() + InstructionDisplayMs;
+                    hintTimer?.Dispose();
+                    hintTimer = new Timer(_ => ExpireInstruction(), null, InstructionDisplayMs, Timeout.Infinite);
+                }
+            }
+            else server.SendRegion(area.Id, text, box, lineHeight, icons, blocks);
         }
     }
 
@@ -1185,6 +1217,14 @@ public sealed partial class RegionWatcher
     /// <summary>Çeviri durdu ya da hat yeniden kuruldu: süren tur bırakılır, TV'deki ek alan kutuları kalkar.</summary>
     public void Reset()
     {
+        lock (hintGate)
+        {
+            hintTimer?.Dispose();
+            hintTimer = null;
+            instructionVisible = false;
+            recentInstructions.Clear();
+            dialogueVersion++;
+        }
         Interlocked.Increment(ref session);
         var anyShown = AnyShown();
         states = [];

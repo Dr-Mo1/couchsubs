@@ -17,5 +17,11 @@ public sealed class MenuPausedSender(ISubtitleSender inner, Func<bool> inMenu) :
         inner.SendSubtitle(text, durationMs, box, paragraphs, replaces);
     }
 
+    public void SendPresentedSubtitle(string text, string source, string target, int durationMs, TextBox? box, bool replaces)
+    {
+        if (inMenu()) return;
+        inner.SendPresentedSubtitle(text, source, target, durationMs, box, replaces);
+    }
+
     public void Clear() => inner.Clear();
 }

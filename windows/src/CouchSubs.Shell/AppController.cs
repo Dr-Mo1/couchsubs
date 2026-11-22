@@ -2946,6 +2946,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         var built = new SubtitlePipeline(reader, MakeTranslator(), sender, scheduler)
         {
             ShowSpeakerNames = settings.ShowSpeakerNames,
+            TargetLanguage = settings.TargetLanguage,
             SkipsTurkish = settings.TargetLanguage == "tr",
             WatchSubtitleBackground = settings.WatchSubtitleBackground,
             // Arabic fork: the Arabic packs are GTA 6 only, so screen text is dropped even before the game is known.
@@ -2954,6 +2955,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             EchoPaused = () => Volatile.Read(ref screenText)?.InMenu == true,
         };
         built.MetricsReady += metrics => post(() => MetricsText = metrics.Summary(text));
+        built.DialogueArrived += () => Volatile.Read(ref regionWatcher)?.DialogueArrived();
         built.PairShown += (source, translation) =>
         {
             var box = built.LastBox;
