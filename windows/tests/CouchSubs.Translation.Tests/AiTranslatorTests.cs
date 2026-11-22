@@ -188,6 +188,151 @@ public class AiTranslatorTests
         Assert.Equal(4, fake.Requests.Count);
     }
 
+    [Theory]
+    [InlineData("JASON", "Speaker is a man.")]
+    [InlineData("Lucia", "Speaker is a woman.")]
+    [InlineData("Cal", "Speaker is a man.")]
+    [InlineData("Brian", "Speaker is a man.")]
+    [InlineData("Boobie", "Speaker is a man.")]
+    [InlineData("Raul", "Speaker is a man.")]
+    [InlineData("Dre'Quan", "Speaker is a man.")]
+    [InlineData("Dre’Quan", "Speaker is a man.")]
+    [InlineData("Real Dimez", "Speakers are women.")]
+    public void ArabicDialogueKnowsMainCharacterGender(string speaker, string hint)
+    {
+        var user = AiRequest.UserMessage(["I'm ready."], [], target: "ar", speaker: speaker);
+        Assert.Contains($"Speaker: {speaker}", user);
+        Assert.Contains(hint, user);
+        Assert.EndsWith("[\"I'm ready.\"]", user);
+    }
+
+    [Theory]
+    [InlineData("Lucia, stay close.", "Lucia", "woman")]
+    [InlineData("Stay close, Jason!", "Jason", "man")]
+    [InlineData("Hey, Lucia, wait!", "Lucia", "woman")]
+    public void ArabicDialogueUsesExplicitListener(string text, string listener, string gender) =>
+        Assert.Contains($"Listener ({listener}) is a {gender}.", AiRequest.UserMessage([text], [], target: "ar"));
+
+    [Fact]
+    public void ArabicDialogueDoesNotGuessMissingGenderOrListener()
+    {
+        var user = AiRequest.UserMessage(["I saw Lucia yesterday."], [], target: "ar", speaker: "UNKNOWN");
+        Assert.Contains("Speaker: UNKNOWN", user);
+        Assert.DoesNotContain("Speaker is a", user);
+        Assert.DoesNotContain("Listener", user);
+        Assert.DoesNotContain("Speaker:", AiRequest.UserMessage(["I'm ready."], [], target: "ar"));
+    }
+
+    [Theory]
+    [InlineData("The only way", "We can survive.")]
+    [InlineData("If we stick together,", "We can survive.")]
+    [InlineData("We need to stay.", "together through this.")]
+    [InlineData("We need to stay.", "And work as a team.")]
+    [InlineData("We need to stay.", "But only tonight.")]
+    [InlineData("We need to stay.", "So keep quiet.")]
+    [InlineData("We need to stay.", "Or leave together.")]
+    public void ArabicDialogueJoinsSentenceFragments(string previous, string current)
+    {
+        var user = AiRequest.UserMessage([current], [new(previous, "الترجمة السابقة", "LUCIA")], target: "ar", speaker: "LUCIA");
+        Assert.Contains($"This subtitle continues the previous one: \"{previous}\" (shown as \"الترجمة السابقة\")", user);
+        Assert.Contains("without repeating the previous one", user);
+        Assert.EndsWith(JsonSerializer.Serialize(new[] { current }), user);
+    }
+
+    [Theory]
+    [InlineData("Done.", "Next sentence.", "LUCIA", "LUCIA", "انتهى")]
+    [InlineData("Done!\"", "Next sentence.", "LUCIA", "LUCIA", "انتهى")]
+    [InlineData("Done…", "Next sentence.", "LUCIA", "LUCIA", "انتهى")]
+    [InlineData("If we stay", "and work together.", "JASON", "LUCIA", "انتهى")]
+    [InlineData("If we stay", "and work together.", "LUCIA", "LUCIA", null)]
+    public void ArabicDialogueDoesNotJoinCompletedTurnsOrUntranslatedLines(string previous, string current,
+        string previousSpeaker, string speaker, string? translation) =>
+        Assert.DoesNotContain("This subtitle continues", AiRequest.UserMessage([current],
+            [new(previous, translation, previousSpeaker)], target: "ar", speaker: speaker));
+
+    [Fact]
+    public void TurkishDialogueMessageStaysByteIdentical()
+    {
+        const string expected = "Game: GTA VI\n\nPrevious subtitles, for context only (do not translate them again):\n" +
+            "English: If we stay\nTurkish: Kalırsak\n\n" +
+            "Translate each string in this JSON array into Turkish. Reply with only a JSON array of 1 Turkish strings in the same order.\n" +
+            "[\"and work together.\"]";
+        Assert.Equal(expected, AiRequest.UserMessage(["and work together."], [new("If we stay", "Kalırsak", "JASON")],
+            game: "GTA VI", speaker: "LUCIA"));
+    }
+
+    [Fact]
+    public async Task ArabicSpeakerSurvivesFallbackAndSeparatesGenderCache()
+    {
+        var fake = new FakeAi();
+        var next = new AiTranslator(AiProvider.OpenAi, Secret, null, null, new HttpClient(fake), target: "ar");
+        var limited = new FakeAi((_, _) => Json(RateLimitBody(PerMinute, "15", "1s"), HttpStatusCode.TooManyRequests));
+        var first = new AiTranslator(AiProvider.OpenAi, Secret, null, next, new HttpClient(limited), target: "ar");
+        var old = TranslationDialogue.CurrentSpeaker;
+        try
+        {
+            TranslationDialogue.CurrentSpeaker = "LUCIA";
+            await first.TranslateAsync("I'm ready.");
+            Assert.Contains("Speaker is a woman.", User(fake, 0));
+            TranslationDialogue.CurrentSpeaker = "JASON";
+            await first.TranslateAsync("I'm ready.");
+            Assert.Equal(2, fake.Requests.Count);
+            Assert.Contains("Speaker is a man.", User(fake, 1));
+            await first.TranslateAsync("I'm ready.");
+            Assert.Equal(2, fake.Requests.Count);
+        }
+        finally { TranslationDialogue.CurrentSpeaker = old; }
+    }
+
+    [Fact]
+    public async Task ArabicContinuationUsesRealPreviousReply()
+    {
+        var fake = new FakeAi((request, _) => Wrap(request, "[\"لو بقينا مع بعض\"]"));
+        var translator = new AiTranslator(AiProvider.OpenAi, Secret, null, null, new HttpClient(fake), target: "ar");
+        await translator.TranslateAsync("If we stay together,");
+        await translator.TranslateAsync("we can survive this.");
+        Assert.Contains("This subtitle continues the previous one: \"If we stay together,\" (shown as \"لو بقينا مع بعض\")", User(fake, 1));
+    }
+
+    private sealed class DialogueReader : ITextReader
+    {
+        public string Read(Frame image) => "LUCIA: I'm ready to go.";
+    }
+
+    private sealed class DialogueSender : ISubtitleSender
+    {
+        public void SendSubtitle(string text, int durationMs = 15000, TextBox? box = null, bool paragraphs = false, bool replaces = false) { }
+        public void Clear() { }
+    }
+
+    [Theory]
+    [InlineData("ar")]
+    [InlineData("tr")]
+    public async Task PipelineCarriesStrippedSpeakerOnlyIntoArabicRequest(string target)
+    {
+        var fake = new FakeAi();
+        var translator = new AiTranslator(AiProvider.OpenAi, Secret, null, null, new HttpClient(fake), target: target);
+        long time = 0;
+        var pipeline = new SubtitlePipeline(new DialogueReader(), translator, new DialogueSender(), clock: () => time);
+        var old = TranslationDialogue.CurrentSpeaker;
+        for (var i = 0; i < 25; i++)
+        {
+            await pipeline.ProcessAsync(Frame.Blank(64, 64), new CropRegion());
+            await pipeline.WaitForTranslationsAsync();
+            time += 100;
+        }
+        Assert.Single(fake.Requests);
+        var user = User(fake, 0);
+        Assert.EndsWith("[\"I'm ready to go.\"]", user);
+        if (target == "ar")
+        {
+            Assert.Contains("Speaker: LUCIA", user);
+            Assert.Contains("Speaker is a woman.", user);
+        }
+        else Assert.DoesNotContain("Speaker:", user);
+        Assert.Equal(old, TranslationDialogue.CurrentSpeaker);
+    }
+
     /// <summary>Yapay zekâ hizmetlerinin yerine geçen sahte sunucu: istekleri saklar, cümleleri "[tr] cümle" diye çevirir.</summary>
     private sealed class FakeAi(Func<HttpRequestMessage, string, HttpResponseMessage>? reply = null) : HttpMessageHandler
     {

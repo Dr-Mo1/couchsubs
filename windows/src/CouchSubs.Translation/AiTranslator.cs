@@ -11,7 +11,7 @@ using CouchSubs.Core.Dubbing;
 namespace CouchSubs.Translation;
 
 /// <summary>Bağlam olarak giden, daha önce gösterilmiş satır ve (biliniyorsa) çevirisi.</summary>
-public sealed record AiContextLine(string Source, string? Translation = null);
+public sealed record AiContextLine(string Source, string? Translation = null, string? Speaker = null);
 
 /// <summary>Arabic fork: the lines shown so far; one log is shared by every key and model of a chain, so each sees the scene.</summary>
 public sealed class AiContextLog
@@ -227,11 +227,13 @@ public static class AiRequest
     /// </summary>
     public static string UserMessage(IReadOnlyList<string> sentences, IReadOnlyList<AiContextLine> context, string? game = null,
                                      IReadOnlyList<string>? names = null, string target = "tr",
-                                     IReadOnlyList<KeyValuePair<string, string>>? slang = null, string? reference = null)
+                                     IReadOnlyList<KeyValuePair<string, string>>? slang = null, string? reference = null,
+                                     string? speaker = null)
     {
         var language = LanguageName(target);
         var parts = new List<string>();
         if (!string.IsNullOrEmpty(game)) parts.Add($"Game: {game}");
+        if (target == "ar") AddDialogueHints(parts, sentences, context, speaker);
         if (names is { Count: > 0 })
             parts.Add(target == "ar"
                 ? $"Character names (write them in Arabic letters by how they sound, do not translate their meaning): {string.Join(", ", names)}"
@@ -249,6 +251,7 @@ public static class AiRequest
             var lines = new List<string> { "Previous subtitles, for context only (do not translate them again):" };
             foreach (var line in context)
             {
+                if (target == "ar" && line.Speaker is { } previousSpeaker) lines.Add($"Speaker: {previousSpeaker}");
                 lines.Add($"English: {line.Source}");
                 if (line.Translation is { } translation) lines.Add($"{language}: {translation}");
             }
@@ -258,6 +261,46 @@ public static class AiRequest
         parts.Add($"Translate each string in this JSON array into {language}. Reply with only a JSON array of {sentences.Count} " +
                   $"{language} strings in the same order.\n{list}");
         return string.Join("\n\n", parts);
+    }
+
+    // Arabic fork: use only explicit speaker labels and direct address; a name mentioned in a story is not the listener.
+    private static readonly IReadOnlyDictionary<string, string> CharacterGenders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Jason"] = "man", ["Lucia"] = "woman", ["Cal"] = "man", ["Brian"] = "man",
+        ["Boobie"] = "man", ["Raul"] = "man", ["Dre'Quan"] = "man", ["Real Dimez"] = "women",
+    };
+
+    private static void AddDialogueHints(List<string> parts, IReadOnlyList<string> sentences,
+                                         IReadOnlyList<AiContextLine> context, string? speaker)
+    {
+        if (!string.IsNullOrWhiteSpace(speaker))
+        {
+            parts.Add($"Speaker: {speaker}");
+            if (CharacterGenders.TryGetValue(speaker.Replace('’', '\''), out var gender))
+                parts.Add(gender == "women" ? "Speakers are women." : $"Speaker is a {gender}.");
+        }
+        var text = string.Join(" ", sentences).Trim();
+        foreach (var (name, gender) in CharacterGenders)
+        {
+            if (string.Equals(name, speaker, StringComparison.OrdinalIgnoreCase)) continue;
+            var escaped = System.Text.RegularExpressions.Regex.Escape(name);
+            if (System.Text.RegularExpressions.Regex.IsMatch(text.Replace('’', '\''),
+                    $@"^(?:Hey,?\s+)?{escaped}\s*,|,\s*{escaped}\s*[.!?]*$",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+                parts.Add(gender == "women" ? $"Listeners ({name}) are women." : $"Listener ({name}) is a {gender}.");
+        }
+        parts.Add("Understand each whole sentence before translating; when it spans strings, preserve its overall meaning and keep the requested array count and order.");
+        if (context.LastOrDefault() is not { Translation: { } arabic } previous || string.IsNullOrWhiteSpace(arabic)) return;
+        if (speaker is not null && previous.Speaker is not null &&
+            !string.Equals(speaker, previous.Speaker, StringComparison.OrdinalIgnoreCase)) return;
+        var ending = previous.Source.TrimEnd().TrimEnd('"', '\'', '”', '’', ')', ']').TrimEnd();
+        var first = text.TrimStart('"', '\'', '“', '‘', '(', '[');
+        var word = new string(first.TakeWhile(char.IsLetter).ToArray());
+        if (ending.Length == 0 || first.Length == 0) return;
+        if (!".!?…".Contains(ending[^1]) || char.IsLower(first[0]) ||
+            new[] { "and", "but", "so", "or" }.Contains(word, StringComparer.OrdinalIgnoreCase))
+            parts.Add($"This subtitle continues the previous one: \"{previous.Source}\" (shown as \"{arabic}\"); " +
+                      "translate it so the two read as one natural Arabic sentence. Translate only the current subtitle, without repeating the previous one.");
     }
 
     /// <summary>Yerel modelin sıcaklığı: 0, aynı satır her seferinde aynı çevrilir (#306).</summary>
@@ -278,10 +321,11 @@ public static class AiRequest
                                            IReadOnlyList<AiContextLine> context, string? game = null, LocalAiServer? server = null,
                                            int maxOutputTokens = MaxOutputTokens, bool thinkingOff = true,
                                            IReadOnlyList<string>? names = null, string? instruction = null, string target = "tr",
-                                           IReadOnlyList<KeyValuePair<string, string>>? slang = null, string? reference = null)
+                                           IReadOnlyList<KeyValuePair<string, string>>? slang = null, string? reference = null,
+                                           string? speaker = null)
     {
         key = key.Trim();
-        var user = UserMessage(sentences, context, game, names, target, slang, reference);
+        var user = UserMessage(sentences, context, game, names, target, slang, reference, speaker);
         var system = SystemPromptWith(instruction, target);
         HttpRequestMessage request;
         JsonObject body;
@@ -834,9 +878,14 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         var game = _game?.Invoke()?.Trim();
         // Bağlam, bu satırdan önce gösterilenlerdir; satırın kendisi bağlama girmez.
         var context = ContextBeforeShowing(text, game);
+        // Arabic fork: a feminine reply must not reuse the same English sentence spoken by a man (or an older blind reply).
+        var speaker = _target == "ar" ? TranslationDialogue.CurrentSpeaker : null;
+        string Key(string source) => _target == "ar"
+            ? "dialogue:1\u001f" + (speaker?.ToLowerInvariant() ?? "") + "\u001f" + CacheKey(source, game)
+            : CacheKey(source, game);
         // Arabic fork: a reviewed fix for this exact line wins over the cache and the engine.
         if (_corrections is { Count: > 0 } fixes && fixes.TryGetValue(PackKey.Canon(text), out var fixedLine)) return Remember(fixedLine, text, game);
-        if (_cache.TryGet(CacheKey(text, game), out var cached)) return Remember(cached, text, game);
+        if (_cache.TryGet(Key(text), out var cached)) return Remember(cached, text, game);
         // Arabic fork: an OCR re-read of a line shown a moment ago ("Clean iti" / "Clean it'") reuses that translation;
         // re-reads were 35% of the requests. Only translated lines count, so a failed line can still try again.
         if (_target == "ar" && RecentTranslation(text) is { } again) return Remember(again, text, game);
@@ -845,7 +894,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         foreach (var name in pieces.Select(SubtitleSegmenter.LabelName).OfType<string>()) NoteSpeaker(name);
         var names = _names.Keys.ToHashSet(StringComparer.Ordinal);
         // Önbellekte duran cümleler yeniden gönderilmez.
-        var translations = pieces.Select(p => p.Translate && _cache.TryGet(CacheKey(p.Text, game), out var known) ? known : null).ToList();
+        var translations = pieces.Select(p => p.Translate && _cache.TryGet(Key(p.Text), out var known) ? known : null).ToList();
         var missing = Enumerable.Range(0, pieces.Count).Where(i => pieces[i].Translate && translations[i] is null).ToList();
         var sources = missing.Select(i => SubtitleSegmenter.NormalizeCase(pieces[i].Text, names)).ToList();
         // Hizmetin beklemesi yalnız eksik çeviriler içindir; önbellekteki parçalar yerel motor istemez. Hata sonrası
@@ -930,7 +979,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
                 continue;
             }
             translations[missing[i]] = translated[i];
-            _cache.Store(CacheKey(piece, game), translated[i]);
+            _cache.Store(Key(piece), translated[i]);
         }
 
         var builder = new StringBuilder();
@@ -938,7 +987,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         if (_speech.Count >= 512) _speech.Clear();
         _speech[CacheKey(text, game)] = SpeechScript.Lines(pieces, translations);
         var result = builder.ToString();
-        if (!local) _cache.Store(CacheKey(text, game), result);
+        if (!local) _cache.Store(Key(text), result);
         return Remember(result, text, game);
     }
 
@@ -1048,6 +1097,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         var normalized = TextMatch.Normalize(text);
         lock (_log)
             return _log.Lines.LastOrDefault(line => line.Translation is not null && line.Source != text
+                                                    && line.Speaker == TranslationDialogue.CurrentSpeaker
                                                     && TextMatch.IsSimilar(TextMatch.Normalize(line.Source), normalized, 0.85))?.Translation;
     }
 
@@ -1061,11 +1111,12 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
                 _log.Game = game;
             }
             // Arabic fork: a chain's links share one log, so the line may already be in it from the link before.
-            var context = _target == "ar" ? _log.Lines.Where(line => line.Source != text).ToList() : new List<AiContextLine>(_log.Lines);
+            var speaker = _target == "ar" ? TranslationDialogue.CurrentSpeaker : null;
+            var context = _target == "ar" ? _log.Lines.Where(line => line.Source != text || line.Speaker != speaker).ToList() : new List<AiContextLine>(_log.Lines);
             // Aynı satır yeniden okunduysa bağlam tekrarla dolmasın.
-            if (_log.Lines.Count == 0 || _log.Lines[^1].Source != text)
+            if (_log.Lines.Count == 0 || _log.Lines[^1].Source != text || (_target == "ar" && _log.Lines[^1].Speaker != speaker))
             {
-                _log.Lines.Add(new AiContextLine(text));
+                _log.Lines.Add(new AiContextLine(text, Speaker: speaker));
                 if (_log.Lines.Count > (_target == "ar" ? ArabicContextLines : ContextLines)) _log.Lines.RemoveAt(0);
             }
             return context;
@@ -1078,7 +1129,8 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         lock (_log)
         {
             if (!string.Equals(_log.Game, game, StringComparison.Ordinal)) return translation;
-            var index = _log.Lines.FindLastIndex(line => line.Source == text);
+            var index = _log.Lines.FindLastIndex(line => line.Source == text &&
+                (_target != "ar" || line.Speaker == TranslationDialogue.CurrentSpeaker));
             if (index >= 0) _log.Lines[index] = _log.Lines[index] with { Translation = translation };
         }
         return translation;
@@ -1120,7 +1172,8 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
                                         IReadOnlyList<string> names, CancellationToken cancellationToken, string? reference = null) =>
         PerformAsync(thinkingOff => AiRequest.Build(Provider, _key, Model, sentences, context, game, Server, thinkingOff: thinkingOff, names: names,
                                                        instruction: _instruction, target: _target,
-                                                       slang: AiRequest.SlangIn(_glossary, sentences), reference: reference),
+                                                       slang: AiRequest.SlangIn(_glossary, sentences), reference: reference,
+                                                       speaker: _target == "ar" ? TranslationDialogue.CurrentSpeaker : null),
                      _http, sentences.Count, cancellationToken);
 
     /// <summary>Düşünmeyi kapatan alanları reddeden Ollama sunucuları; uygulama açık kaldıkça hatırlanır.</summary>

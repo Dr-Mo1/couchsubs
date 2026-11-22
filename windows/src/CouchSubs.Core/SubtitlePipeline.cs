@@ -971,6 +971,8 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         var probe = new TranslationProbe();
         TranslationProbe.Current = probe;
         string sentence;
+        var previousSpeaker = TranslationDialogue.CurrentSpeaker;
+        TranslationDialogue.CurrentSpeaker = speaker?.Name;
         try
         {
             sentence = await translator.TranslateAsync(input, token);
@@ -994,6 +996,10 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
             }
             TranslationResult?.Invoke(LastError);
             return;
+        }
+        finally
+        {
+            TranslationDialogue.CurrentSpeaker = previousSpeaker;
         }
 
         var translated = partial is null ? Present(sentence, request) : Combine(partial, sentence);
