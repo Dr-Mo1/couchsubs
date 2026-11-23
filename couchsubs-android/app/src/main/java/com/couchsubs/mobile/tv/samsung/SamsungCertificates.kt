@@ -199,7 +199,7 @@ class SamsungCertificates(private val http: HttpPost = UrlConnectionPost, privat
         } catch (error: IOException) {
             log("Sertifika sunucusuna ulaşılamadı ($step): $error")
             throw SamsungInstallException(SamsungInstallError.CERTIFICATE_FAILED,
-                "Samsung'un sertifika sunucusuna (${URL(url).host}) ulaşılamadı: ${error.message}")
+                "تعذّر الوصول إلى خادم شهادات Samsung (${URL(url).host}): ${error.message}")
         }
         log("Sertifika sunucusu $step: ${reply.status} ${reply.reason}, ${reply.body.size} bayt")
         if (reply.status !in 200..299) {

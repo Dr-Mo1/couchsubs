@@ -33,7 +33,7 @@ class JschShell(
             val pair = try {
                 KeyPair.load(JSch(), key, null)
             } catch (error: JSchException) {
-                throw LgInstallException(LgInstallError.KEY_SERVER_OFF, "anahtar okunamadı: ${error.message}")
+                throw LgInstallException(LgInstallError.KEY_SERVER_OFF, "تعذّرت قراءة المفتاح: ${error.message}")
             }
             try {
                 if (pair.isEncrypted && !pair.decrypt(passphrase) && !pair.decrypt(passphrase.uppercase()))
@@ -50,7 +50,7 @@ class JschShell(
         try {
             jsch.addIdentity("couchsubs-lg", key, null, null)
         } catch (error: JSchException) {
-            throw LgInstallException(LgInstallError.KEY_REFUSED, "anahtar okunamadı: ${error.message}")
+            throw LgInstallException(LgInstallError.KEY_REFUSED, "تعذّرت قراءة المفتاح: ${error.message}")
         }
         val session = try {
             jsch.getSession(user, host, port).apply {

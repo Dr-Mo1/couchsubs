@@ -148,13 +148,13 @@ class XboxHome(
     fun sdp(sessionId: String, offer: String): String {
         val answer = parseObject(exchange("/v5/sessions/home/$sessionId/sdp", sdpBody(offer)))
         return answer.optString("sdp").takeIf { it.isNotEmpty() }
-            ?: throw XboxException(XboxError.SERVICE, "Xbox SDP yanıtı boş: ${answer.toString().take(200)}")
+            ?: throw XboxException(XboxError.SERVICE, "رد SDP من Xbox فارغ: ${answer.toString().take(200)}")
     }
 
     fun ice(sessionId: String, candidates: List<XboxIceCandidate>): List<XboxIceCandidate> {
         val payload = JSONObject().put("messageType", "iceCandidate").put("candidate", JSONArray().apply { candidates.forEach { put(it.toJson()) } })
         val text = exchange("/v5/sessions/home/$sessionId/ice", payload)
-        val array = try { JSONArray(text) } catch (error: Exception) { throw XboxException(XboxError.SERVICE, "Xbox ICE yanıtı okunamadı", error) }
+        val array = try { JSONArray(text) } catch (error: Exception) { throw XboxException(XboxError.SERVICE, "تعذّرت قراءة رد ICE من Xbox", error) }
         return expandCandidates((0 until array.length()).mapNotNull { array.optJSONObject(it)?.let(XboxIceCandidate::parse) })
     }
 

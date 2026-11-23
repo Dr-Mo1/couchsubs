@@ -119,7 +119,7 @@ object SamsungLogin {
             }
         } catch (error: IOException) {
             throw SamsungInstallException(SamsungInstallError.LOGIN_FAILED,
-                "giriş dönüşü için localhost:$CALLBACK_PORT açılamadı: ${error.message}")
+                "تعذّر فتح localhost:$CALLBACK_PORT لاستقبال نتيجة تسجيل الدخول: ${error.message}")
         }
 
         /** Girişi [timeoutMs] boyunca bekler. */
@@ -157,8 +157,8 @@ object SamsungLogin {
                 close()
             }
             throw SamsungInstallException(SamsungInstallError.LOGIN_FAILED,
-                "giriş ${timeoutMs / 60000} dakika içinde tamamlanmadı" +
-                    (rejected?.let { "; Samsung'un geri dönüşünde hesap bilgisi yoktu ($it)" } ?: ""))
+                "لم يكتمل تسجيل الدخول خلال ${timeoutMs / 60000} دقيقة" +
+                    (rejected?.let { "؛ لم تحتوِ عودة Samsung على بيانات الحساب ($it)" } ?: ""))
         }
 
         override fun close() {
@@ -166,9 +166,9 @@ object SamsungLogin {
         }
 
         private fun respond(output: java.io.OutputStream, status: Int, signedIn: Boolean) {
-            val page = if (signedIn) "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width\"><title>CouchSubs</title>" +
-                "<body style=\"font-family:system-ui;padding:2em\"><h2>Giriş tamam / Signed in</h2>" +
-                "<p>CouchSubs'a dönebilirsiniz.<br>You can return to CouchSubs.</p>"
+            val page = if (signedIn) "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width\"><title>ترجمجي</title>" +
+                "<body style=\"font-family:system-ui;padding:2em\"><h2 dir=auto>تم تسجيل الدخول / Signed in</h2>" +
+                "<p dir=auto>يمكنك العودة إلى ترجمجي.<br>You can return to Targamgi.</p>"
             else "Not found"
             val reason = when (status) { 200 -> "OK"; 400 -> "Bad Request"; else -> "Not Found" }
             val body = page.toByteArray(Charsets.UTF_8)

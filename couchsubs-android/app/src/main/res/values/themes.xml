@@ -8,4 +8,5 @@
         <item name="android:navigationBarColor">@color/background</item>
     </style>
     <color name="background">#0b0714</color>
+    <color name="targamgi_icon_background">#0b0714</color>
 </resources>

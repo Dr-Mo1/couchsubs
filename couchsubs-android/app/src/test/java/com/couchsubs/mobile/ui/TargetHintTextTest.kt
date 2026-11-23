@@ -9,7 +9,7 @@ import javax.xml.parsers.DocumentBuilderFactory
 /**
  * Altyazı hedefinde ağda TV bulunamayınca ne yapılacağı söylenir: monitör kullanan kullanıcı "Ağda TV bulunamadı"da
  * kalmıştı. Yönlendirme ekrandaki gerçek düğme adlarını ("TV uygulamasını bu telefondan kur", "Bu telefonda") anmalı;
- * düğmenin adı değişirse bu test uyarır. Türkçe ve İngilizce.
+ * düğmenin adı değişirse bu test uyarır. Arapça (varsayılan) ve İngilizce.
  */
 class TargetHintTextTest {
     private fun strings(folder: String): Map<String, String> {
@@ -29,7 +29,7 @@ class TargetHintTextTest {
             assertTrue("$folder: $hint", hint.contains(s.getValue("tvinstall_entry")))
             assertTrue("$folder: $hint", hint.contains(s.getValue("target_phone")))
             // Monitör ya da akıllı olmayan TV anılır.
-            assertTrue("$folder: $hint", hint.contains(if (folder == "values") "Monitör" else "monitor"))
+            assertTrue("$folder: $hint", hint.contains(if (folder == "values") "شاشة كمبيوتر" else "monitor"))
         }
     }
 }

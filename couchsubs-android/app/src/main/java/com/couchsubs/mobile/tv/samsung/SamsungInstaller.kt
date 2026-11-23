@@ -211,7 +211,7 @@ class SamsungInstaller(
             var profile = profileFor(duid)
             log.write("Kayıtlı sertifika: ${profile.describe(Date(), duid)}")
             if (!profile.isValid() || !profile.isFor(duid)) {
-                val login = signIn ?: throw SamsungInstallException(SamsungInstallError.LOGIN_FAILED, "giriş gerekiyor")
+                val login = signIn ?: throw SamsungInstallException(SamsungInstallError.LOGIN_FAILED, "يلزم تسجيل الدخول")
                 progress(InstallStep.SIGN_IN)
                 log.write("Samsung hesabıyla giriş bekleniyor.")
                 val account = login()
@@ -269,7 +269,7 @@ class SamsungInstaller(
             val after = readInstalledVersion(device)
             if (version != null && after != null && SamsungDiagnostics.isNewer(version, after))
                 throw SamsungInstallException(SamsungInstallError.INSTALL_FAILED,
-                    "TV kurulumu bitirdi ama TV'de hâlâ $after sürümü var ($version kurulmalıydı)")
+                    "انتهى التلفزيون من التثبيت لكن الإصدار $after ما زال عليه (كان يجب تثبيت $version)")
             launch(device)
             return Result(after ?: version ?: "", true)
         }
@@ -331,7 +331,7 @@ class SamsungInstaller(
             Thread.sleep(500)
         }
         throw SamsungInstallException(SamsungInstallError.UNREACHABLE,
-            "TV kimliği (DUID) okunamadı; TV'nin yanıtı: ${last.trim().ifEmpty { "boş" }}")
+            "تعذّرت قراءة معرّف التلفزيون (DUID)؛ رد التلفزيون: ${last.trim().ifEmpty { "فارغ" }}")
     }
 
     /** Gerçek TV: paket `sdk_toolpath`'e gönderilir ve `vd_appinstall` ile kurulur. */

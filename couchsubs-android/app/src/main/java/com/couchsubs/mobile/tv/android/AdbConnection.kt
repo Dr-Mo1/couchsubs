@@ -79,7 +79,7 @@ class AdbPacket(val command: Int, val arg0: Int, val arg1: Int, val payload: Byt
             var read = 0
             while (read < size) {
                 val n = input.read(result, read, size - read)
-                if (n < 0) throw EOFException("TV bağlantıyı kapattı")
+                if (n < 0) throw EOFException("أغلق التلفزيون الاتصال")
                 read += n
             }
             return result
@@ -185,7 +185,7 @@ class AdbConnection private constructor(private val socket: Socket) : Closeable 
                 }
                 packet.command == AdbPacket.AUTH && packet.arg0 == AUTH_TOKEN -> {
                     // İmza tanınmadı: TV bu anahtarı ilk kez görüyor. Açık anahtarı gönderince TV kullanıcıya sorar.
-                    if (waitingForApproval) throw AndroidInstallException(AndroidInstallError.NOT_APPROVED, "TV anahtarı yine sordu")
+                    if (waitingForApproval) throw AndroidInstallException(AndroidInstallError.NOT_APPROVED, "طلب التلفزيون الموافقة على المفتاح مجددًا")
                     send(AdbPacket(AdbPacket.AUTH, AUTH_PUBLICKEY, 0, (key.publicKeyLine(KEY_NAME) + "\u0000").toByteArray(Charsets.US_ASCII)))
                     waitingForApproval = true
                     socket.soTimeout = approvalTimeoutMs
@@ -221,7 +221,7 @@ class AdbConnection private constructor(private val socket: Socket) : Closeable 
         fun readExactly(size: Int): ByteArray {
             val result = ByteArrayOutputStream(size)
             while (result.size() < size) {
-                val chunk = read() ?: throw EOFException("ADB: kanal erken kapandı")
+                val chunk = read() ?: throw EOFException("ADB: أُغلقت القناة مبكرًا")
                 val need = size - result.size()
                 if (chunk.size <= need) result.write(chunk)
                 else {
@@ -281,7 +281,7 @@ class AdbConnection private constructor(private val socket: Socket) : Closeable 
         val channel = Channel(nextLocalId++)
         send(AdbPacket(AdbPacket.OPEN, channel.localId, 0, (service + "\u0000").toByteArray(Charsets.UTF_8)))
         while (channel.remoteId == 0) {
-            if (channel.closed) throw IOException("ADB: TV hizmeti açmadı ($service)")
+            if (channel.closed) throw IOException("ADB: لم يفتح التلفزيون الخدمة ($service)")
             channel.pump()
         }
         return channel

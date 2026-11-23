@@ -34,9 +34,9 @@ class BackgroundPipTest {
     @Test
     fun settingTextMatchesIPhone() {
         val english = file("app/src/main/res/values-en/strings.xml", "src/main/res/values-en/strings.xml").readText()
-        val turkish = file("app/src/main/res/values/strings.xml", "src/main/res/values/strings.xml").readText()
         val catalog = file("../mac/CouchSubs/Resources/Localizable.xcstrings", "mac/CouchSubs/Resources/Localizable.xcstrings").readText()
-        for (strings in listOf(english, turkish)) for (name in listOf("settings_background_pip", "settings_background_pip_short")) {
+        // The default (values) is Arabic now; the iPhone catalog only has Turkish and English, so only English is compared.
+        for (strings in listOf(english)) for (name in listOf("settings_background_pip", "settings_background_pip_short")) {
             val text = Regex("<string name=\"$name\">([^<]*)</string>").find(strings)!!.groupValues[1]
             assertTrue("$name iPhone'da yok: $text", catalog.contains("\"$text\""))
         }

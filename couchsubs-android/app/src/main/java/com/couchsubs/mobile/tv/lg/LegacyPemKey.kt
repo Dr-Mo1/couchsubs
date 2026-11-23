@@ -24,12 +24,12 @@ object LegacyPemKey {
     fun decrypt(pem: String, passphrase: String): String {
         val kind = header.find(pem)?.groupValues?.get(1)
         val info = dekInfo.find(pem)
-        if (kind == null || info == null) throw LgInstallException(LgInstallError.INSTALL_FAILED, "PEM başlığı okunamadı")
+        if (kind == null || info == null) throw LgInstallException(LgInstallError.INSTALL_FAILED, "تعذّرت قراءة ترويسة PEM")
         val cipherName = info.groupValues[1].uppercase()
         val iv = hex(info.groupValues[2])
         val body = pem.substring(info.range.last + 1)
         val end = body.indexOf("-----END")
-        if (end < 0) throw LgInstallException(LgInstallError.INSTALL_FAILED, "PEM sonu bulunamadı")
+        if (end < 0) throw LgInstallException(LgInstallError.INSTALL_FAILED, "لم يُعثر على نهاية PEM")
         val encrypted = Base64.getDecoder().decode(body.substring(0, end).filterNot { it.isWhitespace() })
 
         val (transformation, algorithm, keyLength) = when (cipherName) {
@@ -37,7 +37,7 @@ object LegacyPemKey {
             "AES-128-CBC" -> Triple("AES/CBC/PKCS5Padding", "AES", 16)
             "AES-192-CBC" -> Triple("AES/CBC/PKCS5Padding", "AES", 24)
             "AES-256-CBC" -> Triple("AES/CBC/PKCS5Padding", "AES", 32)
-            else -> throw LgInstallException(LgInstallError.INSTALL_FAILED, "Desteklenmeyen şifre: $cipherName")
+            else -> throw LgInstallException(LgInstallError.INSTALL_FAILED, "خوارزمية تشفير غير مدعومة: $cipherName")
         }
         val key = deriveKey(passphrase.toByteArray(Charsets.UTF_8), iv.copyOf(8), keyLength)
         val plain = try {

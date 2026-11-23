@@ -172,7 +172,7 @@ class XboxStreamSession(
                 if (!stopped.get()) {
                     // Bağlantı kuruldu ama Xbox tek kare göndermeden kapattı: "görüntü gelmedi" sayılır (iki bağlantıda durulur).
                     val noFirstFrame = connectedAt > 0 && frameSession?.let { frameCounter.framesInSession(it) } == 0L
-                    throw XboxException(if (noFirstFrame) XboxError.NO_FIRST_FRAME else XboxError.NETWORK, endReason ?: "Xbox görüntü bağlantısı kapandı")
+                    throw XboxException(if (noFirstFrame) XboxError.NO_FIRST_FRAME else XboxError.NETWORK, endReason ?: "انتهى اتصال الصورة مع Xbox")
                 }
             } catch (error: InterruptedException) {
                 if (stopped.get()) break
@@ -357,11 +357,11 @@ class XboxStreamSession(
             override fun onConnectionChange(state: PeerConnection.PeerConnectionState?) {
                 log("bağlantı: $state")
                 if (state == PeerConnection.PeerConnectionState.FAILED || state == PeerConnection.PeerConnectionState.CLOSED) {
-                    endReason = "Xbox WebRTC bağlantısı kesildi ($state)"
+                    endReason = "انقطع اتصال WebRTC مع Xbox ($state)"
                     done.countDown()
                 }
             }
-        }) ?: throw XboxException(XboxError.SERVICE, "WebRTC bağlantısı kurulamadı")
+        }) ?: throw XboxException(XboxError.SERVICE, "تعذّر إنشاء اتصال WebRTC")
         peer = connection
 
         // Oynatıcıdaki sıra: önce veri kanalları, sonra ses (gönder-al) ve görüntü (yalnız al).
@@ -370,7 +370,7 @@ class XboxStreamSession(
                 ordered = true
                 this.protocol = protocol
             }
-            val channel = connection.createDataChannel(name, init) ?: throw XboxException(XboxError.SERVICE, "Veri kanalı açılamadı: $name")
+            val channel = connection.createDataChannel(name, init) ?: throw XboxException(XboxError.SERVICE, "تعذّر فتح قناة البيانات: $name")
             synchronized(channels) { channels[name] = channel }
             channel.registerObserver(ChannelObserver(name, channel, done))
         }
@@ -381,16 +381,16 @@ class XboxStreamSession(
         audio?.receiver?.track()?.setEnabled(playAudio)
         log(if (playAudio) "oyun sesi bu telefonda çalınır" else "oyun sesi kapalı (ayar)")
         val track = (video?.receiver?.track() as? VideoTrack)
-            ?: throw XboxException(XboxError.SERVICE, "Görüntü alıcısı kurulamadı")
+            ?: throw XboxException(XboxError.SERVICE, "تعذّر إعداد مستقبل الصورة")
         track.addSink(sink)
         videoTrack = track
 
-        val offer = await<SessionDescription>("SDP teklifi") { result -> connection.createOffer(result.creating(), MediaConstraints()) }
+        val offer = await<SessionDescription>("عرض SDP") { result -> connection.createOffer(result.creating(), MediaConstraints()) }
         val munged = SessionDescription(SessionDescription.Type.OFFER, XboxChannels.mungeOffer(offer.description))
-        await<Unit>("yerel SDP") { result -> connection.setLocalDescription(result.setting(), munged) }
+        await<Unit>("SDP المحلي") { result -> connection.setLocalDescription(result.setting(), munged) }
         log("SDP gönderiliyor")
         val answer = home.sdp(id, munged.description)
-        await<Unit>("Xbox SDP") { result -> connection.setRemoteDescription(result.setting(), SessionDescription(SessionDescription.Type.ANSWER, answer)) }
+        await<Unit>("SDP من Xbox") { result -> connection.setRemoteDescription(result.setting(), SessionDescription(SessionDescription.Type.ANSWER, answer)) }
         // Yerel adaylar toplanana kadar (en çok 5 sn) beklenir; yavaş ağ bağdaştırıcılarının adayları da gitsin.
         gathered.await(ICE_GATHER_MS, TimeUnit.MILLISECONDS)
         val candidates = synchronized(local) { local.toList() }
@@ -407,7 +407,7 @@ class XboxStreamSession(
         while (!stopped.get()) {
             if (done.await(1, TimeUnit.SECONDS)) break
             if (frameCounter.framesInSession(negotiatedFrames) == 0L && SystemClock.elapsedRealtime() - negotiatedAt > FIRST_FRAME_MS) {
-                endReason = "Xbox'tan ${FIRST_FRAME_MS / 1000} sn içinde görüntü gelmedi"
+                endReason = "لم تصل صورة من Xbox خلال ${FIRST_FRAME_MS / 1000} ثانية"
                 throw XboxException(XboxError.NO_FIRST_FRAME, endReason!!)
             }
             checkPicture(watchPicture)
@@ -450,7 +450,7 @@ class XboxStreamSession(
                     startWatch()
                 }
                 state == DataChannel.State.CLOSED && name == "input" -> {
-                    endReason = "Xbox görüntü bağlantısı kapandı"
+                    endReason = "انتهى اتصال الصورة مع Xbox"
                     done.countDown()
                 }
             }
@@ -601,7 +601,7 @@ class XboxStreamSession(
     private fun <T> await(what: String, start: (SdpResult<T>) -> Unit): T {
         val result = SdpResult<T>()
         start(result)
-        if (!result.latch.await(10, TimeUnit.SECONDS)) throw XboxException(XboxError.TIMEOUT, "$what zaman aşımı")
+        if (!result.latch.await(10, TimeUnit.SECONDS)) throw XboxException(XboxError.TIMEOUT, "انتهت المهلة: $what")
         result.error?.let { throw XboxException(XboxError.SERVICE, "$what: $it") }
         @Suppress("UNCHECKED_CAST")
         return result.value as T

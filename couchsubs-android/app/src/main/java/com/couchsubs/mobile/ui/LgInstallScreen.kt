@@ -105,7 +105,7 @@ internal fun LgInstallScreen(onBack: () -> Unit, onDone: () -> Unit, brandPicker
                     val log = InstallLog(logFile)
                     val progress: (InstallStep) -> Unit = { step -> main.post { if (state is LgState.Working) state = LgState.Working(step) } }
                     fun fresh(): ByteArray {
-                        if (typed.isEmpty()) throw LgInstallException(LgInstallError.KEY_REFUSED, "parola yazılmadı")
+                        if (typed.isEmpty()) throw LgInstallException(LgInstallError.KEY_REFUSED, "لم تُكتب كلمة المرور")
                         progress(InstallStep.KEY)
                         val key = LgInstaller.decodeKey(LgInstaller.downloadKey(target), typed) { k, p -> JschShell.decryptOtherFormat(k, p) }
                         keys.save(target, key)

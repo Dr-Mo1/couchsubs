@@ -55,9 +55,10 @@ android {
         versionCode((findProperty('couchsubs.versionCode') ?: '37').toString().toInteger())
         versionName((findProperty('couchsubs.versionName') ?: '0.1.0-beta.37').toString())
         ndk { abiFilters(*abis) }
-        buildConfigField 'String', 'PACKS_URL', "\"${secret('packs.url', 'https://couchsubs-packs.enmera.workers.dev')}\""
+        buildConfigField 'String', 'PACKS_URL', "\"${secret('packs.url', '')}\""
+        // Targamgi (Arabic-first): blank by default, so the app never contacts upstream's Turkish pack servers.
         // Yedek adres: workers.dev'e ulaşamayan ağlar için (DNS/reklam engelleyici/operatör, #583). Aynı Worker.
-        buildConfigField 'String', 'PACKS_FALLBACK_URL', "\"${secret('packs.fallbackUrl', 'https://couchsubs-packs.enmeraapps.com')}\""
+        buildConfigField 'String', 'PACKS_FALLBACK_URL', "\"${secret('packs.fallbackUrl', '')}\""
         buildConfigField 'String', 'FACEBOOK_APP_ID', "\"${''}\""
         buildConfigField 'boolean', 'HAS_FIREBASE', "${hasGoogleServices}"
         buildConfigField 'String', 'TV_SAMSUNG_VERSION', "\"${tizenVersion}\""
@@ -142,8 +143,7 @@ android {
         buildConfig true
     }
     sourceSets.main.assets.srcDirs += layout.buildDirectory.dir('generated/couchsubs-assets')
-    // Paketler ücretsiz ve her derlemede uygulamayla gelir (dokuz paket ~27 MB); sunucudan yalnız yenileri ve güncellemeleri iner.
-    sourceSets.main.assets.srcDirs += layout.buildDirectory.dir('generated/couchsubs-packs')
+    // Targamgi: the Turkish game packs (~28 MB) are no longer bundled; the Arabic pack comes from generated/targamgi-assets.
     // Telefondan TV kurulumu ve güncellemesi: imzasız Samsung paketi (her derlemede kaynaktan, yani hep en yenisi);
     // kurulurken TV'ye özel sertifikayla imzalanır.
     sourceSets.main.assets.srcDirs += layout.buildDirectory.dir('generated/couchsubs-tv')
@@ -175,10 +175,6 @@ tasks.withType(Test).configureEach {
 }
 preBuild.dependsOn 'copyTargamgiAssets'
 
-tasks.register('copyCouchSubsPacks', Copy) {
-    into layout.buildDirectory.dir('generated/couchsubs-packs')
-    from("$repoRoot/core/Sources/CouchSubsCore/Resources") { include 'packs/*.json.gz' }
-}
 // Samsung TV paketi (.wgt): scripts/package-tizen.sh'nin yaptığının aynısı (ortak dosyalar tv-webos'tan, Tizen'e
 // özgüler tv-tizen'den; index.html'e Samsung'un webapis.js'i eklenir, panel simgesi panel-icon.png olur).
 tasks.register('samsungTvPackage', Zip) {
@@ -268,7 +264,7 @@ tasks.register('tvReleasePackages') {
         }
     }
 }
-preBuild.dependsOn 'copyCouchSubsAssets', 'copyCouchSubsPacks', 'samsungTvPackage', 'tvReleasePackages'
+preBuild.dependsOn 'copyCouchSubsAssets', 'samsungTvPackage', 'tvReleasePackages'
 
 // Sürüm derlemesi (assembleRelease / bundleRelease) bitince yerel semboller Crashlytics'e yüklenir; böylece yerel
 // çökme izlerinde "Missing BuildId" yerine işlev adları görünür. Ağ yoksa -Pcouchsubs.skipSymbolUpload=true ile atlanır.

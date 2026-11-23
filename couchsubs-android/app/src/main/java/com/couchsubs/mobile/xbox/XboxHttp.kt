@@ -20,7 +20,7 @@ object UrlConnectionHttp : XboxHttp {
         val connection = try {
             URL(url).openConnection() as HttpURLConnection
         } catch (error: IOException) {
-            throw XboxException(XboxError.NETWORK, "Bağlantı açılamadı: ${error.message}", error)
+            throw XboxException(XboxError.NETWORK, "تعذّر فتح الاتصال: ${error.message}", error)
         }
         try {
             connection.requestMethod = method
@@ -37,7 +37,7 @@ object UrlConnectionHttp : XboxHttp {
             val text = stream?.use { it.readBytes().toString(Charsets.UTF_8) }.orEmpty()
             return XboxHttpResponse(status, text)
         } catch (error: IOException) {
-            throw XboxException(XboxError.NETWORK, "Xbox hizmetine ulaşılamadı: ${error.message}", error)
+            throw XboxException(XboxError.NETWORK, "تعذّر الوصول إلى خدمة Xbox: ${error.message}", error)
         } finally {
             connection.disconnect()
         }

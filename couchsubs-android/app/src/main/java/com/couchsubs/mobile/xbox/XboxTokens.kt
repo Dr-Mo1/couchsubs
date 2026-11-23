@@ -56,7 +56,7 @@ class XboxUserToken(val json: JSONObject) {
          */
         fun fromResponse(body: JSONObject, nowMs: Long, previous: XboxUserToken? = null): XboxUserToken {
             val access = body.optString("access_token")
-            if (access.isEmpty()) throw XboxException(XboxError.SERVICE, "Microsoft jeton yanıtında access_token yok")
+            if (access.isEmpty()) throw XboxException(XboxError.SERVICE, "لا يوجد access_token في رد رمز Microsoft")
             val copy = JSONObject(body.toString())
             if (copy.optString("refresh_token").isEmpty()) previous?.refreshToken?.takeIf { it.isNotEmpty() }?.let { copy.put("refresh_token", it) }
             copy.put("expires_on", Instant.ofEpochMilli(nowMs + body.optLong("expires_in", 0) * 1000).toString())
@@ -82,7 +82,7 @@ class XboxXstsToken(val token: String, val userHash: String, val notAfterMs: Lon
     companion object {
         fun parse(body: JSONObject): XboxXstsToken {
             val token = body.optString("Token")
-            if (token.isEmpty()) throw XboxException(XboxError.SERVICE, "Xbox Live yanıtında Token yok")
+            if (token.isEmpty()) throw XboxException(XboxError.SERVICE, "لا يوجد Token في رد Xbox Live")
             val uhs = body.optJSONObject("DisplayClaims")?.optJSONArray("xui")?.optJSONObject(0)?.optString("uhs").orEmpty()
             return XboxXstsToken(token, uhs, parseInstant(body.optString("NotAfter")) ?: 0L)
         }
@@ -103,9 +103,9 @@ class XboxHomeEndpoint(val baseUrl: String, val token: String, val expiresAtMs: 
             }
             if (chosen == null) chosen = regions?.optJSONObject(0)
             val base = chosen?.optString("baseUri").orEmpty().trimEnd('/')
-            if (base.isEmpty()) throw XboxException(XboxError.SERVICE, "Xbox ev yayını bölgesi gelmedi")
+            if (base.isEmpty()) throw XboxException(XboxError.SERVICE, "لم تصل منطقة البث المنزلي من Xbox")
             val token = body.optString("gsToken")
-            if (token.isEmpty()) throw XboxException(XboxError.SERVICE, "Xbox ev yayını jetonu gelmedi")
+            if (token.isEmpty()) throw XboxException(XboxError.SERVICE, "لم يصل رمز البث المنزلي من Xbox")
             val seconds = body.optLong("durationInSeconds", 0)
             return XboxHomeEndpoint(base, token, nowMs + if (seconds > 0) seconds * 1000 else DEFAULT_LIFETIME_MS)
         }

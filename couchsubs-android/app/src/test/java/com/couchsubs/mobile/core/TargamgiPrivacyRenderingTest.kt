@@ -22,14 +22,14 @@ class TargamgiPrivacyRenderingTest {
         val manifest = File(app, "src/main/AndroidManifest.xml").readText()
         assertTrue(manifest.contains("FirebaseInitProvider"))
         assertTrue(manifest.contains("tools:node=\"remove\""))
-        val arabic = File(app, "src/main/res/values-ar/strings.xml").readText()
+        val arabic = File(app, "src/main/res/values/strings.xml").readText() // Arabic is the default locale now (values-ar is gone)
         assertTrue(arabic.contains("ترجمجي"))
         val page = File(app, "src/main/assets/second-screen.html").readText()
         assertTrue(page.contains("unicode-bidi: plaintext"))
         assertTrue(page.contains("\u2068") || page.contains("\\u2068"))
         for (locale in listOf("values", "values-en")) {
             val strings = File(app, "src/main/res/$locale/strings.xml").readText()
-            assertTrue(strings.contains("Modified for Targamgi (ترجمجي), 2026-11-22"))
+            assertTrue(strings.contains(if (locale == "values") "نسخة معدّلة لترجمجي، 2026-11-22" else "Modified for Targamgi (ترجمجي), 2026-11-22"))
             assertTrue(strings.contains("Sinan Yorulmaz"))
         }
     }

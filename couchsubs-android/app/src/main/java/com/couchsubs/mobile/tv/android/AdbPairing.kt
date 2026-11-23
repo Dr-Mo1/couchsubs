@@ -35,7 +35,7 @@ object AdbPairing {
                 socket.tcpNoDelay = true
                 socket.soTimeout = 15_000
             } catch (error: IOException) {
-                throw AndroidInstallException(AndroidInstallError.UNREACHABLE, "eşleme $host:$port: ${error.message}")
+                throw AndroidInstallException(AndroidInstallError.UNREACHABLE, "الربط مع $host:$port: ${error.message}")
             }
             pair(socket.getInputStream(), socket.getOutputStream(), code, key)
         }
@@ -50,11 +50,11 @@ object AdbPairing {
         }
         try {
             val password = code.trim().toByteArray(Charsets.US_ASCII) + (tls.client.exportedKeyingMaterial
-                ?: throw AndroidInstallException(AndroidInstallError.PAIRING_FAILED, "TLS anahtar dışa aktarımı yok"))
+                ?: throw AndroidInstallException(AndroidInstallError.PAIRING_FAILED, "تصدير مفتاح TLS غير متاح"))
             val spake = Spake2(alice = true, password = password)
             writePacket(tls.output, SPAKE2_MESSAGE, spake.message)
             val theirs = readPacket(tls.input, SPAKE2_MESSAGE)
-            val keyMaterial = spake.finish(theirs) ?: throw AndroidInstallException(AndroidInstallError.PAIRING_FAILED, "geçersiz SPAKE2 mesajı")
+            val keyMaterial = spake.finish(theirs) ?: throw AndroidInstallException(AndroidInstallError.PAIRING_FAILED, "رسالة SPAKE2 غير صالحة")
             val cipher = PairingCipher(keyMaterial)
 
             val peerInfo = ByteArray(PEER_INFO_SIZE)
@@ -63,7 +63,7 @@ object AdbPairing {
             writePacket(tls.output, PEER_INFO_MESSAGE, cipher.encrypt(peerInfo))
             // Kod yanlışsa TV'nin anahtarı farklıdır; gelen bilgi çözülemez (ya da TV bağlantıyı kapatır).
             val answer = readPacket(tls.input, PEER_INFO_MESSAGE)
-            cipher.decrypt(answer) ?: throw AndroidInstallException(AndroidInstallError.PAIRING_FAILED, "eşleştirme kodu yanlış")
+            cipher.decrypt(answer) ?: throw AndroidInstallException(AndroidInstallError.PAIRING_FAILED, "رمز الربط غير صحيح")
         } finally {
             tls.close()
         }
@@ -79,11 +79,11 @@ object AdbPairing {
             AdbPacket.readExactly(input, 6)
         } catch (error: IOException) {
             // TV yanlış kodda bağlantıyı kapatır.
-            throw AndroidInstallException(AndroidInstallError.PAIRING_FAILED, "TV eşleştirmeyi kapattı: ${error.message}")
+            throw AndroidInstallException(AndroidInstallError.PAIRING_FAILED, "أنهى التلفزيون الربط: ${error.message}")
         }
         val length = ByteBuffer.wrap(header, 2, 4).int
         if (header[0] != HEADER_VERSION || header[1] != expectedType || length < 0 || length > PEER_INFO_SIZE * 2)
-            throw AndroidInstallException(AndroidInstallError.PAIRING_FAILED, "beklenmeyen eşleştirme paketi ${header[0]}/${header[1]}/$length")
+            throw AndroidInstallException(AndroidInstallError.PAIRING_FAILED, "حزمة ربط غير متوقعة ${header[0]}/${header[1]}/$length")
         return AdbPacket.readExactly(input, length)
     }
 

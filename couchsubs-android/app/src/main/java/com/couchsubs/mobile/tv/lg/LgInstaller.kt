@@ -154,7 +154,7 @@ class LgInstaller(
          */
         fun decodeKey(response: ByteArray, passphrase: String, otherFormat: (ByteArray, String) -> ByteArray): ByteArray {
             val text = String(response, Charsets.UTF_8)
-            if (!text.contains("PRIVATE KEY")) throw LgInstallException(LgInstallError.KEY_SERVER_OFF, "Key Server anahtar yerine başka bir şey döndü")
+            if (!text.contains("PRIVATE KEY")) throw LgInstallException(LgInstallError.KEY_SERVER_OFF, "أعاد Key Server شيئًا آخر بدلًا من المفتاح")
             if (LegacyPemKey.isLegacyEncrypted(text)) return LegacyPemKey.decryptWithCaseFallback(text, passphrase.trim()).toByteArray(Charsets.US_ASCII)
             return otherFormat(response, passphrase.trim())
         }
@@ -294,18 +294,18 @@ class LgInstaller(
         val remote = remotePackage(packageName)
         // Önceki denemelerden kalan paketler TV'de yer kaplamasın.
         val upload = shell.run("mkdir -p $TEMP_DIR && rm -f $TEMP_DIR/com.couchsubs.tv_*.ipk $TEMP_DIR/couchsubs.ipk && cat > '$remote'", ipk)
-        if (upload.status != 0) throw failure("yükleme çıkış kodu ${upload.status}: ${short(upload.output)}", upload.output)
+        if (upload.status != 0) throw failure("رمز خروج الرفع ${upload.status}: ${short(upload.output)}", upload.output)
         // Paket TV'ye eksiksiz ulaştı mı? (wc yoksa ya da çıktı okunamazsa denetim atlanır.)
         val size = shell.run("wc -c < '$remote'", null).output.trim().toLongOrNull()
         if (size != null && size != ipk.size.toLong())
-            throw LgInstallException(LgInstallError.INSTALL_FAILED, "paket TV'ye eksik ya da bozuk ulaştı: $size/${ipk.size} bayt")
+            throw LgInstallException(LgInstallError.INSTALL_FAILED, "وصلت الحزمة إلى التلفزيون ناقصة أو تالفة: $size/${ipk.size} بايت")
 
         val response = shell.run(installCommand(remote, installTimeoutSeconds), null)
         log.write("Kurulum yanıtı (${response.status}):\n${response.output.trim()}")
         val outcome = parseInstallReplies(response.output)
         if (outcome.failed) {
             remove(remote)
-            throw failure(outcome.reason?.takeIf { it.isNotBlank() } ?: "kurulum başarısız: ${short(response.output)}", response.output)
+            throw failure(outcome.reason?.takeIf { it.isNotBlank() } ?: "فشل التثبيت: ${short(response.output)}", response.output)
         }
         val limit = verifyTimeoutMs ?: if (outcome.installed) 30_000L else 60_000L
         val started = System.currentTimeMillis()
@@ -320,7 +320,7 @@ class LgInstaller(
         // Sonuç gelmediyse paket silinmez: kurulum TV'de sürüyor olabilir; bir sonraki deneme onu temizler.
         if (outcome.installed) remove(remote)
         throw LgInstallException(LgInstallError.INSTALL_FAILED,
-            "TV'de $version sürümü görünmedi; kurulum yanıtı (${response.status}): ${short(response.output)}")
+            "لم يظهر الإصدار $version على التلفزيون؛ رد التثبيت (${response.status}): ${short(response.output)}")
     }
 
     /** Uygulamayı açar (ares-launch gibi); açılmasa da kurulum başarılıdır. */

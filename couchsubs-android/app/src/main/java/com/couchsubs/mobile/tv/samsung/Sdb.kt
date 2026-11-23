@@ -61,10 +61,10 @@ class SdbFrame(val command: Int, val arg0: Int, val arg1: Int, val payload: Byte
             val length = buffer.int
             val sum = buffer.int
             val magic = buffer.int
-            if (length < 0 || length > 16 * 1024 * 1024) throw IOException("sdb: geçersiz uzunluk $length")
+            if (length < 0 || length > 16 * 1024 * 1024) throw IOException("sdb: طول غير صالح $length")
             val payload = if (length > 0) readExactly(input, length) else ByteArray(0)
-            if (magic != command xor -1) throw IOException("sdb: geçersiz çerçeve (komut %08X)".format(command))
-            if (sum != checksum(payload)) throw IOException("sdb: denetim toplamı tutmuyor")
+            if (magic != command xor -1) throw IOException("sdb: إطار غير صالح (الأمر %08X)".format(command))
+            if (sum != checksum(payload)) throw IOException("sdb: المجموع الاختباري غير مطابق")
             return SdbFrame(command, arg0, arg1, payload)
         }
 
@@ -73,7 +73,7 @@ class SdbFrame(val command: Int, val arg0: Int, val arg1: Int, val payload: Byte
             var read = 0
             while (read < size) {
                 val n = input.read(result, read, size - read)
-                if (n < 0) throw EOFException("TV bağlantıyı kapattı")
+                if (n < 0) throw EOFException("أغلق التلفزيون الاتصال")
                 read += n
             }
             return result
@@ -139,7 +139,7 @@ class SdbConnection private constructor(private val socket: Socket, private val 
                     if (attempt < 2) Thread.sleep(400)
                 }
             }
-            throw last ?: IOException("sdb bağlantısı kurulamadı")
+            throw last ?: IOException("تعذّر إنشاء اتصال sdb")
         }
     }
 
@@ -162,7 +162,7 @@ class SdbConnection private constructor(private val socket: Socket, private val 
                 SdbFrame.AUTH -> when (reply.arg0) {
                     AUTH_TOKEN -> send(SdbFrame(SdbFrame.AUTH, AUTH_SIGNATURE, 0, key.sign(reply.payload)))
                     AUTH_PUBLICKEY -> send(SdbFrame(SdbFrame.AUTH, AUTH_PUBLICKEY, 0, key.publicKeyPayload()))
-                    else -> throw IOException("sdb: bilinmeyen AUTH türü ${reply.arg0}")
+                    else -> throw IOException("sdb: نوع AUTH غير معروف ${reply.arg0}")
                 }
                 else -> throw IOException("sdb: CNXN ya da AUTH bekleniyordu")
             }
@@ -196,12 +196,12 @@ class SdbConnection private constructor(private val socket: Socket, private val 
         fun write(data: ByteArray) {
             var offset = 0
             while (offset < data.size) {
-                if (closed) throw IOException("sdb: TV kanalı kapattı")
+                if (closed) throw IOException("sdb: أغلق التلفزيون القناة")
                 val size = minOf(maxData, data.size - offset)
                 acked = false
                 send(SdbFrame(SdbFrame.WRTE, localId, remoteId, data.copyOfRange(offset, offset + size)))
                 while (!acked) {
-                    if (closed) throw IOException("sdb: TV kanalı kapattı")
+                    if (closed) throw IOException("sdb: أغلق التلفزيون القناة")
                     pump()
                 }
                 offset += size
@@ -212,7 +212,7 @@ class SdbConnection private constructor(private val socket: Socket, private val 
         fun readExactly(size: Int): ByteArray {
             val result = ByteArrayOutputStream(size)
             while (result.size() < size) {
-                val chunk = read() ?: throw EOFException("sdb: kanal erken kapandı")
+                val chunk = read() ?: throw EOFException("sdb: أُغلقت القناة مبكرًا")
                 val need = size - result.size()
                 if (chunk.size <= need) result.write(chunk)
                 else {
@@ -257,7 +257,7 @@ class SdbConnection private constructor(private val socket: Socket, private val 
         val channel = Channel(++nextLocalId, service)
         send(SdbFrame(SdbFrame.OPEN, channel.localId, 0, service.toByteArray(Charsets.US_ASCII)))
         while (channel.remoteId == 0) {
-            if (channel.closed) throw IOException("sdb: TV kanalı açmadı ($service)")
+            if (channel.closed) throw IOException("sdb: لم يفتح التلفزيون القناة ($service)")
             channel.pump()
         }
         return channel
@@ -378,7 +378,7 @@ class AdbKey(private val privateKey: PrivateKey, val publicKey: RSAPublicKey) {
         val key = privateKey as RSAPrivateCrtKey
         val size = (key.modulus.bitLength() + 7) / 8
         val digestInfo = byteArrayOf(0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14) + token
-        require(digestInfo.size <= size - 11) { "jeton çok uzun" }
+        require(digestInfo.size <= size - 11) { "الرمز طويل جدًا" }
         val block = ByteArray(size)
         block[1] = 0x01
         for (i in 2 until size - digestInfo.size - 1) block[i] = 0xFF.toByte()

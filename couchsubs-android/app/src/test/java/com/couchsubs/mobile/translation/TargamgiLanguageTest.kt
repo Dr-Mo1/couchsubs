@@ -30,6 +30,12 @@ class TargamgiLanguageTest {
             assertFalse(prompt.contains("Egyptian"))
         }
     }
+    @Test fun savedTurkishTargetBecomesArabic() {
+        assertEquals("ar", TranslationLanguage.stored("tr"))
+        assertEquals("ar", TranslationLanguage.stored(null))
+        assertEquals("fr", TranslationLanguage.stored("fr"))
+        assertEquals("ar", TranslationLanguage.stored("ar"))
+    }
     @Test(expected = IllegalArgumentException::class) fun invalidLanguageRejected() { TranslationLanguage.code("../tr") }
     @Test fun rawArabicFallbackNeverRunsTurkishPostEditAndSeparatesSpeakers() {
         val cache = TranslationCache()

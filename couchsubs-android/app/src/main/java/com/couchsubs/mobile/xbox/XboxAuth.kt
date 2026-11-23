@@ -59,7 +59,7 @@ class XboxAuth(
         val deadline = clock() + code.expiresInSeconds * 1000L
         var interval = code.intervalSeconds * 1000L
         while (true) {
-            if (cancelled()) throw InterruptedException("Microsoft girişi iptal edildi")
+            if (cancelled()) throw InterruptedException("أُلغي تسجيل الدخول إلى Microsoft")
             val response = try {
                 http.request("POST", "$LOGIN/token", mapOf("Content-Type" to FORM),
                     formBody("grant_type" to "urn:ietf:params:oauth:grant-type:device_code", "client_id" to CLIENT_ID, "device_code" to code.deviceCode))
@@ -77,11 +77,11 @@ class XboxAuth(
             when (DeviceCodePoll.classify(response)) {
                 DeviceCodePoll.PENDING -> Unit
                 DeviceCodePoll.SLOW_DOWN -> interval += 5000
-                DeviceCodePoll.EXPIRED -> throw XboxException(XboxError.CODE_EXPIRED, "Microsoft kodunun süresi doldu")
-                DeviceCodePoll.DECLINED -> throw XboxException(XboxError.SIGN_IN_DECLINED, "Microsoft girişi reddedildi")
-                DeviceCodePoll.FAILED -> throw XboxException(XboxError.SERVICE, "Microsoft girişi: HTTP ${response.status} ${response.body.take(200)}")
+                DeviceCodePoll.EXPIRED -> throw XboxException(XboxError.CODE_EXPIRED, "انتهت صلاحية رمز Microsoft")
+                DeviceCodePoll.DECLINED -> throw XboxException(XboxError.SIGN_IN_DECLINED, "رُفض تسجيل الدخول إلى Microsoft")
+                DeviceCodePoll.FAILED -> throw XboxException(XboxError.SERVICE, "تسجيل الدخول إلى Microsoft: HTTP ${response.status} ${response.body.take(200)}")
             }
-            if (clock() >= deadline) throw XboxException(XboxError.CODE_EXPIRED, "Microsoft kodunun süresi doldu")
+            if (clock() >= deadline) throw XboxException(XboxError.CODE_EXPIRED, "انتهت صلاحية رمز Microsoft")
             sleep(interval)
         }
     }
@@ -100,18 +100,18 @@ class XboxAuth(
 
     /** Microsoft erişim jetonu; 60 sn'den az kaldıysa yenilenir (xal-node `getOrRefreshUserToken`). */
     fun userAccessToken(): String { synchronized(lock) {
-        val current = userToken ?: throw XboxException(XboxError.SIGN_IN_REQUIRED, "Microsoft girişi gerekiyor")
+        val current = userToken ?: throw XboxException(XboxError.SIGN_IN_REQUIRED, "يلزم تسجيل الدخول إلى Microsoft")
         if (current.secondsValid(clock()) > MARGIN_S) return current.accessToken
         return refresh(current).accessToken
     } }
 
     private fun refresh(current: XboxUserToken): XboxUserToken {
-        if (current.refreshToken.isEmpty()) throw XboxException(XboxError.SIGN_IN_REQUIRED, "Microsoft girişi gerekiyor")
+        if (current.refreshToken.isEmpty()) throw XboxException(XboxError.SIGN_IN_REQUIRED, "يلزم تسجيل الدخول إلى Microsoft")
         val response = http.request("POST", "$LOGIN/token",
             mapOf("Content-Type" to FORM, "Cache-Control" to "no-store, must-revalidate, no-cache"),
             formBody("client_id" to CLIENT_ID, "grant_type" to "refresh_token", "refresh_token" to current.refreshToken, "scope" to SCOPE))
         // 400: yenileme jetonu geçersiz (xal-node TokenRefreshError); kullanıcı yeniden giriş yapmalı.
-        if (response.status == 400) throw XboxException(XboxError.SIGN_IN_REQUIRED, "Microsoft girişinin süresi doldu")
+        if (response.status == 400) throw XboxException(XboxError.SIGN_IN_REQUIRED, "انتهت صلاحية تسجيل الدخول إلى Microsoft")
         val token = XboxUserToken.fromResponse(json(response, "Microsoft jeton yenileme"), clock(), current)
         userToken = token
         onUserToken(token)
@@ -128,8 +128,8 @@ class XboxAuth(
         val response = http.request("POST", "https://user.auth.xboxlive.com/user/authenticate", mapOf(
             "x-xbl-contract-version" to "1", "Cache-Control" to "no-cache", "Content-Type" to "application/json",
             "Origin" to "https://www.xbox.com", "Referer" to "https://www.xbox.com/"), body)
-        if (response.status == 401) throw XboxException(XboxError.SIGN_IN_REQUIRED, "Xbox Live girişi kabul etmedi")
-        return XboxXstsToken.parse(json(response, "Xbox Live kullanıcı jetonu")).also { xblUser = it }
+        if (response.status == 401) throw XboxException(XboxError.SIGN_IN_REQUIRED, "لم تقبل خدمة Xbox Live تسجيل الدخول")
+        return XboxXstsToken.parse(json(response, "رمز مستخدم Xbox Live")).also { xblUser = it }
     }
 
     /** XSTS jetonu: [relyingParty] `http://xboxlive.com` (konsol listesi) ya da `http://gssv.xboxlive.com/` (yayın). */
@@ -145,7 +145,7 @@ class XboxAuth(
             "User-Agent" to BROWSER_AGENT), body)
         if (response.status == 401) {
             val xerr = try { JSONObject(response.body).optLong("XErr") } catch (error: Exception) { 0L }
-            if (xerr in NO_ACCOUNT_XERR) throw XboxException(XboxError.NO_XBOX_ACCOUNT, "Bu Microsoft hesabının Xbox profili yok (XErr $xerr)")
+            if (xerr in NO_ACCOUNT_XERR) throw XboxException(XboxError.NO_XBOX_ACCOUNT, "لا يوجد ملف Xbox شخصي لحساب Microsoft هذا (XErr $xerr)")
             throw XboxException(XboxError.SIGN_IN_REQUIRED, "Xbox yetkisi verilmedi (XErr $xerr)")
         }
         return XboxXstsToken.parse(json(response, "XSTS")).also { xsts[relyingParty] = it }
@@ -159,18 +159,18 @@ class XboxAuth(
         val response = http.request("POST", "https://xhome.gssv-play-prod.xboxlive.com/v2/login/user", mapOf(
             "Content-Type" to "application/json", "Cache-Control" to "no-store, must-revalidate, no-cache",
             "x-gssv-client" to "XboxComBrowser"), body)
-        return XboxHomeEndpoint.parse(json(response, "Xbox ev yayını girişi"), clock()).also { home = it }
+        return XboxHomeEndpoint.parse(json(response, "دخول البث المنزلي من Xbox"), clock()).also { home = it }
     } }
 
     /** Konsola aktarım jetonu (`connect` için; xal-node `getMsalToken().lpt`). */
     fun transferToken(): String {
         userAccessToken()
-        val refresh = userToken?.refreshToken ?: throw XboxException(XboxError.SIGN_IN_REQUIRED, "Microsoft girişi gerekiyor")
+        val refresh = userToken?.refreshToken ?: throw XboxException(XboxError.SIGN_IN_REQUIRED, "يلزم تسجيل الدخول إلى Microsoft")
         val response = http.request("POST", "https://login.live.com/oauth20_token.srf", mapOf("Content-Type" to FORM),
             formBody("client_id" to CLIENT_ID, "scope" to TRANSFER_SCOPE, "grant_type" to "refresh_token", "refresh_token" to refresh))
-        if (response.status == 400) throw XboxException(XboxError.SIGN_IN_REQUIRED, "Microsoft girişinin süresi doldu")
-        return json(response, "Konsol aktarım jetonu").optString("access_token").takeIf { it.isNotEmpty() }
-            ?: throw XboxException(XboxError.SERVICE, "Konsol aktarım jetonu gelmedi")
+        if (response.status == 400) throw XboxException(XboxError.SIGN_IN_REQUIRED, "انتهت صلاحية تسجيل الدخول إلى Microsoft")
+        return json(response, "رمز بث الجهاز").optString("access_token").takeIf { it.isNotEmpty() }
+            ?: throw XboxException(XboxError.SERVICE, "لم يصل رمز بث الجهاز")
     }
 
     private fun json(response: XboxHttpResponse, what: String): JSONObject {
@@ -182,7 +182,7 @@ class XboxAuth(
 internal fun parseObject(text: String): JSONObject = try {
     if (text.isBlank()) JSONObject() else JSONObject(text)
 } catch (error: Exception) {
-    throw XboxException(XboxError.SERVICE, "Xbox yanıtı okunamadı", error)
+    throw XboxException(XboxError.SERVICE, "تعذّرت قراءة رد Xbox", error)
 }
 
 /** Cihaz kodu beklerken gelen hata yanıtının anlamı (OAuth 2.0 cihaz akışı, RFC 8628). */

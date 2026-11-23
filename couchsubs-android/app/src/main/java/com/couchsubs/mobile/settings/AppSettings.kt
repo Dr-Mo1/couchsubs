@@ -158,7 +158,7 @@ class AppSettings(context: Context) : AreaStore {
         set(value) = prefs.edit().putString("target", value.name).apply()
 
     var translationLanguage: String
-        get() = prefs.getString("translationLanguage", null) ?: com.couchsubs.mobile.translation.TranslationLanguage.DEFAULT
+        get() = com.couchsubs.mobile.translation.TranslationLanguage.stored(prefs.getString("translationLanguage", null))
         set(value) = prefs.edit().putString("translationLanguage", com.couchsubs.mobile.translation.TranslationLanguage.code(value)).apply()
 
     var engine: EngineChoice

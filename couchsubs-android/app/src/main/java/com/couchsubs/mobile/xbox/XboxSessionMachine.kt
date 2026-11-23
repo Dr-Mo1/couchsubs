@@ -72,7 +72,7 @@ class XboxSessionMachine(
         val current = phase as? Phase.Provisioning ?: return Action.Nothing
         // Konsol yayını kendisi reddetti: yeniden denemek konsolu yeniden tetikler, denenmez.
         if (state == "Failed" || (state != "Provisioned" && hasErrorDetails(errorDetails)))
-            return fail(classifyFailure(errorDetails), errorDetails ?: "Xbox yayını açılamadı", permanent = true)
+            return fail(classifyFailure(errorDetails), errorDetails ?: "تعذّر فتح بث Xbox", permanent = true)
         return when (state) {
             "Provisioned" -> {
                 phase = Phase.Negotiating
@@ -94,7 +94,7 @@ class XboxSessionMachine(
 
     private fun poll(current: Phase.Provisioning): Action {
         val polls = current.polls + 1
-        if (polls >= maxPolls) return fail(XboxError.TIMEOUT, "Xbox yayını hazır olmayı beklerken zaman aşımına uğradı")
+        if (polls >= maxPolls) return fail(XboxError.TIMEOUT, "انتهت المهلة أثناء انتظار جاهزية بث Xbox")
         phase = current.copy(polls = polls)
         return Action.PollState(pollIntervalMs)
     }

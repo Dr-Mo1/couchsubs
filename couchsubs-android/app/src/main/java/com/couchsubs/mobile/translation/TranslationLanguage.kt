@@ -10,6 +10,8 @@ object TranslationLanguage {
     fun code(value: String) = value.trim().lowercase(Locale.ROOT).also {
         require(it.matches(Regex("[a-z]{2,3}(?:-[a-z0-9]{2,8})*"))) { "Invalid language code" }
     }
+    /** Saved language -> language in use: the Turkish target is retired, so a saved "tr" (or nothing) becomes Arabic. */
+    fun stored(saved: String?): String = saved?.takeUnless { it == "tr" } ?: DEFAULT
     fun name(target: String): String = when (target) {
         "ar" -> "Arabic"
         "tr" -> "Turkish"

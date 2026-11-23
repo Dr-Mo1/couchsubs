@@ -207,7 +207,7 @@ object LgKeeper {
             val id = "keep_${next++}"
             inbox.clear()
             val sent = socket?.send(JSONObject().put("type", "request").put("id", id).put("uri", uri).toString()) == true
-            if (!sent) throw java.io.IOException("SSAP kapalı")
+            if (!sent) throw java.io.IOException("SSAP مغلق")
             return awaitReply(id)
         }
 
@@ -215,9 +215,9 @@ object LgKeeper {
             val deadline = System.currentTimeMillis() + 3_000
             while (true) {
                 val left = deadline - System.currentTimeMillis()
-                if (left <= 0) throw java.io.IOException("SSAP yanıt yok")
-                val message = inbox.poll(left, TimeUnit.MILLISECONDS) ?: throw java.io.IOException("SSAP yanıt yok")
-                if (message.optString("type") == "closed") throw java.io.IOException("SSAP kapandı")
+                if (left <= 0) throw java.io.IOException("لا رد من SSAP")
+                val message = inbox.poll(left, TimeUnit.MILLISECONDS) ?: throw java.io.IOException("لا رد من SSAP")
+                if (message.optString("type") == "closed") throw java.io.IOException("أُغلق SSAP")
                 if (message.optString("id") != id) continue
                 if (message.optString("type") == "error") throw java.io.IOException(message.optString("error"))
                 return message.optJSONObject("payload") ?: JSONObject()
@@ -230,7 +230,7 @@ object LgKeeper {
         override fun launch() {
             inbox.clear()
             val message = JSONObject(launchMessage).put("id", "keep_${next++}")
-            if (socket?.send(message.toString()) != true) throw java.io.IOException("SSAP kapalı")
+            if (socket?.send(message.toString()) != true) throw java.io.IOException("SSAP مغلق")
             val payload = awaitReply(message.getString("id"))
             if (payload.has("returnValue") && !payload.optBoolean("returnValue")) throw java.io.IOException("launch")
         }

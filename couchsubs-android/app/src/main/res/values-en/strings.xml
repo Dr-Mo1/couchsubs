@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
-<!-- İngilizce arayüz (cihaz dili İngilizceyken). Türkçesi values/strings.xml; yeni metin ikisine birden eklenir. -->
+<!-- English UI text (device language English). The Arabic default is values/strings.xml; add new strings to both. -->
 <resources>
+    <string name="app_name">ترجمجي</string>
+    <string name="translation_language">Translation language</string>
+    <string name="translation_language_code">Language code (ar, en, fr, de, es…)</string>
+    <string name="translation_language_apply">Apply and stop translation</string>
     <string name="channel_translation">Subtitle translation</string>
     <string name="notification_title">CouchSubs is translating</string>
-    <string name="notification_text">Reading subtitles and translating them into Turkish; keeps going while the screen is locked</string>
+    <string name="notification_text">Reading subtitles and translating them into Arabic; keeps going while the screen is locked</string>
     <string name="stop">Stop translation</string>
     <string name="start">Start translation</string>
     <string name="next">Next</string>
@@ -53,8 +57,8 @@
     <string name="screen_no_picture">Couldn\'t capture the screen: no picture from the PS5 yet.</string>
     <string name="screen_failed">Couldn\'t translate the screen: %1$s</string>
 
-    <string name="welcome1_title">PS5 games with Turkish subtitles</string>
-    <string name="welcome1_body">In games without Turkish, your phone reads the English subtitles and translates them into Turkish. You play as usual.</string>
+    <string name="welcome1_title">PS5 games with Arabic subtitles</string>
+    <string name="welcome1_body">In games without Arabic, your phone reads the English subtitles and translates them into Arabic. You play as usual.</string>
     <string name="welcome2_title">Instant with ready packs</string>
     <string name="welcome2_body">All the text of popular games is already translated, for free. Subtitles arrive instantly, without internet. Other games use free translation.</string>
     <string name="welcome3_title">On the screen you want</string>
@@ -205,7 +209,7 @@
     <string name="background_limit_body">Battery restrictions are on for CouchSubs on this phone. When the screen turns off, the phone\'s battery saver can slow down or cut the connection, or stop translation. In the settings that open, set CouchSubs to Unrestricted under Battery. On Vivo, Xiaomi and Oppo, also allow it to run in the background and to auto-start.</string>
     <string name="background_limit_button">Open battery settings</string>
     <string name="close">Close</string>
-    <!-- Kendi ürünlerimizin tanıtım popup'ı (promo.json) -->
+    <!-- Promo popup for our own products (promo.json) -->
     <string name="promo_label">Sponsored</string>
     <string name="promo_open">Open link</string>
     <string name="ok">OK</string>
@@ -217,7 +221,7 @@
     <string name="lines_count">%1$d lines</string>
     <string name="duration_hours">%1$d h %2$d min</string>
     <string name="duration_minutes">%1$d min</string>
-    <string name="welcome1_sample_tr">Dinliyor musun beni?</string>
+    <string name="welcome1_sample_tr">هل تسمعني؟</string>
     <string name="welcome1_sample_en">Are you listening to me?</string>
     <string name="welcome2_gta">190K lines ready</string>
     <string name="welcome2_rdr_lines">195K lines</string>
@@ -677,7 +681,7 @@
     <string name="xbox_beta_note">Xbox support is in Beta. If something goes wrong, tell us and we\'ll fix it as soon as we can.</string>
     <string name="xbox_error_offline">Couldn\'t connect to the internet. Check your connection and try again.</string>
     <string name="xbox_error_unexpected">The Xbox service sent an unexpected reply (%1$s).</string>
-    <!-- Deneme modu (konsol olmadan örnek görüntülerle; iPhone ve Mac ile aynı) -->
+    <!-- Demo mode (sample footage, no console) -->
     <string name="demo_mode">Demo mode</string>
     <string name="demo_mode_try">Try demo mode (no console needed)</string>
     <string name="demo_mode_exit">Exit demo mode</string>
@@ -697,7 +701,7 @@
     <string name="second_screen_caption">Scan the code with the camera of a phone or tablet on the same Wi-Fi. While translating, the subtitles appear large in its browser; no app or internet needed.</string>
     <string name="second_screen_offline">Connect to Wi-Fi to show subtitles on another device.</string>
     <string name="tv_pair_expired">The pairing request expired. Try again on the TV.</string>
-    <!-- TV uygulamasını kendiliğinden açma: ana ekrandaki yönlendirme ve kurulumun son adımı (Mac/iPhone/Windows ile aynı). -->
+    <!-- Opening the TV app automatically: main-screen hint and the last install step. -->
     <string name="tv_open_on_tv_android">If CouchSubs didn\'t open on the TV by itself, open it on the TV: on Android TV it\'s under Apps.</string>
     <string name="tv_open_on_tv_app_list">If CouchSubs didn\'t open on the TV by itself, open it on the TV: it\'s in the TV\'s app list.</string>
     <string name="tv_open_unreachable">Couldn\'t open it automatically: the TV didn\'t answer. Is the TV on and on the same Wi-Fi as this device?</string>
