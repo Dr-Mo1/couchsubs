@@ -74,6 +74,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  * SSE sunucusu (TV) ve telefon ekranı. Ekran kapansa ya da uygulama arka plana geçse de okuma sürer.
  */
 class TranslationService : Service() {
+    // Notifications in the app's language (AppLanguage), not the phone's.
+    override fun attachBaseContext(newBase: Context) = super.attachBaseContext(com.couchsubs.mobile.AppLanguage.wrap(newBase))
+
     companion object {
         private const val TAG = "CouchSubsService"
         /** Değişmeyen bölgenin son okuması kaç kare yeniden kullanılır (Mac/iPhone/Windows ReadScheduler ile aynı). */

@@ -67,6 +67,11 @@ import com.couchsubs.mobile.service.LiveState
  * "Ekranı döndür" yatayla dik arasında geçer (iPhone ile aynı).
  */
 class PhoneSubtitleActivity : ComponentActivity() {
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(newBase)
+        applyOverrideConfiguration(com.couchsubs.mobile.AppLanguage.override(newBase))
+    }
+
     companion object {
         /** Bölünmüş [display] metni; [enabled] ise konuşanların parçaları kendi renginde ([source]: bölünmemiş metin). */
         fun speakerText(display: String, source: String, enabled: Boolean): AnnotatedString {

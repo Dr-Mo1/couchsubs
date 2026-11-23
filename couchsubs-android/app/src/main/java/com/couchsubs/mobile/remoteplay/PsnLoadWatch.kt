@@ -40,8 +40,11 @@ class PsnLoadWatch(private val startedAtMs: Long) {
     }
 
     companion object {
-        /** Ekran açıldıktan sonra Sony'nin giriş formu bu sürede çıkmazsa hata ekranı. */
-        const val LOAD_TIMEOUT_MS = 20_000L
+        /**
+         * Ekran açıldıktan sonra Sony'nin giriş formu bu sürede çıkmazsa hata ekranı. Measured 2026-11-23 on DocMo's phone:
+         * the form shows after ~10 s in Chrome and ~20 s in the app, so the old 20 s cut working sign-ins off.
+         */
+        const val LOAD_TIMEOUT_MS = 45_000L
 
         /**
          * Yönlendirme yakalandıktan sonra hesap kimliğinin Sony'den alınması (iki istek) en çok bu kadar beklenir; sonra
@@ -59,7 +62,12 @@ class PsnLoadWatch(private val startedAtMs: Long) {
         /** Sayfa yüklendikten sonra giriş formunun çizilip çizilmediğine bu aralıkla bakılır. */
         const val READY_POLL_MS = 1_000L
 
-        /** Sayfada kullanıcının dokunabileceği öğe sayısı. */
-        const val INTERACTIVE_SCRIPT = "document.querySelectorAll('input:not([type=hidden]),button').length"
+        /**
+         * Sayfada kullanıcının dokunabileceği öğe sayısı: yalnız ekranda gerçekten görünenler. A form that is in the DOM but
+         * clipped away (2026-11-23: Sony's page laid out at zero height) hit-tests to the root, so it does not count.
+         */
+        const val INTERACTIVE_SCRIPT = "Array.prototype.filter.call(document.querySelectorAll('input:not([type=hidden]),button')," +
+            "function(e){var r=e.getBoundingClientRect(),h=r.width&&r.height&&document.elementFromPoint(r.left+r.width/2," +
+            "r.top+r.height/2);return h&&h!==document.documentElement&&h!==document.body}).length"
     }
 }

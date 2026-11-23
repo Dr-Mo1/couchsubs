@@ -20,6 +20,8 @@ import java.io.File
 
 /** Uygulama açılınca: Firebase ve Meta (varsa) ve paket yenilemesi. Hesap ve reklam SDK'sı yok (yalnız kendi ürünlerimizin tanıtımı, bkz. promo); uygulama ve paketler ücretsiz. */
 class CouchSubsApp : Application() {
+    override fun attachBaseContext(base: Context) = super.attachBaseContext(AppLanguage.wrap(base))
+
     override fun onCreate() {
         super.onCreate()
         Services.init(this)

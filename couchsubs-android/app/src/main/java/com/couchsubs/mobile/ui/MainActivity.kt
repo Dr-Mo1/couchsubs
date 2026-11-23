@@ -80,6 +80,11 @@ private const val NAV_MS = 280
 private const val NAV_SHIFT = 8
 
 class MainActivity : ComponentActivity() {
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(newBase)
+        applyOverrideConfiguration(com.couchsubs.mobile.AppLanguage.override(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Uygulama hep koyu; sistem açık temadayken de durum çubuğu simgeleri açık renk kalsın.
         enableEdgeToEdge(SystemBarStyle.dark(Color.TRANSPARENT), SystemBarStyle.dark(Color.TRANSPARENT))

@@ -18,6 +18,8 @@ import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.view.ViewGroup
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -388,6 +390,8 @@ private fun SamsungSignIn(onClose: () -> Unit) {
                             fail(PsnPageProblem.CRASHED, error.javaClass.simpleName)
                             null
                         }?.apply {
+                            // Not WRAP_CONTENT (AndroidView's default): the page would be laid out at zero height (PsnLoginScreen).
+                            layoutParams = ViewGroup.LayoutParams(MATCH_PARENT, MATCH_PARENT)
                             setBackgroundColor(background)
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true

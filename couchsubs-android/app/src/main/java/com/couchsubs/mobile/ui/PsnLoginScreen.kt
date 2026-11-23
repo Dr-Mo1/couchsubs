@@ -20,6 +20,8 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
 import android.view.View
+import android.view.ViewGroup
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
 import android.webkit.RenderProcessGoneDetail
@@ -365,6 +367,9 @@ private fun PsnWebLogin(
                                 fail(PsnPageProblem.CRASHED, error.javaClass.simpleName)
                                 null
                             }?.apply {
+                                // AndroidView gives its view WRAP_CONTENT layout params, and a WebView then lays the page out
+                                // at zero height (100vh = 0): Sony's sign-in page collapsed to a blank screen (2026-11-23).
+                                layoutParams = ViewGroup.LayoutParams(MATCH_PARENT, MATCH_PARENT)
                                 setBackgroundColor(background)
                                 settings.javaScriptEnabled = true
                                 settings.domStorageEnabled = true
@@ -490,7 +495,6 @@ private class LoginClient(
 ) : WebViewClient() {
     private var redirected = false
     private var cancelled = false
-    private var shown = false
     private var readyPoll: Job? = null
 
     fun cancel() {
@@ -539,8 +543,6 @@ private class LoginClient(
 
     override fun onPageCommitVisible(view: WebView, url: String) {
         if (redirected || cancelled) return
-        shown = true
-        onVisible()
         // Bir alt kaynak takılırsa onPageFinished gecikir; form görünür olur olmaz da bakılır.
         if (readyPoll == null) poll(view)
     }
@@ -549,10 +551,6 @@ private class LoginClient(
         if (redirected || cancelled || PsnAccount.isRedirect(url)) return
         Log.i(TAG, "Sayfa bitti: ${Uri.parse(url).host}")
         watch.onPageFinished()
-        if (!shown) {
-            shown = true
-            onVisible()
-        }
         // Sony'nin sayfası tek sayfalık bir uygulamadır: betikleri çalışmazsa sayfa "yüklenir" ama boş kalır ya da kendi
         // yükleme simgesinde takılır. Giriş formu çizilene kadar bakılır; çizilmezse PsnLoadWatch süre dolunca bildirir.
         if (readyPoll == null) poll(view)
@@ -563,7 +561,11 @@ private class LoginClient(
             if (redirected || cancelled || watch.ready) return@schedule
             view.evaluateJavascript(PsnLoadWatch.INTERACTIVE_SCRIPT) { count ->
                 watch.onInteractiveCount(count)
-                if (watch.ready) Log.i(TAG, "Giriş formu çizildi") else if (!cancelled) poll(view)
+                if (watch.ready) {
+                    Log.i(TAG, "Giriş formu çizildi")
+                    // The loading screen stays until the form is on screen: Sony's page is blank for 10-20 s before it.
+                    if (!cancelled) onVisible()
+                } else if (!cancelled) poll(view)
             }
         }
     }
