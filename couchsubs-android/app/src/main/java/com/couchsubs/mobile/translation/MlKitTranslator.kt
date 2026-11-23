@@ -21,6 +21,7 @@ import java.util.concurrent.TimeoutException
 class MlKitTranslator(
     private val cache: TranslationCache = TranslationCache(),
     private val glossary: Glossary = Glossary.Empty,
+    private val target: String = "tr",
 ) : TextTranslator, AutoCloseable {
     companion object {
         /** Kalıcı önbellek dosyasındaki motor adı; metin hattı değişince ([FreeTranslation.PIPELINE_VERSION]) bu da değişir. */
@@ -28,9 +29,12 @@ class MlKitTranslator(
     }
 
     private val translator = Translation.getClient(
-        TranslatorOptions.Builder().setSourceLanguage(TranslateLanguage.ENGLISH).setTargetLanguage(TranslateLanguage.TURKISH).build()
+        TranslatorOptions.Builder().setSourceLanguage(TranslateLanguage.ENGLISH).setTargetLanguage(if (target == "ar") TranslateLanguage.ARABIC else TranslateLanguage.TURKISH).build()
     )
-    private val line = FreeLineTranslator(cache, glossary, engine = ::machine)
+    init { require(TranslationLanguage.supportsLocal(target)) }
+    private fun newLine(): TextTranslator = if (target == "tr") FreeLineTranslator(cache, glossary, engine = ::machine)
+        else TargetLineTranslator(target, cache, ::machine)
+    private val line = newLine()
 
     /** Model yoksa indirir (bloklar). [wifiOnly]: hücresel veride indirme. */
     fun prepare(wifiOnly: Boolean = false, timeoutSeconds: Long = 300) {
@@ -38,6 +42,7 @@ class MlKitTranslator(
         ModelDownloadRecovery.retryOnce { await(translator.downloadModelIfNeeded(conditions), timeoutSeconds) }
     }
 
+    override val translationLanguage: String get() = target
     override fun translate(text: String): String = line.translate(text)
 
     override fun noteSpeaker(name: String) = line.noteSpeaker(name)
@@ -46,7 +51,7 @@ class MlKitTranslator(
      * Aynı modeli ve önbelleği kullanan, kendi satır bağlamı olan çevirmen (ek alanlar için: görev yazısı altyazının
      * kısa satırına bağlam olmasın).
      */
-    fun separate(): TextTranslator = FreeLineTranslator(cache, glossary, engine = ::machine)
+    fun separate(): TextTranslator = newLine()
 
     /** Hazır metni ML Kit'e verir. */
     private fun machine(input: String): String = await(translator.translate(input), 10)

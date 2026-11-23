@@ -10,3 +10,7 @@ app/google-services.json
 *.jks
 *.keystore
 android-signing.properties
+# Local C15 offline compiler output and interrupted-session scratch files.
+.c15-jvm/
+.gradle-c15/
+.c15-edit*.py

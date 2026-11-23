@@ -42,7 +42,7 @@ class LinePool(
             return out
         }
 
-        const val ENABLED_BY_DEFAULT = true
+        const val ENABLED_BY_DEFAULT = false
         const val DEFAULT_ENDPOINT = "https://couchsubs-pool.enmera.workers.dev/v1/lines"
         const val BATCH_SIZE = 200
         const val MAX_QUEUE = 5000
@@ -100,7 +100,7 @@ class LinePool(
     /** Kapatılınca bekleyen satırlar da silinir: kullanıcı vazgeçtiyse hiçbir şey gitmez. */
     fun setEnabled(value: Boolean) = synchronized(lock) {
         enabled = value
-        if (value || queue.isEmpty()) return@synchronized
+        if (enabled || queue.isEmpty()) return@synchronized
         queue.clear()
         queuedKeys.clear()
         dirty = true
@@ -142,7 +142,7 @@ class LinePool(
                     body = payload(batch)
                 }
                 val (status, retrySeconds, reply) = try {
-                    (post ?: ::httpPost)(endpoint, body)
+                    if (post == null && !TargamgiPrivacy.SHARING) Triple(403, null, "") else (post ?: ::httpPost)(endpoint, body)
                 } catch (error: IOException) {
                     return
                 }

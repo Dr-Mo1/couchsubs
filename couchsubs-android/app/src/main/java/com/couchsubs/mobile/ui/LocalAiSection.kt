@@ -82,7 +82,7 @@ fun LocalAiSection(settings: AppSettings) {
             scope.launch {
                 val (state, sample) = withContext(Dispatchers.IO) {
                     KeyCheck.aiSample(AiProvider.LOCAL, typed.ifEmpty { settings.apiKey(EngineChoice.LOCAL).orEmpty() },
-                        AiModel(server.model, server.model), server = server)
+                        AiModel(server.model, server.model), server = server, target = settings.translationLanguage)
                 }
                 // Yazılan anahtar sunucu kabul ettiyse gizli depoya yazılır (Mac/iPhone testLocalAI ile aynı).
                 if (typed.isNotEmpty() && KeyCheck.accepted(state)) {

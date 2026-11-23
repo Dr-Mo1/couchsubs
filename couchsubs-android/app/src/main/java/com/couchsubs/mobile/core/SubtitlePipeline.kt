@@ -7,6 +7,7 @@ import java.util.concurrent.Executors
 /** Çeviri motoru. Bloklayarak çevirir (hattın kendi iş parçacığında çağrılır); başarısızsa istisna atar. */
 fun interface TextTranslator {
     fun translate(text: String): String
+    val translationLanguage: String get() = "tr"
 
     /** Birbirinden bağımsız metinleri ("ekranı çevir"deki menü satırları, görev yazıları) aynı sırada çevirir. */
     fun translateAll(texts: List<String>): List<String> = texts.map(::translate)
@@ -189,6 +190,8 @@ class SubtitlePipeline(
     /** Konuşan adı ("ARTHUR: …") TV'ye giden çeviride gösterilir; kapalıysa yalnız cümle gider (her satırda sorulur). */
     @Volatile var showSpeakerNames: () -> Boolean = { true }
     /** Hedef dil Türkçe: yüksek güvenle Türkçe olan satır ([TurkishText.isSure]) çevirmene gönderilmez (#289). */
+    @Volatile var translationLanguage = "tr"
+    @Volatile var onDialogueArrived: (() -> Unit)? = null
     @Volatile var skipsTurkish = true
     /** Hiçbir pakette bulunmayan kararlı satır (ortak havuz için). */
     @Volatile var onPackMissed: ((String) -> Unit)? = null
@@ -209,14 +212,15 @@ class SubtitlePipeline(
         frameOcrMs = ocrMs
         // Kumanda ipuçları ve yazı tanıma çöpleri çevrilmez; yalnız altyazı bloğu çevrilir.
         // Konuşma değişirken sabit duran görev/HUD satırı ("Get in the sea plane", GTA 6) altyazı bloğuna katılmaz.
-        val rows = raw.withoutButtonPrompts().withoutOcrNoise().joiningRows()
+        val controller = raw.lines.filter { ControllerPrompt.isPrompt(it.text) }
+        val rows = Reading(raw.lines - controller.toSet()).withoutButtonPrompts().withoutOcrNoise().joiningRows()
         var missionChanged = false
         var missionRegion: CropRegion? = null
         var noticesChanged = false
         var noticeAreas: List<ExtraArea> = emptyList()
         val reading = synchronized(lock) {
             val filtered = stickyRows.filter(rows, now())
-            if (mission.observe(stickyRows.removed, area, now())) {
+            if (mission.observe(stickyRows.removed + controller, area, now())) {
                 missionChanged = true
                 missionRegion = mission.region
             }
@@ -237,9 +241,11 @@ class SubtitlePipeline(
             onLog?.invoke(if (noticeAreas.isEmpty()) "kenar bildirimi kalktı" else "kenar bildirimi kendi yerinde gösteriliyor (${noticeAreas.size})")
             onNoticesChanged?.invoke(noticeAreas)
         }
+        if (reading.text.isNotBlank()) onDialogueArrived?.invoke()
         // Ekran yazısı okuyucuları altyazıyı ikinci kez çizmesin (bkz. [SubtitleEcho]).
         echo?.record(reading, area)
         if (missionChanged) onMissionChanged?.invoke(missionRegion)
+        if (controller.isNotEmpty() && reading.text.isBlank()) return
         var flushed: (() -> Unit)? = null
         val after: (() -> Unit)? = synchronized(lock) {
             var action = stabilizer.feed(reading.text, signature, reading.box)
@@ -463,7 +469,7 @@ class SubtitlePipeline(
 
     /** Gösterilecek çeviri: konuşan adı ayara göre başa eklenir ya da atılır. */
     private fun present(translation: String, request: Request) =
-        SpeakerPrefix.present(translation, request.source, showSpeakerNames())
+        SpeakerPrefix.present(translation, request.source, showSpeakerNames(), translationLanguage)
 
     private fun showPacked(request: Request, packed: PackMatch): (() -> Unit)? {
         waiting.clear()
@@ -474,7 +480,7 @@ class SubtitlePipeline(
         remember(request.number, source, if (shouldSend) translated else null)
         if (!shouldSend) return null
         lastShown = request.number
-        sender.sendSubtitle(translated, 15000, request.box, revisesShown(source))
+        sender.sendPresentedSubtitle(translated, source, translationLanguage, 15000, request.box, revisesShown(source))
         lastShownSource = source
         val shown = onPairShown
         val total = totalMs(request)
@@ -488,7 +494,7 @@ class SubtitlePipeline(
             val pair = pairs[index]
             lineOnScreen = pair.number
             pair.translation?.let {
-                sender.sendSubtitle(it, 15000, box, revisesShown(source))
+                sender.sendPresentedSubtitle(it, source, translationLanguage, 15000, box, revisesShown(source))
                 lastShownSource = source
             }
             return null
@@ -538,7 +544,7 @@ class SubtitlePipeline(
         request.prefix?.let { translator.noteSpeaker(it.name) }
         val started = now()
         val sentence = try {
-            translator.translate(input)
+            TranslationDialogue.withSpeaker(request.prefix?.name) { translator.translate(input) }
         } catch (error: Exception) {
             synchronized(lock) {
                 // Yerine uzamış okuması gelen ya da bırakılan satırın çevirisi hata sayılmaz.
@@ -568,7 +574,7 @@ class SubtitlePipeline(
             // Satır ekrandan çoktan kalktıysa çevirisi sonraki sahnenin üstüne düşmesin.
             if (!onScreen && left != null && now() - left > LATE_RESULT_MS) return
             lastShown = request.number
-            sender.sendSubtitle(translated, if (onScreen) 15000 else readingTime(translated), request.box, revisesShown(source))
+            sender.sendPresentedSubtitle(translated, source, translationLanguage, if (onScreen) 15000 else readingTime(translated), request.box, revisesShown(source))
             lastShownSource = source
             total = totalMs(request)
         }

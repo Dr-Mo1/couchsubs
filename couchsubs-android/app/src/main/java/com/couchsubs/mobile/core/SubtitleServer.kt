@@ -47,6 +47,8 @@ interface SubtitleSender {
      * üstüne yığmaz, yerine koyar (`replace` alanı; eski TV uygulamaları yok sayar).
      */
     fun sendSubtitle(text: String, durationMs: Int = 15000, box: TextBox? = null, replaces: Boolean = false)
+    fun sendPresentedSubtitle(text: String, source: String, target: String, durationMs: Int = 15000,
+        box: TextBox? = null, replaces: Boolean = false) = sendSubtitle(text, durationMs, box, replaces)
     fun clear()
 }
 
@@ -136,13 +138,13 @@ class SubtitleServer(
         /** [speakerColors]: açıksa satırlardaki konuşanlar renkleriyle `speakers` alanında gider (bkz. [SpeakerColors]). */
         fun subtitleFrame(
             text: String, durationMs: Int, box: TextBox?, at: Long, paragraphs: Boolean = false, replaces: Boolean = false,
-            speakerColors: Boolean = false,
+            speakerColors: Boolean = false, source: String? = null, target: String = "tr",
         ): String {
             val json = mutableMapOf<String, Any?>("at" to at, "duration" to durationMs, "text" to text)
             if (paragraphs) json["paragraphs"] = true
             if (replaces) json["replace"] = true
             // Konuşan adı yoksa ya da ayar kapalıysa alan hiç yazılmaz; eski TV uygulamaları alanı yok sayar.
-            if (speakerColors) SpeakerColors.speakers(text).takeIf { it.isNotEmpty() }?.let { speakers ->
+            if (speakerColors) (if (source == null) SpeakerColors.speakers(text) else SpeakerColors.presented(text, source, target)).takeIf { it.isNotEmpty() }?.let { speakers ->
                 json["speakers"] = speakers.map { mapOf("color" to it.color, "name" to it.name) }
             }
             if (box != null) json["box"] = boxJson(box)
@@ -313,6 +315,13 @@ class SubtitleServer(
 
     override fun sendSubtitle(text: String, durationMs: Int, box: TextBox?, replaces: Boolean) {
         broadcast(subtitleFrame(text, durationMs, box, clock(), replaces = replaces, speakerColors = speakerColors), subtitle = true)
+        onEvent?.invoke(SubtitleEvent.Subtitle(text, durationMs, replaces, box))
+    }
+
+    override fun sendPresentedSubtitle(text: String, source: String, target: String, durationMs: Int, box: TextBox?, replaces: Boolean) {
+        SpeakerColors.presented(text, source, target)
+        broadcast(subtitleFrame(text, durationMs, box, clock(), replaces = replaces, speakerColors = speakerColors,
+            source = source, target = target), subtitle = true)
         onEvent?.invoke(SubtitleEvent.Subtitle(text, durationMs, replaces, box))
     }
 

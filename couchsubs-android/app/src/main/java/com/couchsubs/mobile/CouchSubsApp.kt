@@ -165,7 +165,7 @@ object Services {
      * [onChanged] çağrılır (çalışan çeviri hizmeti kendi kitaplığını yeniden okur).
      */
     fun refreshPacks(force: Boolean, maxAgeMs: Long = PackStore.REFRESH_INTERVAL_MS, onChanged: (() -> Unit)? = null) {
-        if (BuildConfig.PACKS_URL.isBlank()) return
+        if (settings.translationLanguage != "tr" || BuildConfig.PACKS_URL.isBlank()) return
         if (force) packStatus.value = PackStatus.DOWNLOADING
         scope.launch(Dispatchers.IO) { runRefresh(force, maxAgeMs, onChanged) }
     }
@@ -176,7 +176,7 @@ object Services {
      * Paket sunucusu yapılandırılmamışsa null.
      */
     suspend fun updatePacksNow(before: List<Pair<String, Int>>): com.couchsubs.mobile.packs.PackUpdateOutcome? {
-        if (BuildConfig.PACKS_URL.isBlank()) return null
+        if (settings.translationLanguage != "tr" || BuildConfig.PACKS_URL.isBlank()) return null
         packStatus.value = PackStatus.DOWNLOADING
         val (result, error) = kotlinx.coroutines.withContext(Dispatchers.IO) {
             // Çalışan çeviri hizmeti de yeni paketleri okusun (TranslationService'teki yenilemede olduğu gibi).
@@ -216,7 +216,7 @@ object Services {
     /** Bu telefondaki paketler ve sunucuda olup henüz inmemiş olanlar (bloklar). Sunucu listesi alınamazsa durum yazılır. */
     fun catalog(context: Context): List<CatalogEntry> {
         val local = packLibrary(context).infos
-        val remote = if (BuildConfig.PACKS_URL.isBlank()) emptyList()
+        val remote = if (settings.translationLanguage != "tr" || BuildConfig.PACKS_URL.isBlank()) emptyList()
         else try {
             packServer.list()
         } catch (error: Exception) {
@@ -238,9 +238,12 @@ object Services {
      */
     fun packLibrary(context: Context): GamePackLibrary {
         val bundled: () -> List<Pair<String, () -> ByteArray>> = {
-            (context.assets.list("packs") ?: emptyArray()).map { name -> name to { context.assets.open("packs/$name").use { s -> s.readBytes() } } }
+            val directory = com.couchsubs.mobile.translation.TranslationLanguage.packDirectory(settings.translationLanguage)
+            if (directory == null) emptyList() else (context.assets.list(directory) ?: emptyArray()).map { name ->
+                name to { context.assets.open("$directory/$name").use { s -> s.readBytes() } } }
         }
-        return GamePackLibrary(bundled, packStore.directory, importedPacksDirectory).also { it.setDisabled(settings.disabledPacks) }
+        return GamePackLibrary(bundled, if (settings.translationLanguage == "tr") packStore.directory else null,
+            if (settings.translationLanguage == "tr") importedPacksDirectory else null).also { it.setDisabled(settings.disabledPacks) }
     }
 
     /** İçe aktarılan bir paket (Ayarlar › Oyun paketleri'ndeki liste). */

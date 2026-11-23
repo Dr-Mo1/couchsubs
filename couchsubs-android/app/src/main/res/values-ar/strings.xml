@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<resources>
+    <string name="app_name">ترجمجي</string>
+    <string name="translation_language">لغة الترجمة</string>
+    <string name="translation_language_code">رمز اللغة (ar، tr، en، fr، de، es…)</string>
+    <string name="translation_language_apply">تطبيق وإيقاف الترجمة</string>
+</resources>

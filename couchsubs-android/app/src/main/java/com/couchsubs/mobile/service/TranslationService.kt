@@ -608,9 +608,11 @@ class TranslationService : Service() {
         val library = Services.packLibrary(this)
         packs = library
         // Terim sözlüğü ve kalıcı önbellek (iPhone ile aynı biçim): önceki oturumlarda çevrilen cümleler hemen gelir.
-        val glossary = Glossary.load(this)
+        val glossary = if (settings.translationLanguage == "tr") Glossary.load(this) else Glossary.Empty
         glossaryInUse = glossary
-        val free = MlKitTranslator(cache(MlKitTranslator.ENGINE_ID), glossary).also { freeTranslator = it }
+        val free = MlKitTranslator(cache(MlKitTranslator.ENGINE_ID), glossary, if (settings.translationLanguage == "tr") "tr" else "ar").also { freeTranslator = it }
+        arabicSlang = runCatching { assets.open("arabic/glossary-ar.txt").bufferedReader().use {
+            com.couchsubs.mobile.translation.ArabicGlossary.parse(it.readText()) } }.getOrDefault(emptyList())
         val translator = engineTranslator(free)
         val subtitleServer = SubtitleServer(instanceId = installationId(this), key = settings.subtitleAccessKey, obsOverlay = assets.open("obs-overlay.html").bufferedReader().use { it.readText() },
             secondScreenPage = assets.open("second-screen.html").bufferedReader().use { it.readText() }).also { server = it }
@@ -695,12 +697,15 @@ class TranslationService : Service() {
                     PackLookup.match(library, text)
                 } else null
             }
+            translationLanguage = settings.translationLanguage
+            skipsTurkish = settings.translationLanguage == "tr"
             showSpeakerNames = { settings.showSpeakerNames }
             // Görev satırı altyazıya girmez; otomatik ekran yazısı açıksa "auto-mission" ek alanı olarak kendi yerinde ve
             // özgün stilinde gösterilir (Windows ve Mac ile aynı). Kapalıysa ayrıca gösterilmez.
             missionAreas = emptyList()
+            onDialogueArrived = { regionWatcher?.dialogueArrived() }
             onMissionChanged = { region ->
-                missionAreas = if (region != null && settings.autoScreenText)
+                missionAreas = if (region != null && (settings.autoScreenText || settings.translationLanguage == "ar"))
                     listOf(com.couchsubs.mobile.core.ExtraArea(com.couchsubs.mobile.core.MissionLine.AREA_ID, "Mission", region, auto = true))
                 else emptyList()
             }
@@ -739,6 +744,7 @@ class TranslationService : Service() {
             prefetchWork = regionPrefetch,
             prefetchTranslator = earlyTranslator ?: areaTranslator,
             readPhone = { flat -> areaReader.read(RegionPixels(flat.nv21, flat.width, flat.height, 0L)) }).apply {
+            skipsTurkish = settings.translationLanguage == "tr"
             prefetchesTranslations = earlyTranslator != null
             subtitleEcho = com.couchsubs.mobile.core.SubtitleEcho.shared
             // Ayarlar'daki ekran yazısı türleri (telefon, görev, yardım/eylemler, menüler, diğer).
@@ -765,7 +771,7 @@ class TranslationService : Service() {
         // Ücretsiz modelin ilk indirilmesi (yaklaşık 30 MB); oyun paketleri beklemeden çalışır.
         background.execute {
             try {
-                free.prepare()
+                if (com.couchsubs.mobile.translation.TranslationLanguage.supportsLocal(settings.translationLanguage)) free.prepare()
             } catch (error: Exception) {
                 Log.w(TAG, "ML Kit model", error)
                 // Deneme modu model olmadan da hazır çeviriyle sürer; uyarı gösterilmez.
@@ -1239,7 +1245,19 @@ class TranslationService : Service() {
     /** Çevrimiçi motor seçilip anahtarı girildiyse o, hatada yerel motor; yoksa null. */
     /** Seçili motor; deneme modunda motor çeviremezse örnek satırların hazır çevirisi ([DemoTranslator]). */
     private fun engineTranslator(free: TextTranslator): TextTranslator =
-        (onlineTranslator(free) ?: free).let { if (demo) DemoTranslator(it) else it }
+        run {
+            val target = settings.translationLanguage
+            val fallback = if (target == "ar") settings.apiKey(EngineChoice.DEEPL)?.takeIf { it.isNotBlank() }?.let {
+                DeepLTranslator(it, free, cache = cache(DeepLTranslator.ENGINE_ID), target = "ar") } ?: free
+                else if (target == "tr") free else object : TextTranslator {
+                    override val translationLanguage: String get() = target
+                    override fun translate(text: String): String = throw java.io.IOException("Select an online AI engine for $target")
+                }
+            val engine = onlineTranslator(fallback) ?: fallback
+            if (target == "ar") com.couchsubs.mobile.translation.PackFirstTranslator(engine) { text ->
+                if (settings.packsEnabled) packs?.let { PackLookup.match(it, text) } else null
+            } else if (demo && target == "tr") DemoTranslator(engine) else engine
+        }
 
     private fun onlineTranslator(free: TextTranslator): TextTranslator? {
         val engine = settings.engine
@@ -1248,13 +1266,14 @@ class TranslationService : Service() {
             val server = settings.localAiServer ?: return null
             val model = AiModel(server.model, server.model)
             return AiTranslator(AiProvider.LOCAL, settings.apiKey(engine).orEmpty(), model, free, cache = cache(server.engineId),
-                playedGame = { PlayedGame.sense.current?.name }, instruction = { settings.aiInstruction }, server = server)
+                playedGame = { PlayedGame.sense.current?.name }, instruction = { settings.aiInstruction }, server = server, target = settings.translationLanguage, slang = arabicSlang)
         }
         val key = settings.apiKey(engine)?.takeIf { it.isNotBlank() } ?: return null
         return when (engine) {
             EngineChoice.FREE -> null
-            EngineChoice.DEEPL -> DeepLTranslator(key, free, cache = cache(DeepLTranslator.ENGINE_ID), glossary = glossaryInUse,
-                playedGame = { packs?.scopeTitle })
+            EngineChoice.DEEPL -> if (settings.translationLanguage == "ar") free else if (settings.translationLanguage == "tr")
+                DeepLTranslator(key, free, cache = cache(DeepLTranslator.ENGINE_ID), glossary = glossaryInUse,
+                    playedGame = { packs?.scopeTitle }, target = "tr") else null
             else -> {
                 val provider = when (engine) {
                     EngineChoice.GEMINI -> AiProvider.GEMINI
@@ -1265,7 +1284,7 @@ class TranslationService : Service() {
                 val model = AiModel.selected(aiModels()[provider.id].orEmpty(), settings.aiModel(provider)) ?: return null
                 AiTranslator(provider, key, model, free, cache = cache(AiTranslator.engineId(provider, model)),
                     // Kararlı oyun (GameSense.current), son eşleşen paket değil: tek satır adı başka oyuna geçirmez (#27).
-                    playedGame = { PlayedGame.sense.current?.name }, instruction = { settings.aiInstruction })
+                    playedGame = { PlayedGame.sense.current?.name }, instruction = { settings.aiInstruction }, target = settings.translationLanguage, slang = arabicSlang)
             }
         }
     }
@@ -1273,9 +1292,10 @@ class TranslationService : Service() {
     private fun aiModels(): Map<String, List<AiModel>> = AiModel.load(this)
 
     /** Motorun kalıcı önbelleği: files/Translations/v1-<motor>-en-tr.jsonl (iPhone'daki Translations klasörüyle aynı biçim). */
-    private fun cache(engine: String) = TranslationCache.shared(File(filesDir, "Translations"), engine)
+    private fun cache(engine: String) = TranslationCache.shared(File(filesDir, "Translations"), engine, target = settings.translationLanguage)
 
     @Volatile private var glossaryInUse = Glossary.Empty
+    @Volatile private var arabicSlang: List<Pair<String, String>> = emptyList()
 
     /** Xbox hatasının ekrandaki anlatımı. */
     private fun describeXbox(kind: XboxError): String = getString(when (kind) {

@@ -56,6 +56,7 @@ object ScreenTranslation {
     fun translateGroups(
         reading: Reading, translate: (String) -> String, cancelled: () -> Boolean = { false }, frame: GrayFrame? = null,
         color: ((Int, Int) -> Int)? = null, phone: ScreenPhoneCard.Handset? = null, memory: PhoneChatMemory? = null,
+        target: String = "tr",
         progress: (List<Item>) -> Unit = {},
     ): List<Item> {
         val items = mutableListOf<Item>()
@@ -68,7 +69,7 @@ object ScreenTranslation {
             val prepared = group.paragraphs.map { IconText.protect(it) }
             val translated = prepared.mapIndexed { index, paragraph ->
                 val source = group.paragraphs[index]
-                known(source, group) ?: remembered(source, group, chat, memory)
+                known(source, group, target) ?: remembered(source, group, chat, memory)
                     ?: PriceText.protect(paragraph.text).let { PriceText.restore(translate(it.text), it.values) }
                         .also { memory?.remember(memoryChat(group, chat), source, it) }
             }
@@ -95,7 +96,7 @@ object ScreenTranslation {
         progress: (List<Item>) -> Unit = {},
     ): List<Item> {
         if (!translator.translatesTogether)
-            return translateGroups(reading, { translator.translate(it) }, cancelled, frame, color, phone, memory, progress)
+            return translateGroups(reading, { translator.translate(it) }, cancelled, frame, color, phone, memory, translator.translationLanguage, progress)
         val groups = withImages(groups(reading, wholeScreen = true, handset = phone, frame = frame), frame)
         // Simgeler çeviride uydurma adlarla korunur (IconText). Sözlükteki kısa arayüz etiketleri ("SCROLL", "SEND",
         // "BACK") ve telefondaki kişi adları çevirmene gitmez; fiyatlar adla korunur (PriceText).
@@ -105,7 +106,7 @@ object ScreenTranslation {
         val chat = chatTitle(groups)
         // Daha önce görülen sohbetin mesajları da çevirmene gitmez ([memory]).
         val owners = groups.flatMap { group -> group.paragraphs.map { group } }
-        val knowns = sources.indices.map { known(sources[it], owners[it]) ?: remembered(sources[it], owners[it], chat, memory) }
+        val knowns = sources.indices.map { known(sources[it], owners[it], translator.translationLanguage) ?: remembered(sources[it], owners[it], chat, memory) }
         val prices = prepared.flatMap { group -> group.map { PriceText.protect(it.text) } }
         val asked = prices.indices.filter { knowns[it] == null }
         val answers = if (asked.isEmpty()) emptyList() else translator.translateAll(asked.map { prices[it].text })
@@ -135,13 +136,13 @@ object ScreenTranslation {
      * Oyun arayüzü sözlüğündeki kısa etiketin Türkçesi ("SCROLL" → "KAYDIR", "TIP" → "BAHŞİŞ VER"); simgeli ya da
      * sözlükte olmayan parçada null (çevirmene gider).
      */
-    internal fun known(paragraph: String, group: Group? = null): String? = when {
+    internal fun known(paragraph: String, group: Group? = null, target: String = "tr"): String? = when {
         // Telefondaki kişi adı (sohbet başlığı, listedeki ad) çevrilmez: "Rose" "Gül", "May" "Mayıs" olmasın.
         group?.phone?.role?.keepsText == true -> paragraph
         // "JASON & LUCIA" gibi yalnız özel adlardan oluşan sekme/başlık çevrilmez (#859).
         keepsNames(paragraph) -> paragraph
         paragraph.indexOf(ButtonIcons.MARKER) >= 0 -> null
-        else -> UiCommands.translate(paragraph)
+        else -> if (target == "tr") UiCommands.translate(paragraph) else null
     }
 
     /** Telefondaki sohbetin başlığı (kişi adı); sohbet listesinde ya da telefonsuz karede boş. */

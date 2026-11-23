@@ -49,6 +49,7 @@ object PromoController {
      * yapılmaz: yeni kullanıcı ilk açılışında tanıtım görmez.
      */
     fun refresh(context: Context, scope: CoroutineScope, setupDone: Boolean) {
+        if (!com.couchsubs.mobile.core.TargamgiPrivacy.PROMO) return
         val app = context.applicationContext
         foregroundAtMs = System.currentTimeMillis()
         if (!setupDone) {

@@ -19,12 +19,13 @@
 
     <!-- largeHeap: uygulamayla gelen dokuz oyun paketi bellekte ~50 MB tutar; Compose, ML Kit ve görüntü akışıyla birlikte
          varsayılan sınır zayıf telefonda yetmiyor, çeviri başlarken uygulama kapanıyordu. -->
+    <!-- TODO: replace the launcher icon with the Targamgi icon. -->
     <application
-        android:name=".CouchSubsApp"
+        android:name="com.couchsubs.mobile.CouchSubsApp"
         android:allowBackup="false"
         android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/icon"
-        android:label="CouchSubs"
+        android:label="@string/app_name"
         android:largeHeap="true"
         android:theme="@style/Theme.CouchSubs"
         android:usesCleartextTraffic="true">
@@ -47,9 +48,11 @@
             android:name="com.facebook.internal.FacebookInitProvider"
             android:authorities="${applicationId}.FacebookInitProvider"
             tools:node="remove" />
+        <provider android:name="com.google.firebase.provider.FirebaseInitProvider"
+            android:authorities="${applicationId}.firebaseinitprovider" tools:node="remove" />
         <!-- Resim içinde resim ("Arka planda sürdür"): pencereye geçerken etkinlik yeniden kurulmaz. -->
         <activity
-            android:name=".ui.MainActivity"
+            android:name="com.couchsubs.mobile.ui.MainActivity"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
             android:exported="true"
             android:launchMode="singleTask"
@@ -62,13 +65,13 @@
         </activity>
         <!-- Altyazı bu telefonun ekranında: yatay, büyük yazı. -->
         <activity
-            android:name=".ui.PhoneSubtitleActivity"
+            android:name="com.couchsubs.mobile.ui.PhoneSubtitleActivity"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
             android:exported="false"
             android:supportsPictureInPicture="true"
             android:screenOrientation="sensorLandscape" />
         <service
-            android:name=".service.TranslationService"
+            android:name="com.couchsubs.mobile.service.TranslationService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
     </application>

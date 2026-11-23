@@ -18,7 +18,7 @@ object Meta {
     @Volatile private var started = false
     @Volatile private var eventsOn = false
 
-    private val configured get() = BuildConfig.FACEBOOK_APP_ID.isNotBlank()
+    private val configured get() = com.couchsubs.mobile.core.TargamgiPrivacy.TELEMETRY && BuildConfig.FACEBOOK_APP_ID.isNotBlank()
 
     fun init(app: Application) {
         application = app

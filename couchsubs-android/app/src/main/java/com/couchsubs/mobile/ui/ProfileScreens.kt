@@ -79,6 +79,7 @@ fun ProfileScreen(onBack: () -> Unit, onSettings: () -> Unit, onPairing: () -> U
     var tvs by remember { mutableStateOf<List<FoundTv>?>(null) }
     var notifyDisconnect by remember { mutableStateOf(settings.notifyDisconnect) }
     var notifyPacks by remember { mutableStateOf(settings.notifyNewPacks) }
+    var language by remember { mutableStateOf(settings.translationLanguage) }
     var pool by remember { mutableStateOf(settings.sharePool) }
     var askGame by remember { mutableStateOf(settings.askGame) }
     var speakerNames by remember { mutableStateOf(settings.showSpeakerNames) }
@@ -116,6 +117,19 @@ fun ProfileScreen(onBack: () -> Unit, onSettings: () -> Unit, onPairing: () -> U
                     style = Tokens.Type.caption, color = Tokens.Color.secondary)
             }
         }
+        Tile(Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.translation_language))
+            androidx.compose.material3.OutlinedTextField(value = language, onValueChange = { language = it },
+                label = { Text(stringResource(R.string.translation_language_code)) }, singleLine = true)
+            androidx.compose.material3.TextButton(onClick = {
+                runCatching { settings.translationLanguage = language }.onSuccess {
+                    TranslationService.stop(context)
+                    Services.localPacksChanged()
+                }
+            }, enabled = language.trim().matches(Regex("[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*"))) {
+                Text(stringResource(R.string.translation_language_apply))
+            }
+        }
         RowList(listOf(
             { RowItem(stringResource(R.string.notify_disconnect)) { Switch(notifyDisconnect, { notifyDisconnect = it; settings.notifyDisconnect = it }) } },
             // iPhone ile aynı ad ve açıklama (orada Resim içinde resim penceresi çeviriyi ayakta tutar).
@@ -126,7 +140,7 @@ fun ProfileScreen(onBack: () -> Unit, onSettings: () -> Unit, onPairing: () -> U
         ))
         RowList(listOf(
             { RowItem(stringResource(R.string.settings_pool), stringResource(R.string.settings_pool_short)) {
-                Switch(pool, { pool = it; settings.sharePool = it })
+                Switch(false, {}, enabled = false)
             } },
             { RowItem(stringResource(R.string.settings_ask_game), stringResource(R.string.settings_ask_game_short)) {
                 Switch(askGame, { askGame = it; settings.askGame = it })
@@ -330,7 +344,7 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
                                 if (provider == null) KeyCheck.deepL(typed)
                                 else {
                                     val model = AiModel.selected(AiModel.load(context)[provider.id].orEmpty(), settings.aiModel(provider))
-                                    if (model == null) OnlineKeyState.UNREACHABLE else KeyCheck.ai(provider, typed, model)
+                                    if (model == null) OnlineKeyState.UNREACHABLE else KeyCheck.ai(provider, typed, model, target = settings.translationLanguage)
                                 }
                             }
                             if (state != OnlineKeyState.VALID) Backend.breadcrumb("API anahtarı testi sonucu: $logName $state")
@@ -589,7 +603,7 @@ private fun AboutDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("CouchSubs ${BuildConfig.VERSION_NAME}") },
+        title = { Text("Targamgi ${BuildConfig.VERSION_NAME}") },
         text = {
             Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(Tokens.Space.inline)) {
                 Text("Copyright © 2026 Sinan Yorulmaz", style = Tokens.Type.caption, color = Tokens.Color.secondary)

@@ -399,12 +399,12 @@ class LinePoolTest {
         val bodies = mutableListOf<String>()
         var status = 503
         val post = { _: URL, body: String -> bodies.add(body); Triple(status, null, "") }
-        val pool = LinePool(file, "test", post = post, clock = { 1_700_000_000_000 })
+        val pool = LinePool(file, "test", enabled = true, post = post, clock = { 1_700_000_000_000 })
         pool.offer("Get in the car, Enzo.")
         pool.offer("Get in the car, Enzo.")
         pool.flush()
         assertEquals(1, pool.queued.size)
-        val reopened = LinePool(file, "test", post = post, clock = { 1_700_000_000_000 })
+        val reopened = LinePool(file, "test", enabled = true, post = post, clock = { 1_700_000_000_000 })
         assertEquals(1, reopened.queued.size)
         assertEquals(pool.installId, reopened.installId)
         status = 200
@@ -427,14 +427,14 @@ class LinePoolTest {
         val bodies = mutableListOf<String>()
         var status = 503
         val post = { _: URL, body: String -> bodies.add(body); Triple(status, null, "") }
-        val pool = LinePool(file, "test", post = post, clock = { 1_700_000_000_000 })
+        val pool = LinePool(file, "test", enabled = true, post = post, clock = { 1_700_000_000_000 })
         pool.offer("Who is that over there?")
         pool.setGame(RunningGame.create("ppsa12345", "  Grand Theft Auto VI\n"))
         pool.offer("Get in the car, Lucia.")
         pool.setGame(null)
         pool.offer("Keep your head down, Jason.")
         pool.flush()
-        val reopened = LinePool(file, "test", post = post, clock = { 1_700_000_000_000 })
+        val reopened = LinePool(file, "test", enabled = true, post = post, clock = { 1_700_000_000_000 })
         assertEquals("PPSA12345", reopened.queued[1].titleId)
         assertEquals("Grand Theft Auto VI", reopened.queued[1].game)
         status = 200
@@ -454,7 +454,7 @@ class LinePoolTest {
         val file = File(Files.createTempDirectory("pool").toFile(), "pool.json")
         val key = PackKey.key("Get in the car, Enzo.")!!
         val post = { _: URL, _: String -> Triple(200, null, saturatedReply(key.uppercase())) }
-        val pool = LinePool(file, "test", post = post, clock = { 1_700_000_000_000 })
+        val pool = LinePool(file, "test", enabled = true, post = post, clock = { 1_700_000_000_000 })
         pool.offer("Get in the car, Enzo.")
         pool.offer("Who is that man?")
         pool.flush()
@@ -463,7 +463,7 @@ class LinePoolTest {
         pool.offer("Who is that man?")
         assertEquals(0, pool.queued.size)
         // Yeniden başlatınca da hatırlanır.
-        val reopened = LinePool(file, "test", post = post, clock = { 1_700_000_000_000 })
+        val reopened = LinePool(file, "test", enabled = true, post = post, clock = { 1_700_000_000_000 })
         reopened.offer("Get in the car, Enzo.")
         assertEquals(0, reopened.queued.size)
     }
@@ -474,7 +474,7 @@ class LinePoolTest {
         val lines = (0 until 201).map { "Get in the car number $it, Lucia." }
         var posts = 0
         val post = { _: URL, _: String -> posts++; Triple(200, null, saturatedReply(PackKey.key(lines[200])!!)) }
-        val pool = LinePool(File(Files.createTempDirectory("pool").toFile(), "pool.json"), "test", post = post, clock = { 1_700_000_000_000 })
+        val pool = LinePool(File(Files.createTempDirectory("pool").toFile(), "pool.json"), "test", enabled = true, post = post, clock = { 1_700_000_000_000 })
         for (line in lines) pool.offer(line)
         pool.flush()
         assertEquals(1, posts)
@@ -493,7 +493,7 @@ class LinePoolTest {
     fun rejectedBatchIsRememberedSoItIsNotSentAgain() {
         var posts = 0
         val post = { _: URL, _: String -> posts++; Triple(400, null, "") }
-        val pool = LinePool(File(Files.createTempDirectory("pool").toFile(), "pool.json"), "test", post = post, clock = { 1_700_000_000_000 })
+        val pool = LinePool(File(Files.createTempDirectory("pool").toFile(), "pool.json"), "test", enabled = true, post = post, clock = { 1_700_000_000_000 })
         pool.offer("Get in the car, Enzo.")
         pool.flush()
         pool.offer("Get in the car, Enzo.")
@@ -520,7 +520,7 @@ class LinePoolTest {
 
     @Test
     fun disablingDropsTheQueue() {
-        val pool = LinePool(File(Files.createTempDirectory("pool").toFile(), "pool.json"), "test", post = { _, _ -> throw IOException() })
+        val pool = LinePool(File(Files.createTempDirectory("pool").toFile(), "pool.json"), "test", enabled = true, post = { _, _ -> throw IOException() })
         pool.offer("Get in the car, Enzo.")
         pool.setEnabled(false)
         assertEquals(0, pool.queued.size)

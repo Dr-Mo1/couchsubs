@@ -7,7 +7,7 @@ plugins {
 
 // Firebase (Analytics, Crashlytics) yapılandırması app/google-services.json'dan gelir. Dosya depoda
 // yoktur (.gitignore); yoksa eklentiler uygulanmaz, uygulama Firebase'siz derlenir ve çalışır (bkz. Backend.kt).
-def hasGoogleServices = file('google-services.json').exists()
+def hasGoogleServices = false // Targamgi: never initialize upstream Firebase identities.
 if (hasGoogleServices) {
     apply plugin: 'com.google.gms.google-services'
     apply plugin: 'com.google.firebase.crashlytics'
@@ -16,12 +16,12 @@ if (hasGoogleServices) {
 // Anahtarlar ve kimlikler couchsubs-android/secrets.properties'ten (depoda yok; örnek: secrets.example.properties).
 def secrets = new Properties()
 def secretsFile = rootProject.file('secrets.properties')
-if (secretsFile.exists()) secretsFile.withInputStream { secrets.load(it) }
+// Targamgi uses public pack endpoints for tr only; no upstream private identities are loaded.
 def secret = { String name, String fallback = '' -> (secrets.getProperty(name) ?: System.getenv(name.toUpperCase().replace('.', '_')) ?: fallback).trim() }
 
 def releaseSigning = null
 def signingFile = file(System.getenv('COUCHSUBS_ANDROID_SIGNING') ?: "${System.getProperty('user.home')}/.config/couchsubs/android-signing.properties")
-if (signingFile.exists()) {
+if (gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') } && signingFile.exists()) {
     def props = new Properties()
     signingFile.withInputStream { props.load(it) }
     releaseSigning = [storeFile: props.getProperty('storeFile'), storePassword: props.getProperty('storePassword'),
@@ -44,10 +44,10 @@ def python = (findProperty('couchsubs.python') ?: System.getenv('COUCHSUBS_PYTHO
 android {
     namespace 'com.couchsubs.mobile'
     compileSdk 36
-    ndkVersion '27.0.12077973'
+    ndkVersion '27.1.12297006' // Targamgi: the installed NDK r27b; upstream pins 27.0.12077973
 
     defaultConfig {
-        applicationId 'com.couchsubs.mobile'
+        applicationId 'com.targamgi.app'
         minSdk 26
         targetSdk 36
         // Masaüstü sürüm çizgisiyle aynı ad; kod beta numarasıdır ve her yayında artar. CI etiketten verebilir:
@@ -58,12 +58,12 @@ android {
         buildConfigField 'String', 'PACKS_URL', "\"${secret('packs.url', 'https://couchsubs-packs.enmera.workers.dev')}\""
         // Yedek adres: workers.dev'e ulaşamayan ağlar için (DNS/reklam engelleyici/operatör, #583). Aynı Worker.
         buildConfigField 'String', 'PACKS_FALLBACK_URL', "\"${secret('packs.fallbackUrl', 'https://couchsubs-packs.enmeraapps.com')}\""
-        buildConfigField 'String', 'FACEBOOK_APP_ID', "\"${secret('facebook.appId')}\""
+        buildConfigField 'String', 'FACEBOOK_APP_ID', "\"${''}\""
         buildConfigField 'boolean', 'HAS_FIREBASE', "${hasGoogleServices}"
         buildConfigField 'String', 'TV_SAMSUNG_VERSION', "\"${tizenVersion}\""
         manifestPlaceholders = [
-            facebookAppId      : secret('facebook.appId'),
-            facebookClientToken: secret('facebook.clientToken'),
+            facebookAppId      : '',
+            facebookClientToken: '',
         ]
         if (!skipNative) {
             externalNativeBuild {
@@ -73,6 +73,23 @@ android {
                     // 16 KB sayfa boyutu (Play şartı): NDK 27 varsayılanı 4 KB; LOAD segmentleri 16 KB hizalanır.
                     arguments "-DPYTHON_EXECUTABLE=${python}", "-DPython3_EXECUTABLE=${python}", '-DANDROID_STL=c++_static',
                         '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON'
+                    // Targamgi local builds: GitHub downloads time out intermittently from DocMo's network, so chiaki's
+                    // FetchContent deps (same tag archives) are taken from targamgi.depsDir when unpacked there.
+                    def depsDir = file((findProperty('targamgi.depsDir') ?: 'D:/Games/couchsubs-ar/build/android-deps').toString())
+                    def jsonc = new File(depsDir, 'json-c-json-c-0.17-20230812')
+                    def miniupnpc = new File(depsDir, 'miniupnp-miniupnpc_2_2_8')
+                    if (jsonc.isDirectory()) arguments "-DFETCHCONTENT_SOURCE_DIR_JSON-C=${jsonc.path.replace('\\', '/')}"
+                    if (miniupnpc.isDirectory()) arguments "-DFETCHCONTENT_SOURCE_DIR_MINIUPNPC=${miniupnpc.path.replace('\\', '/')}"
+                    def openssl = new File(depsDir, 'openssl-1.1.1w-android-arm64')
+                    if (abis.toList() == ['arm64-v8a'] &&
+                            ['include/openssl/ssl.h', 'lib/libcrypto.a', 'lib/libssl.a'].every { new File(openssl, it).isFile() }) {
+                        // The NDK toolchain confines find_package to its sysroot, so OPENSSL_ROOT_DIR alone is ignored:
+                        // hand FindOpenSSL the exact headers and archives.
+                        def ossl = openssl.path.replace('\\', '/')
+                        arguments '-DCHIAKI_LIB_OPENSSL_EXTERNAL_PROJECT=OFF', '-DOPENSSL_USE_STATIC_LIBS=TRUE',
+                            "-DOPENSSL_INCLUDE_DIR=${ossl}/include", "-DOPENSSL_CRYPTO_LIBRARY=${ossl}/lib/libcrypto.a",
+                            "-DOPENSSL_SSL_LIBRARY=${ossl}/lib/libssl.a"
+                    }
                 }
             }
         }
@@ -140,8 +157,24 @@ android {
 // Oyun paketleri ve yapay zekâ model listesi Mac ve Windows'la aynı dosyalardır.
 tasks.register('copyCouchSubsAssets', Copy) {
     into layout.buildDirectory.dir('generated/couchsubs-assets')
-    from("$repoRoot/core/Sources/CouchSubsCore/Resources") { include 'ai-models.json', 'glossary-en-tr.json', 'obs-overlay.html', 'second-screen.html' }
+    from("$repoRoot/core/Sources/CouchSubsCore/Resources") { include 'ai-models.json', 'glossary-en-tr.json', 'obs-overlay.html' }
 }
+def targamgiDataDir = file(findProperty('targamgi.dataDir') ?: 'D:/Games/couchsubs-ar/build/android-data')
+if (!new File(targamgiDataDir, 'gta-6-ar.json.gz').isFile()) {
+    logger.warn('Targamgi: Arabic data/pack missing; building without the Arabic pack: ' + targamgiDataDir)
+}
+android.sourceSets.main.assets.srcDirs += layout.buildDirectory.dir('generated/targamgi-assets')
+tasks.register('copyTargamgiAssets', Sync) {
+    into layout.buildDirectory.dir('generated/targamgi-assets')
+    from(targamgiDataDir) { include 'gta-6-ar.json.gz'; into 'packs-ar' }
+    from(targamgiDataDir) { include 'glossary-ar.txt', 'corrections-ar.txt'; into 'arabic' }
+}
+tasks.withType(Test).configureEach {
+    systemProperty 'targamgi.dataDir', targamgiDataDir.absolutePath
+    systemProperty 'targamgi.repoRoot', repoRoot.absolutePath
+}
+preBuild.dependsOn 'copyTargamgiAssets'
+
 tasks.register('copyCouchSubsPacks', Copy) {
     into layout.buildDirectory.dir('generated/couchsubs-packs')
     from("$repoRoot/core/Sources/CouchSubsCore/Resources") { include 'packs/*.json.gz' }
@@ -180,6 +213,7 @@ tasks.register('tvReleasePackages') {
     // LG paketi (.ipk) de masaüstünün kurduğuyla aynıdır (ares-package çıktısı); adı sürümü taşır.
     def wanted = [[pattern: ~/CouchSubs-androidtv\.apk/, file: 'couchsubs-androidtv.apk'],
                   [pattern: ~/com\.couchsubs\.tv_[0-9.]+_all\.ipk/, file: 'couchsubs-lg.ipk']]
+    onlyIf { !gradle.startParameter.offline }
     doLast {
         def fetch = { String url, boolean api ->
             def connection = new URL(url).openConnection()

@@ -36,7 +36,7 @@ class MissionLine {
         for (line in removed) {
             val box = line.box ?: continue
             if (SpeakerPrefix.split(line.text) != null) continue
-            val text = TextMatch.normalize(line.text)
+            val text = if (ControllerPrompt.isPrompt(line.text)) ControllerPrompt.identity(line.text) else TextMatch.normalize(line.text)
             if (text.length < 3) continue
             val placed = box.placedIn(area)
             val track = tracks.firstOrNull { TextMatch.isSimilar(it.text, text) }
@@ -48,7 +48,7 @@ class MissionLine {
             }
         }
         tracks.removeAll { time - it.lastSeen > FORGET_MS }
-        val settled = tracks.filter { time - it.since >= SETTLE_MS }
+        val settled = tracks.filter { time - it.since >= SETTLE_MS || ControllerPrompt.isPrompt(it.text) }
         var next: CropRegion? = null
         if (settled.isNotEmpty()) {
             val union = settled.drop(1).fold(settled[0].box) { total, track -> total.union(track.box) }

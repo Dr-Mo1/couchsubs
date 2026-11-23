@@ -33,14 +33,29 @@ object SpeakerColors {
     /** Çeviri oturumunun renk defteri (çeviri başlayınca sıfırlanır; bkz. [SpeakerColorBook]). */
     val session = SpeakerColorBook()
 
+    private val aliases = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** Source English identity assigns the color; Arabic labels are display aliases only. */
+    fun presented(display: String, source: String, target: String, book: SpeakerColorBook = session): List<Speaker> {
+        val result = speakers(source, book).mapNotNull { speaker ->
+            val name = if (target == "ar") ArabicSpeakerNames.display(speaker.name) else speaker.name
+            if (display.lines().none { it.trimStart().startsWith("$name:") || it.trimStart().startsWith("$name：") }) null
+            else Speaker(name, speaker.color).also { if (book === session) aliases[name] = speaker.color }
+        }
+        return result.distinctBy { it.name }
+    }
+
+    internal fun resetAliases() = aliases.clear()
+
     /**
      * Metindeki konuşanlar (her satırın baştaki adı; [SpeakerPrefix.split]), ilk görülüş sırasıyla, tekrarsız; renkler
      * [book]'tan (aynı kişinin yakın okumaları aynı renk, yeni kişi kullanılmayan aileden renk alır).
      */
     fun speakers(text: String, book: SpeakerColorBook = session): List<Speaker> =
-        text.split('\n').mapNotNull { SpeakerPrefix.split(it)?.name }
+        text.split('\n').mapNotNull { line -> SpeakerPrefix.split(line)?.name ?: aliases.keys.firstOrNull {
+            line.trimStart().startsWith("$it:") || line.trimStart().startsWith("$it：") } }
             .filter { it.lowercase(Locale.forLanguageTag("tr")) !in turkishHeadings }
-            .distinct().mapNotNull { name -> book.color(name)?.let { Speaker(name, it) } }
+            .distinct().mapNotNull { name -> ((if (book === session) aliases[name] else null) ?: book.color(name))?.let { Speaker(name, it) } }
 
     /** Çeviride ad gibi görünen Türkçe başlıklar ("Hedef: Arabaya bin."); konuşan sayılmaz, renklenmez. */
     private val turkishHeadings = setOf(
@@ -62,7 +77,7 @@ object SpeakerColors {
         var lineStart = 0
         while (lineStart <= display.length) {
             val line = display.substring(lineStart).substringBefore('\n')
-            val trimmed = line.trimStart()
+            val trimmed = line.replace("\u2068", "").replace("\u2069", "").trimStart()
             val match = names.firstOrNull { speaker ->
                 trimmed.startsWith(speaker.name) && trimmed.drop(speaker.name.length).trimStart(' ').let { it.startsWith(":") || it.startsWith("：") }
             }
@@ -145,5 +160,5 @@ class SpeakerColorBook {
 
     /** Yeni çeviri oturumu: renkler unutulur. */
     @Synchronized
-    fun reset() = people.clear()
+    fun reset() { people.clear(); if (this === SpeakerColors.session) SpeakerColors.resetAliases() }
 }

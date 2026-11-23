@@ -1,0 +1,30 @@
+diff --git a/cmake/JsoncExternalProject.cmake b/cmake/JsoncExternalProject.cmake
+index 6d9ca75..40d46b3 100644
+--- a/cmake/JsoncExternalProject.cmake
++++ b/cmake/JsoncExternalProject.cmake
+@@ -17,5 +17,9 @@ FetchContent_MakeAvailable(json-c)
+ set(JSONC_PREFIX_INCLUDE_DIR "${CMAKE_BINARY_DIR}/_deps/json-c-prefix-include")
+ file(MAKE_DIRECTORY "${JSONC_PREFIX_INCLUDE_DIR}")
+ if(NOT EXISTS "${JSONC_PREFIX_INCLUDE_DIR}/json-c")
+-	file(CREATE_LINK "${json-c_SOURCE_DIR}" "${JSONC_PREFIX_INCLUDE_DIR}/json-c" SYMBOLIC)
++	file(CREATE_LINK "${json-c_SOURCE_DIR}" "${JSONC_PREFIX_INCLUDE_DIR}/json-c" RESULT jsonc_link SYMBOLIC)
++	if(NOT jsonc_link EQUAL 0)
++		# Windows without Developer Mode may not create symlinks: copy the headers instead.
++		file(COPY "${json-c_SOURCE_DIR}/" DESTINATION "${JSONC_PREFIX_INCLUDE_DIR}/json-c" FILES_MATCHING PATTERN "*.h")
++	endif()
+ endif()
+diff --git a/cmake/MiniupnpcExternalProject.cmake b/cmake/MiniupnpcExternalProject.cmake
+index 20d94de..6446596 100644
+--- a/cmake/MiniupnpcExternalProject.cmake
++++ b/cmake/MiniupnpcExternalProject.cmake
+@@ -18,5 +18,9 @@ FetchContent_MakeAvailable(miniupnpc)
+ set(MINIUPNPC_PREFIX_INCLUDE_DIR "${CMAKE_BINARY_DIR}/_deps/miniupnpc-prefix-include")
+ file(MAKE_DIRECTORY "${MINIUPNPC_PREFIX_INCLUDE_DIR}")
+ if(NOT EXISTS "${MINIUPNPC_PREFIX_INCLUDE_DIR}/miniupnpc")
+-	file(CREATE_LINK "${miniupnpc_SOURCE_DIR}/miniupnpc/include" "${MINIUPNPC_PREFIX_INCLUDE_DIR}/miniupnpc" SYMBOLIC)
++	file(CREATE_LINK "${miniupnpc_SOURCE_DIR}/miniupnpc/include" "${MINIUPNPC_PREFIX_INCLUDE_DIR}/miniupnpc" RESULT miniupnpc_link SYMBOLIC)
++	if(NOT miniupnpc_link EQUAL 0)
++		# Windows without Developer Mode may not create symlinks: copy the headers instead.
++		file(COPY "${miniupnpc_SOURCE_DIR}/miniupnpc/include/" DESTINATION "${MINIUPNPC_PREFIX_INCLUDE_DIR}/miniupnpc")
++	endif()
+ endif()

@@ -216,7 +216,7 @@
     <string name="setup_step">Kurulum · Adım %1$d/3</string>
     <string name="url_privacy" translatable="false">https://couchsubs.enmeraapps.com/gizlilik</string>
     <string name="url_help" translatable="false">https://github.com/yorulmazsinan/couchsubs/issues</string>
-    <string name="url_source" translatable="false">https://github.com/yorulmazsinan/couchsubs</string>
+    <string name="url_source" translatable="false">https://github.com/Dr-Mo1/couchsubs</string>
     <string name="url_tvs" translatable="false">https://github.com/yorulmazsinan/couchsubs#hangi-tvlerde-çalışır</string>
     <string name="engine_free_short">Ücretsiz</string>
     <string name="engine_other">Diğer</string>
@@ -417,8 +417,8 @@
     <string name="settings_passcode_field">4 hane</string>
     <string name="settings_passcode_note">Yalnız ikinci hesabın PS5\'te giriş şifresi varsa gerekir. PS5 isteyince CouchSubs girer; şifre telefonda şifreli saklanır.</string>
     <string name="settings_about">Hakkında</string>
-    <string name="settings_copyright">CouchSubs · © 2026 Sinan Yorulmaz · AGPL-3.0 · Enmera</string>
-    <string name="about_body">CouchSubs ücretsiz ve açık kaynaklıdır (AGPL-3.0). Remote Play için chiaki-ng (AGPL-3.0) kullanılır.</string>
+    <string name="settings_copyright">CouchSubs · © 2026 Sinan Yorulmaz · AGPL-3.0 · Enmera\nModified for Targamgi (ترجمجي), 2026-11-22; source: github.com/Dr-Mo1/couchsubs</string>
+    <string name="about_body">CouchSubs ücretsiz ve açık kaynaklıdır (AGPL-3.0). Remote Play için chiaki-ng (AGPL-3.0) kullanılır.\nModified for Targamgi (ترجمجي), 2026-11-22; source: github.com/Dr-Mo1/couchsubs</string>
     <string name="about_source">Kaynak kodu</string>
     <string name="main_packs_off">Kapalı</string>
     <string name="packs_free">Ücretsiz</string>
@@ -736,4 +736,8 @@
     <string name="local_ai_ollama_down">Ollama çalışmıyor: %1$s adresine ulaşılamadı ya da model zamanında yanıt vermedi. Ollama\'yı açıp modeli indir: ollama pull %2$s</string>
     <string name="local_ai_lmstudio_down">LM Studio çalışmıyor: %1$s adresine ulaşılamadı ya da model zamanında yanıt vermedi. LM Studio\'yu aç, modeli yükleyip yerel sunucuyu başlat.</string>
     <string name="local_ai_other_down">%1$s adresindeki yerel model sunucusuna ulaşılamadı ya da model zamanında yanıt vermedi. Adresi ve sunucunun açık olduğunu denetle.</string>
+    <string name="app_name">Targamgi</string>
+    <string name="translation_language">Translation language</string>
+    <string name="translation_language_code">Language code (ar, tr, en, fr, de, es…)</string>
+    <string name="translation_language_apply">Apply and stop translation</string>
 </resources>

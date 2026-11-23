@@ -149,23 +149,23 @@ object KeyCheck {
     }
 
     /** Yapay zekâ hizmeti: örnek satır seçilen modelle çevrilir. Bloklar. */
-    fun ai(provider: AiProvider, key: String, model: AiModel, http: Http = Http.Default, server: LocalAiServer? = null): OnlineKeyState =
-        aiSample(provider, key, model, http, server).first
+    fun ai(provider: AiProvider, key: String, model: AiModel, http: Http = Http.Default, server: LocalAiServer? = null, target: String = "tr"): OnlineKeyState =
+        aiSample(provider, key, model, http, server, target).first
 
     /**
      * Örnek satırın çevirisi ve durum ("Bağlantıyı dene" çeviriyi de gösterir). Yerel modelde anahtar isteğe bağlıdır;
      * sunucu adresi [server]'dan gelir.
      */
-    fun aiSample(provider: AiProvider, key: String, model: AiModel, http: Http = Http.Default, server: LocalAiServer? = null): Pair<OnlineKeyState, String?> {
+    fun aiSample(provider: AiProvider, key: String, model: AiModel, http: Http = Http.Default, server: LocalAiServer? = null, target: String = "tr"): Pair<OnlineKeyState, String?> {
         if (provider != AiProvider.LOCAL && key.isBlank()) return OnlineKeyState.INVALID to null
         if (provider == AiProvider.LOCAL && server == null) return OnlineKeyState.UNREACHABLE to null
         return try {
-            var request = AiRequest.build(provider, key, model, listOf(SAMPLE), emptyList(), server = server)
+            var request = AiRequest.build(provider, key, model, listOf(SAMPLE), emptyList(), server = server, target = target)
             val timeout = if (provider == AiProvider.LOCAL) LocalAiServer.TIMEOUT_MS else 15000
             var (status, body) = http.send("POST", request.url, request.headers, request.body, timeout)
             // Düşünmeyi kapatan alanları tanımayan eski Ollama 400 verir; alanlarsız yeniden denenir.
             if (status == 400 && server?.disablesThinking == true) {
-                request = AiRequest.build(provider, key, model, listOf(SAMPLE), emptyList(), server = server, thinkingOff = false)
+                request = AiRequest.build(provider, key, model, listOf(SAMPLE), emptyList(), server = server, thinkingOff = false, target = target)
                 val retry = http.send("POST", request.url, request.headers, request.body, timeout)
                 status = retry.first
                 body = retry.second
@@ -449,7 +449,9 @@ class DeepLTranslator(
     cache: TranslationCache = TranslationCache(),
     private val glossary: Glossary = Glossary.Empty,
     private val playedGame: (() -> String?)? = null,
+    private val target: String = "tr",
 ) : SentenceTranslator<String>(fallback, cache) {
+    override val translationLanguage: String get() = target
     private val key = key.trim()
     private val recent = ArrayDeque<String>()
     private var recentGame: String? = null
@@ -471,7 +473,7 @@ class DeepLTranslator(
 
     override fun game(): String? = playedGame?.invoke()?.trim()
 
-    override fun cacheKey(text: String, game: String?) = DeepLMarkup.cacheKey(text, glossary)
+    override fun cacheKey(text: String, game: String?) = if (target == "tr") DeepLMarkup.cacheKey(text, glossary) else "$target\u001f${TranslationLanguage.PROMPT_VERSION}\u001f${com.couchsubs.mobile.core.TranslationDialogue.currentSpeaker.orEmpty()}\u001f$text"
     override val extraNames: Set<String> get() = glossary.capitalWords
 
     companion object {
@@ -490,13 +492,13 @@ class DeepLTranslator(
         /** Ücretsiz anahtarlar ":fx" ile biter ve ayrı adrese gider. */
         fun baseUrl(key: String) = if (key.trim().endsWith(":fx")) "https://api-free.deepl.com/v2/" else "https://api.deepl.com/v2/"
 
-        fun body(sentences: List<String>, context: String?, tagged: Boolean = false): String = JSONObject()
+        fun body(sentences: List<String>, context: String?, tagged: Boolean = false, target: String = "tr"): String = JSONObject()
             .put("text", JSONArray(sentences))
             .put("source_lang", "EN")
-            .put("target_lang", "TR")
+            .put("target_lang", target.uppercase(Locale.ROOT))
             .apply { if (!context.isNullOrEmpty()) put("context", context) }
             // Oyun konuşması: "siz" değil "sen".
-            .put("formality", "prefer_less")
+            .apply { if (target == "tr") put("formality", "prefer_less") }
             .put("preserve_formatting", true)
             .apply {
                 // Etiketli terimler çevrilmez.
@@ -519,20 +521,20 @@ class DeepLTranslator(
         val context = recent.joinToString("\n")
         if (recent.lastOrNull() != text) {
             recent.addLast(text)
-            if (recent.size > 3) recent.removeFirst()
+            if (recent.size > TranslationLanguage.contextLines(target)) recent.removeFirst()
         }
         context
     }
 
     override fun request(sentences: List<String>, context: String, game: String?, names: List<String>): List<String> {
         // Sözlükteki adlar etiketle korunur; etiket varsa istek XML olarak gider, diğer cümleler de kaçırılır.
-        val wrapped = sentences.map { DeepLMarkup.wrap(it, glossary) }
+        val wrapped = sentences.map { if (target == "tr") DeepLMarkup.wrap(it, glossary) else null }
         val tagged = wrapped.any { it != null }
         val sources = if (tagged) sentences.indices.map { wrapped[it] ?: DeepLMarkup.escape(sentences[it]) } else sentences
         val send = {
             http.send(
                 "POST", baseUrl(key) + "translate",
-                mapOf("Authorization" to "DeepL-Auth-Key $key", "Content-Type" to "application/json"), body(sources, context, tagged), 4000,
+                mapOf("Authorization" to "DeepL-Auth-Key $key", "Content-Type" to "application/json"), body(sources, context, tagged, target), 4000,
             )
         }
         val (status, response) = try {
@@ -643,8 +645,15 @@ object AiRequest {
     }
 
     /** Sistem talimatı: kullanıcının ek talimatı varsa sona eklenir (#306); boşsa [SYSTEM_PROMPT] olduğu gibi gider. */
-    fun systemPrompt(instruction: String?): String =
-        AiRequest.instruction(instruction)?.let { "$SYSTEM_PROMPT\n\n$it" } ?: SYSTEM_PROMPT
+    fun systemPrompt(instruction: String?, target: String = "tr"): String {
+        val base = when (target) {
+            "ar" -> ArabicPrompt.TEXT
+            "tr" -> SYSTEM_PROMPT
+            else -> "Translate English video game subtitles into ${TranslationLanguage.name(target)}. " +
+                "Preserve meaning, tone, names and line breaks. Reply only with translations."
+        }
+        return AiRequest.instruction(instruction)?.let { "$base\n\n$it" } ?: base
+    }
 
     /**
      * Ek talimatın önbellek etiketi: talimat değişince eski çeviriler dönmesin diye anahtarın başına girer. Talimat yoksa
@@ -656,28 +665,68 @@ object AiRequest {
     }
 
     /** Bağlam satırı: daha önce gösterilmiş İngilizce ve (biliniyorsa) Türkçesi. */
-    data class ContextLine(val source: String, val translation: String? = null)
+    data class ContextLine(val source: String, val translation: String? = null, val speaker: String? = null)
 
     /**
      * Kullanıcı iletisi: önceki satırlar (yalnız bağlam) ve çevrilecek cümleler. [names]: konuşan etiketlerinden öğrenilip
      * cümlelerde geçen adlar; model "Price"ı "Fiyat" diye çevirmesin diye adıyla söylenir (#287).
      */
-    fun userMessage(sentences: List<String>, context: List<ContextLine>, game: String? = null, names: List<String> = emptyList()): String {
+    fun userMessage(sentences: List<String>, context: List<ContextLine>, game: String? = null, names: List<String> = emptyList(),
+        target: String = "tr", slang: List<Pair<String, String>> = emptyList(), speaker: String? = null): String {
+        val language = TranslationLanguage.name(target)
         val parts = mutableListOf<String>()
         if (!game.isNullOrEmpty()) parts.add("Game: $game")
-        if (names.isNotEmpty()) parts.add("Character names (keep them exactly as written, do not translate them): ${names.joinToString(", ")}")
+        // TODO(C17): add the inferred/overridden Player character signal here for Arabic requests.
+        if (target == "ar") dialogueHints(parts, sentences, context, speaker)
+        if (names.isNotEmpty()) parts.add(if (target == "ar")
+            "Character names (write them in Arabic letters by how they sound, do not translate their meaning): ${names.joinToString(", ")}"
+            else "Character names (keep them exactly as written, do not translate them): ${names.joinToString(", ")}")
+        if (slang.isNotEmpty()) parts.add("Slang and idioms in these lines; say them with these expressions (the meaning, not the words): " +
+            slang.joinToString("; ") { "\"${it.first}\" = \"${it.second}\"" })
         if (context.isNotEmpty()) {
             val lines = mutableListOf("Previous subtitles, for context only (do not translate them again):")
             for (line in context) {
+                if (target == "ar" && line.speaker != null) lines.add("Speaker: ${line.speaker}")
                 lines.add("English: ${line.source}")
-                line.translation?.let { lines.add("Turkish: $it") }
+                line.translation?.let { lines.add("$language: $it") }
             }
             parts.add(lines.joinToString("\n"))
         }
         val list = JSONArray(sentences).toString()
-        parts.add("Translate each string in this JSON array into Turkish. Reply with only a JSON array of ${sentences.size} " +
-            "Turkish strings in the same order.\n$list")
+        parts.add("Translate each string in this JSON array into $language. Reply with only a JSON array of ${sentences.size} " +
+            "$language strings in the same order.\n$list")
         return parts.joinToString("\n\n")
+    }
+
+    private val genders = mapOf("Jason" to "man", "Lucia" to "woman", "Cal" to "man", "Brian" to "man",
+        "Boobie" to "man", "Raul" to "man", "Dre'Quan" to "man", "Real Dimez" to "women")
+
+    private fun dialogueHints(parts: MutableList<String>, sentences: List<String>, context: List<ContextLine>, speaker: String?) {
+        if (!speaker.isNullOrBlank()) {
+            parts.add("Speaker: $speaker")
+            genders.entries.firstOrNull { it.key.equals(speaker.replace('’', '\''), true) }?.value?.let {
+                parts.add(if (it == "women") "Speakers are women." else "Speaker is a $it.")
+            }
+        }
+        val text = sentences.joinToString(" ").trim()
+        for ((name, gender) in genders) {
+            if (name.equals(speaker, true)) continue
+            val escaped = Regex.escape(name)
+            if (Regex("^(?:Hey,?\\s+)?$escaped\\s*,|,\\s*$escaped\\s*[.!?]*$", RegexOption.IGNORE_CASE)
+                    .containsMatchIn(text.replace('’', '\'')))
+                parts.add(if (gender == "women") "Listeners ($name) are women." else "Listener ($name) is a $gender.")
+        }
+        parts.add("Understand each whole sentence before translating; when it spans strings, preserve its overall meaning and keep the requested array count and order.")
+        val previous = context.lastOrNull() ?: return
+        val arabic = previous.translation?.takeIf { it.isNotBlank() } ?: return
+        if (speaker != null && previous.speaker != null && !speaker.equals(previous.speaker, true)) return
+        val ending = previous.source.trimEnd().trimEnd('"', '\'', '”', '’', ')', ']').trimEnd()
+        val first = text.trimStart('"', '\'', '“', '‘', '(', '[')
+        val word = first.takeWhile { it.isLetter() }
+        if (ending.isEmpty() || first.isEmpty()) return
+        if (ending.last() !in ".!?…" || first.first().isLowerCase() || word.lowercase(Locale.ROOT) in listOf("and", "but", "so", "or"))
+            parts.add("This subtitle continues the previous one: \"${previous.source}\" (shown as \"$arabic\"); " +
+                "translate it so the two read as one natural Arabic sentence. Translate only the current subtitle, without repeating the previous one.")
     }
 
     fun build(
@@ -688,10 +737,11 @@ object AiRequest {
         // Yerel model sunucusu (yalnız LOCAL); [thinkingOff]: Ollama'da düşünmeyi kapatan alanlar gitsin mi.
         server: LocalAiServer? = null,
         thinkingOff: Boolean = true,
+        target: String = "tr", slang: List<Pair<String, String>> = emptyList(), speaker: String? = null,
     ): AiHttpRequest {
         val trimmed = key.trim()
-        val user = userMessage(sentences, context, game, names)
-        val system = systemPrompt(instruction)
+        val user = userMessage(sentences, context, game, names, target, slang, speaker)
+        val system = systemPrompt(instruction, target)
         return when (provider) {
             AiProvider.GEMINI -> {
                 val config = JSONObject().put("maxOutputTokens", maxOutputTokens)
@@ -919,6 +969,8 @@ class AiTranslator(
     private val instruction: (() -> String?)? = null,
     // Yerel model sunucusu (yalnız LOCAL).
     private val server: LocalAiServer? = null,
+    private val target: String = "tr",
+    private val slang: List<Pair<String, String>> = emptyList(),
 ) : SentenceTranslator<List<AiRequest.ContextLine>>(fallback, cache, clock, budget ?: RequestBudget.shared(provider, model)) {
     companion object {
         /** Kalıcı önbellek dosyasındaki motor adı (iPhone ile aynı: "gemini:<model>"). */
@@ -953,7 +1005,8 @@ class AiTranslator(
             countRequest()
             try {
                 val request = AiRequest.build(provider, key, model, sentences, emptyList(), AiRequest.SCREEN_OUTPUT_TOKENS, game,
-                    instruction = scope.instruction, server = server, thinkingOff = thinkingOff)
+                    instruction = scope.instruction, server = server, thinkingOff = thinkingOff, target = target,
+                    slang = if (target == "ar") ArabicGlossary.inLines(slang, sentences) else emptyList())
                 val (status, body) = http.send("POST", request.url, request.headers, request.body, SCREEN_TIMEOUT_MS)
                 if (status !in 200..299) throw AiRequest.error(status, body)
                 val translated = AiRequest.translations(AiRequest.text(provider, body), sentences.size)
@@ -973,6 +1026,7 @@ class AiTranslator(
         return texts.indices.map { results[it] ?: localTranslation(texts[it]) }
     }
 
+    override val translationLanguage: String get() = target
     private val key = key.trim()
 
     /** Geçerli ek talimat ve önbellek etiketi; etiket yalnız talimat değişince yeniden hesaplanır. */
@@ -993,10 +1047,11 @@ class AiTranslator(
             recent.clear()
             recentGame = game
         }
-        val context = recent.toList()
-        if (recent.lastOrNull()?.source != text) {
-            recent.addLast(AiRequest.ContextLine(text))
-            if (recent.size > 3) recent.removeFirst()
+        val speaker = if (target == "ar") com.couchsubs.mobile.core.TranslationDialogue.currentSpeaker else null
+        val context = if (target == "ar") recent.filter { it.source != text || it.speaker != speaker } else recent.toList()
+        if (recent.lastOrNull()?.source != text || (target == "ar" && recent.lastOrNull()?.speaker != speaker)) {
+            recent.addLast(AiRequest.ContextLine(text, speaker = speaker))
+            if (recent.size > TranslationLanguage.contextLines(target)) recent.removeFirst()
         }
         context
     }
@@ -1005,7 +1060,7 @@ class AiTranslator(
     override fun remember(text: String, translation: String, game: String?) {
         synchronized(recent) {
             if (recentGame != game) return
-            val index = recent.indexOfLast { it.source == text }
+            val index = recent.indexOfLast { it.source == text && (target != "ar" || it.speaker == com.couchsubs.mobile.core.TranslationDialogue.currentSpeaker) }
             if (index >= 0) recent[index] = recent[index].copy(translation = translation)
         }
     }
@@ -1017,7 +1072,8 @@ class AiTranslator(
      * Ek talimat varsa anahtar onun etiketiyle başlar: talimat değişince eski çeviriler dönmez.
      */
     override fun cacheKey(text: String, game: String?): String {
-        val key = if (game.isNullOrEmpty()) text else "$game\u001f$text"
+        val base = if (game.isNullOrEmpty()) text else "$game\u001f$text"
+        val key = if (target == "tr") base else "$target\u001f${TranslationLanguage.PROMPT_VERSION}\u001f${TranslationLanguage.fingerprint(ArabicPrompt.TEXT)}\u001f${TranslationLanguage.fingerprint(slang.toString())}\u001f${com.couchsubs.mobile.core.TranslationDialogue.currentSpeaker.orEmpty()}\u001f$base"
         return scope.tag?.let { "i:$it\u001f$key" } ?: key
     }
 
@@ -1027,7 +1083,9 @@ class AiTranslator(
     override fun request(sentences: List<String>, context: List<AiRequest.ContextLine>, game: String?, names: List<String>): List<String> {
         val timeout = if (provider == AiProvider.LOCAL) LocalAiServer.TIMEOUT_MS else 5000
         fun send() = AiRequest.build(provider, key, model, sentences, context, game = game, names = names, instruction = scope.instruction,
-            server = server, thinkingOff = thinkingOff).let { http.send("POST", it.url, it.headers, it.body, timeout) }
+            server = server, thinkingOff = thinkingOff, target = target,
+            slang = if (target == "ar") ArabicGlossary.inLines(slang, sentences) else emptyList(),
+            speaker = com.couchsubs.mobile.core.TranslationDialogue.currentSpeaker).let { http.send("POST", it.url, it.headers, it.body, timeout) }
         var (status, body) = send()
         if (status == 400 && thinkingOff && server?.disablesThinking == true) {
             thinkingOff = false

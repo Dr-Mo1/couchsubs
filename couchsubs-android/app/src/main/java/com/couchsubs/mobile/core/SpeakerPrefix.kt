@@ -29,11 +29,36 @@ object SpeakerPrefix {
         return Split(name, body)
     }
 
+    private fun presentArabic(translation: String, source: String, show: Boolean): String {
+        val names = source.lines().mapNotNull { split(it)?.name }.distinct()
+        var text = translation
+        val prefix = split(source)
+        if (prefix != null) {
+            val arabic = ArabicSpeakerNames.display(prefix.name)
+            val labeled = listOf(prefix.name, arabic).any {
+                Regex("^${Regex.escape(it)}\\s*[:：]", RegexOption.IGNORE_CASE).containsMatchIn(text.trimStart()) }
+            if (!labeled) text = "${prefix.name}: $text"
+        }
+        return text.lines().joinToString("\n") { line ->
+            var result = line
+            for (name in names) {
+                val arabic = ArabicSpeakerNames.display(name)
+                val label = Regex("^\\s*(?:${Regex.escape(name)}|${Regex.escape(arabic)})\\s*[:：]\\s*", RegexOption.IGNORE_CASE)
+                if (label.containsMatchIn(result)) {
+                    result = label.replaceFirst(result, if (show) "$arabic: " else "")
+                    break
+                }
+            }
+            result
+        }
+    }
+
     /**
      * Gösterilecek metin: çeviri [source]'un baştaki adıyla başlar ("ARTHUR: Gitmeliyiz."); [show] kapalıysa İngilizcede
      * konuşan adı olan satır başları atılır, yalnız Türkçe cümle kalır ("Hedef: …" gibi Türkçe başlık kalır).
      */
-    fun present(translation: String, source: String, show: Boolean): String {
+    fun present(translation: String, source: String, show: Boolean, target: String = "tr"): String {
+        if (target == "ar") return presentArabic(translation, source, show)
         var text = translation
         val prefix = split(source)
         if (prefix != null && split(text)?.name != prefix.name) text = "${prefix.name}: $text"

@@ -608,6 +608,8 @@ class RegionWatcher(
 
     private val lock = Any()
     private val states = mutableMapOf<String, State>()
+    private val instructions = InstructionDisplay(clock) { sender.sendRegion(MissionLine.AREA_ID, "", null, null) }
+    fun dialogueArrived() = instructions.dialogueArrived()
     private var lastPass: Long? = null
     private var busy = false
     @Volatile private var session = 0
@@ -745,6 +747,7 @@ class RegionWatcher(
             for (id in states.keys.toList()) if (id !in ids) {
                 if (states[id]!!.shown.isNotEmpty()) sender.sendRegion(id, "", null, null)
                 states.remove(id)
+                if (id == MissionLine.AREA_ID) instructions.removed()
             }
         }
         for ((area, crop) in crops) {
@@ -808,10 +811,11 @@ class RegionWatcher(
         val geometry = (area.auto || GameAreaPresets.isPreset(area.id)) && !area.menu && area.id != MissionLine.AREA_ID &&
             !ScreenNotices.isNotice(area.id)
         val own = subtitleEcho?.filter(reading, area.region.box, geometry) ?: reading
-        val text = if (area.auto) AutoText.clean(own, area.menu) else own
+        val instruction = area.id == MissionLine.AREA_ID && ControllerPrompt.isPrompt(own.text)
+        val text = if (area.auto && !instruction) AutoText.clean(own, area.menu) else own
         val preset = GameAreaPresets.isPreset(area.id)
-        var candidate = candidate(text, area.region, crop.frame, keepPrompts = area.menu, auto = area.auto, styled = preset)
-        if (area.auto) {
+        var candidate = candidate(text, area.region, crop.frame, keepPrompts = area.menu || instruction, auto = area.auto, styled = preset)
+        if (area.auto && !instruction) {
             // Menü dışındaki otomatik alanın türü okunan yazıdan çıkar (yardım/eylem ya da diğer); kapalı tür gürültü gibi
             // çizilmez, bulucuya bildirilir.
             val unwanted = kind(area, candidate)?.let { !allows(it) } ?: false
@@ -880,6 +884,9 @@ class RegionWatcher(
     private fun commit(candidate: Candidate, area: ExtraArea, state: State, started: Int) {
         // reset() ve TV'ye gönderim sıralı kalmalı: eski tur yeni oyunun üstüne yazmasın.
         fun send(action: () -> Unit): Unit = synchronized(lock) { if (started == session) action() }
+        val instruction = area.id == MissionLine.AREA_ID && ControllerPrompt.isPrompt(candidate.text)
+        if (instruction && instructions.contains(candidate.text)) return
+        val dialogueVersion = instructions.version()
         if (state.shown == candidate.key) {
             val text = state.renderedText
             if (state.renderedKey != candidate.key || text.isNullOrEmpty()) return
@@ -973,7 +980,10 @@ class RegionWatcher(
             val rendered = IconText.render(text.joinToString("\n"), slots)
             val icons = rendered.icons.takeIf { it.isNotEmpty() }
             val blocks = candidate.blocks?.let { renderBlocks(candidate, it, text, similar, slots) }
-            send { sender.sendRegion(area.id, rendered.text, candidate.box, candidate.lineHeight, icons, blocks?.map { it.second }) }
+            send {
+                val show = { sender.sendRegion(area.id, rendered.text, candidate.box, candidate.lineHeight, icons, blocks?.map { it.second }) }
+                if (instruction) instructions.publish(candidate.text, dialogueVersion, show) else show()
+            }
             state.renderedText = rendered.text
             state.renderedIcons = icons
             state.renderedBox = candidate.box
@@ -1062,7 +1072,7 @@ class RegionWatcher(
                 plain.isEmpty() || untouched.matches(plain) -> piece.text
                 // Yalnız özel adlardan oluşan sekme ("JASON & LUCIA") çevrilmez (#859).
                 ScreenTranslation.keepsNames(plain) -> piece.text
-                else -> UiCommands.translate(marked)?.let { ui ->
+                else -> (if (skipsTurkish) UiCommands.translate(marked) else null)?.let { ui ->
                     // Sözlük çevirisindeki simge imleri yeniden adlara döner (çevirinin simge yerleri korunur).
                     var k = 0
                     buildString { for (c in ui) if (c == ButtonIcons.MARKER && k < piece.names.size) append(piece.names[k++]) else append(c) }
@@ -1090,6 +1100,7 @@ class RegionWatcher(
 
     /** Çeviri durdu: süren tur bırakılır, TV'deki ek alan kutuları kalkar. */
     fun reset(): Unit = synchronized(lock) {
+        instructions.reset()
         phoneSession?.close()
         phoneSession = null
         session++

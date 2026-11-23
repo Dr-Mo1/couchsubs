@@ -21,6 +21,7 @@ object Backend {
     private var analytics: FirebaseAnalytics? = null
 
     fun init(context: Context) {
+        if (!com.couchsubs.mobile.core.TargamgiPrivacy.TELEMETRY) return
         available = try {
             FirebaseApp.getApps(context).isNotEmpty() || FirebaseApp.initializeApp(context) != null
         } catch (error: Exception) {

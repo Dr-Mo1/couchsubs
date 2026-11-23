@@ -157,6 +157,10 @@ class AppSettings(context: Context) : AreaStore {
         get() = enumOr(prefs.getString("target", null), SubtitleTarget.TV)
         set(value) = prefs.edit().putString("target", value.name).apply()
 
+    var translationLanguage: String
+        get() = prefs.getString("translationLanguage", null) ?: com.couchsubs.mobile.translation.TranslationLanguage.DEFAULT
+        set(value) = prefs.edit().putString("translationLanguage", com.couchsubs.mobile.translation.TranslationLanguage.code(value)).apply()
+
     var engine: EngineChoice
         get() = enumOr(prefs.getString("engine", null), EngineChoice.FREE)
         set(value) = prefs.edit().putString("engine", value.name).apply()
@@ -210,8 +214,8 @@ class AppSettings(context: Context) : AreaStore {
 
     /** Ortak havuz: varsayılan açık (masaüstüyle aynı), ayarlardan kapatılır. */
     var sharePool: Boolean
-        get() = prefs.getBoolean("sharePool", true)
-        set(value) = prefs.edit().putBoolean("sharePool", value).apply()
+        get() = false
+        set(value) = prefs.edit().putBoolean("sharePool", false).apply()
 
     /** Oynanan oyun paketle tanınmazsa çeviri başladıktan iki dakika sonra bir kez sorulur (bkz. GameSense). */
     var askGame: Boolean
@@ -329,7 +333,7 @@ class AppSettings(context: Context) : AreaStore {
 
     /** "Çeviriyi Türkçe seslendir" (Türkçe dublaj; Mac/iPhone settings.dubbing.enabled); varsayılan kapalı. */
     var dubbingEnabled: Boolean
-        get() = prefs.getBoolean("dubbing.enabled", false)
+        get() = translationLanguage == "tr" && prefs.getBoolean("dubbing.enabled", false)
         set(value) = prefs.edit().putBoolean("dubbing.enabled", value).apply()
 
     /** "Sesi çal": TV ya da bu telefon; varsayılan TV (masaüstüyle aynı). */
@@ -639,7 +643,7 @@ class AppSettings(context: Context) : AreaStore {
 
     /** Profil › Kullanım verisi: hata ve kullanım istatistikleri (Firebase, Meta olay adları). Varsayılan açık. */
     var usageData: Boolean
-        get() = prefs.getBoolean("usageData", true)
+        get() = false
         set(value) = prefs.edit().putBoolean("usageData", value).apply()
 
     /** Tanıtım (3 sayfa) ve ana ekran turu (4 adım) bir kez gösterilir. */

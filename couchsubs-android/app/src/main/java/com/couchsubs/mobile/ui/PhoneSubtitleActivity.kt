@@ -70,10 +70,11 @@ class PhoneSubtitleActivity : ComponentActivity() {
     companion object {
         /** Bölünmüş [display] metni; [enabled] ise konuşanların parçaları kendi renginde ([source]: bölünmemiş metin). */
         fun speakerText(display: String, source: String, enabled: Boolean): AnnotatedString {
-            val segments = if (enabled) SpeakerColors.segments(display, source) else emptyList()
-            if (segments.none { it.color != null }) return AnnotatedString(display)
+            val isolated = com.couchsubs.mobile.core.ArabicBidi.isolateLatin(display)
+            val segments = if (enabled) SpeakerColors.segments(isolated, source) else emptyList()
+            if (segments.none { it.color != null }) return AnnotatedString(isolated)
             return buildAnnotatedString {
-                append(display)
+                append(isolated)
                 segments.forEach { segment ->
                     val hex = segment.color ?: return@forEach
                     addStyle(SpanStyle(color = Color(android.graphics.Color.parseColor(hex))), segment.start, segment.end)
@@ -162,13 +163,13 @@ class PhoneSubtitleActivity : ComponentActivity() {
                         if (stackPrevious && previous.isNotEmpty() && status.current.isNotEmpty() && previous != status.current) {
                             val wrapped = SubtitleWrap.fit(previous)
                             Text(speakerText(wrapped.text, previous, speakerColors),
-                                style = style.copy(fontSize = style.fontSize * scale * 0.8f * wrapped.scale, lineHeight = style.lineHeight * scale * 0.8f * wrapped.scale),
+                                style = style.copy(textDirection = androidx.compose.ui.text.style.TextDirection.Content, fontSize = style.fontSize * scale * 0.8f * wrapped.scale, lineHeight = style.lineHeight * scale * 0.8f * wrapped.scale),
                                 color = color.copy(alpha = 0.4f), textAlign = TextAlign.Center)
                         }
-                        val currentText = status.current.ifEmpty { if (status.running) "" else "CouchSubs" }
+                        val currentText = status.current.ifEmpty { if (status.running) "" else "Targamgi" }
                         val current = SubtitleWrap.fit(currentText)
                         Text(speakerText(current.text, currentText, speakerColors),
-                            style = style.copy(fontSize = style.fontSize * scale * current.scale, lineHeight = style.lineHeight * scale * current.scale),
+                            style = style.copy(textDirection = androidx.compose.ui.text.style.TextDirection.Content, fontSize = style.fontSize * scale * current.scale, lineHeight = style.lineHeight * scale * current.scale),
                             color = color, textAlign = TextAlign.Center)
                     }
                     Column(Modifier.align(Alignment.BottomCenter), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -187,7 +188,7 @@ class PhoneSubtitleActivity : ComponentActivity() {
                             val box = item.box
                             val width = maxOf(60.dp, maxWidth * (box.right - box.left).toFloat())
                             val size = (maxHeight.value * item.lineHeight * 0.8).coerceIn(10.0, 28.0).toFloat()
-                            Text(item.translation, style = Tokens.Type.caption.copy(fontSize = size.sp, lineHeight = (size * 1.2f).sp),
+                            Text(com.couchsubs.mobile.core.ArabicBidi.isolateLatin(item.translation), style = Tokens.Type.caption.copy(fontSize = size.sp, lineHeight = (size * 1.2f).sp),
                                 color = Tokens.Color.text, textAlign = TextAlign.Start,
                                 modifier = Modifier
                                     .offset(x = maxWidth * box.left.toFloat(), y = maxHeight * ((box.top + box.bottom) / 2).toFloat() - (size * 0.8f).dp)
@@ -270,7 +271,7 @@ private fun StyledBlock(
     val longest = item.translation.split('\n').maxOfOrNull { it.length } ?: 1
     val original = item.source.split('\n').maxOfOrNull { it.length } ?: 1
     val shrink = (original.toFloat() / longest).coerceIn(0.6f, 1f)
-    Text(item.translation,
+    Text(com.couchsubs.mobile.core.ArabicBidi.isolateLatin(item.translation),
         style = Tokens.Type.caption.copy(
             fontSize = (line * shrink).sp, lineHeight = (line * shrink * 1.15f).sp,
             fontWeight = if (look?.bold == true) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal,
