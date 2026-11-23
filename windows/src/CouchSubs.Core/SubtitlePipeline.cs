@@ -158,6 +158,14 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     /// <summary>Konuşan adı ("ARTHUR: …") TV'ye giden çeviride gösterilir; kapalıysa yalnız cümle gider.</summary>
     public bool ShowSpeakerNames { get; set; } = true;
     public string TargetLanguage { get; set; } = "tr";
+    public string PlayerCharacter { get; set; } = "auto";
+    private readonly PlayerCharacterInference playerCharacter = new(clock ?? DefaultClock);
+
+    private void ObservePlayer(string source)
+    {
+        if (TargetLanguage != "ar") return;
+        foreach (var line in source.Split('\n')) playerCharacter.Observe(SpeakerPrefix.Parse(line)?.Name);
+    }
     /// <summary>
     /// Hedef dil Türkçe: yüksek güvenle Türkçe olan satır (<see cref="TurkishText.IsSure"/>) çevirmene gönderilmez (#289).
     /// Uygulama hedef dil Türkçe değilse kapatır.
@@ -831,6 +839,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     /// <summary>Paketteki Türkçe hemen gösterilir; süren çevirinin sonucu (eski satır) artık gösterilmez.</summary>
     private Action? ShowPacked(Request request, PackMatch packed)
     {
+        ObservePlayer(request.Source);
         foreach (var old in waiting) Write(old, $"atıldı: sonraki satır paketten geldi (#{request.Number})");
         waiting.Clear();
         PackHits++;
@@ -901,6 +910,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
             lineOnScreen = number;
             Write($"#{number} geri geldi: {SubtitleLog.Excerpt(source)}");
             if (translation is null) return null;
+            ObservePlayer(source);
             SendSubtitle(translation, source, 15000, box, replaces: RevisesShown(source));
             LastPair = (source, translation);
             LastBox = box;
@@ -973,6 +983,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     private async Task Translate(Request request, CancellationToken token)
     {
         var source = request.Source;
+        ObservePlayer(source);
         // Kısmi eşleşmede çevirmene yalnız paketteki karşılığı bulunmayan satır gider (adı varsa onunla).
         var partial = request.Partial;
         var speaker = partial is null ? request.Prefix : SpeakerPrefix.Parse(partial.Missing);
@@ -986,6 +997,8 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         string sentence;
         var previousSpeaker = TranslationDialogue.CurrentSpeaker;
         TranslationDialogue.CurrentSpeaker = speaker?.Name;
+        var previousPlayer = TranslationDialogue.CurrentPlayerCharacter;
+        TranslationDialogue.CurrentPlayerCharacter = TargetLanguage == "ar" ? playerCharacter.Resolve(PlayerCharacter) : null;
         try
         {
             sentence = await translator.TranslateAsync(input, token);
@@ -1013,6 +1026,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         finally
         {
             TranslationDialogue.CurrentSpeaker = previousSpeaker;
+            TranslationDialogue.CurrentPlayerCharacter = previousPlayer;
         }
 
         var translated = partial is null ? Present(sentence, request) : Combine(partial, sentence);

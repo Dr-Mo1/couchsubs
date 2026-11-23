@@ -6,6 +6,13 @@ namespace CouchSubs.Core;
 public static class TranslationDialogue
 {
     private static readonly AsyncLocal<string?> Speaker = new();
+    private static readonly AsyncLocal<string?> Player = new();
+
+    public static string? CurrentPlayerCharacter
+    {
+        get => Player.Value;
+        set => Player.Value = value;
+    }
 
     public static string? CurrentSpeaker
     {

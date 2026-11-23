@@ -294,6 +294,147 @@ public class AiTranslatorTests
         Assert.Contains("This subtitle continues the previous one: \"If we stay together,\" (shown as \"لو بقينا مع بعض\")", User(fake, 1));
     }
 
+    [Theory]
+    [InlineData("ar", "jason", "Player character: Jason (a man)")]
+    [InlineData("ar", "lucia", "Player character: Lucia (a woman)")]
+    [InlineData("ar", null, null)]
+    [InlineData("tr", "jason", null)]
+    public void PlayerCharacterMessageIsArabicOnly(string target, string? player, string? expected)
+    {
+        var user = AiRequest.UserMessage(["Get out!"], [], target: target, playerCharacter: player);
+        if (expected is null) Assert.DoesNotContain("Player character:", user);
+        else Assert.Contains(expected, user);
+    }
+
+    [Theory]
+    [InlineData("ar", 2)]
+    [InlineData("tr", 1)]
+    public async Task PlayerCharacterSeparatesCachedTranslationsOnlyForArabic(string target, int requests)
+    {
+        var fake = new FakeAi();
+        var translator = new AiTranslator(AiProvider.OpenAi, Secret, null, null, new HttpClient(fake), target: target);
+        var old = TranslationDialogue.CurrentPlayerCharacter;
+        try
+        {
+            TranslationDialogue.CurrentPlayerCharacter = "Jason";
+            await translator.TranslateAsync("Get out of here.");
+            TranslationDialogue.CurrentPlayerCharacter = "Lucia";
+            await translator.TranslateAsync("Get out of here.");
+            await translator.TranslateAsync("Get out of here.");
+            Assert.Equal(requests, fake.Requests.Count);
+            if (target == "ar")
+            {
+                Assert.Contains("Player character: Jason (a man)", User(fake, 0));
+                Assert.Contains("Player character: Lucia (a woman)", User(fake, 1));
+                TranslationDialogue.CurrentPlayerCharacter = null;
+                await translator.TranslateAsync("Get out of here.");
+                Assert.Equal(3, fake.Requests.Count);
+            }
+            else Assert.DoesNotContain("Player character:", User(fake, 0));
+        }
+        finally { TranslationDialogue.CurrentPlayerCharacter = old; }
+    }
+
+    [Fact]
+    public async Task SimilarOcrReadDoesNotReuseOtherPlayersRecentTranslation()
+    {
+        var fake = new FakeAi();
+        var translator = new AiTranslator(AiProvider.OpenAi, Secret, null, null, new HttpClient(fake), target: "ar");
+        var old = TranslationDialogue.CurrentPlayerCharacter;
+        try
+        {
+            TranslationDialogue.CurrentPlayerCharacter = "Jason";
+            await translator.TranslateAsync("Get out of here.");
+            TranslationDialogue.CurrentPlayerCharacter = "Lucia";
+            await translator.TranslateAsync("Get out of here!");
+            Assert.Equal(2, fake.Requests.Count);
+            Assert.Contains("Player character: Lucia (a woman)", User(fake, 1));
+        }
+        finally { TranslationDialogue.CurrentPlayerCharacter = old; }
+    }
+
+    [Theory]
+    [InlineData("ar", "auto", "Player character: Lucia (a woman)")]
+    [InlineData("ar", "jason", "Player character: Jason (a man)")]
+    [InlineData("tr", "lucia", null)]
+    public async Task PipelinePassesInferredOrManualPlayerToAi(string target, string selection, string? expected)
+    {
+        var fake = new FakeAi();
+        var translator = new AiTranslator(AiProvider.OpenAi, Secret, null, null, new HttpClient(fake), target: target);
+        var reader = new PlayerReader();
+        long time = 0;
+        var pipeline = new SubtitlePipeline(reader, translator, new DialogueSender(), clock: () => time)
+        { TargetLanguage = target, PlayerCharacter = selection };
+        var old = TranslationDialogue.CurrentPlayerCharacter;
+        // Inference needs PlayerCharacterInference.MinimumLabels (3) agreeing labels.
+        foreach (var line in new[] { "LUCIA: I'm ready to go.", "LUCIA: Keep the engine running.", "LUCIA: We leave at dawn." })
+        {
+            reader.Text = line;
+            for (var i = 0; i < 25; i++)
+            {
+                await pipeline.ProcessAsync(Frame.Blank(64, 64), new CropRegion());
+                await pipeline.WaitForTranslationsAsync();
+                time += 100;
+            }
+        }
+        Assert.Equal(3, fake.Requests.Count);
+        if (selection == "auto") Assert.DoesNotContain("Player character:", User(fake, 0));
+        if (expected is null) Assert.DoesNotContain("Player character:", User(fake, 2));
+        else Assert.Contains(expected, User(fake, 2));
+        Assert.Equal(old, TranslationDialogue.CurrentPlayerCharacter);
+    }
+
+    private sealed class PlayerReader : ITextReader
+    {
+        public string Text { get; set; } = "LUCIA: We should leave this place.";
+        public string Read(Frame image) => Text;
+    }
+
+    [Theory]
+    [InlineData("ar", "Player character: Lucia (a woman)")]
+    [InlineData("tr", null)]
+    public async Task PackedSpeakerInformsLaterStrangersLineWithoutChangingPackLookup(string target, string? expected)
+    {
+        var fake = new FakeAi();
+        var translator = new AiTranslator(AiProvider.OpenAi, Secret, null, null, new HttpClient(fake), target: target);
+        var reader = new PlayerReader();
+        var lookedUp = new List<string>();
+        var packed = new[] { "We should leave this place.", "Grab the bag.", "Stay close to me." };
+        long time = 0;
+        var pipeline = new SubtitlePipeline(reader, translator, new DialogueSender(), clock: () => time)
+        {
+            TargetLanguage = target,
+            PackLookup = text =>
+            {
+                lookedUp.Add(text);
+                return packed.Contains(text) ? new PackMatch("Pack reply", []) : null;
+            },
+        };
+        async Task Feed()
+        {
+            for (var i = 0; i < 25; i++)
+            {
+                await pipeline.ProcessAsync(Frame.Blank(64, 64), new CropRegion());
+                await pipeline.WaitForTranslationsAsync();
+                time += 100;
+            }
+        }
+        // Three packed Lucia lines (PlayerCharacterInference.MinimumLabels) before the stranger speaks.
+        foreach (var body in packed)
+        {
+            reader.Text = "LUCIA: " + body;
+            await Feed();
+        }
+        Assert.Empty(fake.Requests);
+        Assert.Contains("LUCIA: We should leave this place.", lookedUp);
+        Assert.Contains("We should leave this place.", lookedUp);
+        reader.Text = "STRANGER: Get out of here!";
+        await Feed();
+        Assert.Single(fake.Requests);
+        if (expected is null) Assert.DoesNotContain("Player character:", User(fake, 0));
+        else Assert.Contains(expected, User(fake, 0));
+    }
+
     private sealed class DialogueReader : ITextReader
     {
         public string Read(Frame image) => "LUCIA: I'm ready to go.";

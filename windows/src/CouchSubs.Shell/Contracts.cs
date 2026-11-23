@@ -282,6 +282,7 @@ public sealed record UserSettings
     public int PartialWaitMs { get; init; } = SubtitlePipeline.CleanWaitMs;
     public string SourceLanguage { get; init; } = "en";
     public string TargetLanguage { get; init; } = "tr";
+    public string PlayerCharacter { get; init; } = "auto";
     /// <summary>Eski ayar dosyalarında bulunmaz; varsayılan CPU'dur. GPU yalnız NVIDIA CUDA içindir.</summary>
     public TranslationDevice TranslationDevice { get; init; } = TranslationDevice.Cpu;
     /// <summary>Windows CTranslate2 CPU iç işlemlerinin iş parçacığı sayısı; eski ayarlarda 2.</summary>

@@ -11,7 +11,10 @@ using CouchSubs.Core.Dubbing;
 namespace CouchSubs.Translation;
 
 /// <summary>Bağlam olarak giden, daha önce gösterilmiş satır ve (biliniyorsa) çevirisi.</summary>
-public sealed record AiContextLine(string Source, string? Translation = null, string? Speaker = null);
+public sealed record AiContextLine(string Source, string? Translation = null, string? Speaker = null)
+{
+    public string? PlayerCharacter { get; init; }
+}
 
 /// <summary>Arabic fork: the lines shown so far; one log is shared by every key and model of a chain, so each sees the scene.</summary>
 public sealed class AiContextLog
@@ -251,12 +254,17 @@ public static class AiRequest
     public static string UserMessage(IReadOnlyList<string> sentences, IReadOnlyList<AiContextLine> context, string? game = null,
                                      IReadOnlyList<string>? names = null, string target = "tr",
                                      IReadOnlyList<KeyValuePair<string, string>>? slang = null, string? reference = null,
-                                     string? speaker = null)
+                                     string? speaker = null, string? playerCharacter = null)
     {
         var language = LanguageName(target);
         var parts = new List<string>();
         if (!string.IsNullOrEmpty(game)) parts.Add($"Game: {game}");
-        if (target == "ar") AddDialogueHints(parts, sentences, context, speaker);
+        if (target == "ar")
+        {
+            AddDialogueHints(parts, sentences, context, speaker);
+            if (PlayerCharacterInference.Normalize(playerCharacter) is { } player)
+                parts.Add($"Player character: {player} (a {(player == "Jason" ? "man" : "woman")})");
+        }
         if (names is { Count: > 0 })
             parts.Add(target == "ar"
                 ? $"Character names (write them in Arabic letters by how they sound, do not translate their meaning): {string.Join(", ", names)}"
@@ -345,10 +353,10 @@ public static class AiRequest
                                            int maxOutputTokens = MaxOutputTokens, bool thinkingOff = true,
                                            IReadOnlyList<string>? names = null, string? instruction = null, string target = "tr",
                                            IReadOnlyList<KeyValuePair<string, string>>? slang = null, string? reference = null,
-                                           string? speaker = null)
+                                           string? speaker = null, string? playerCharacter = null)
     {
         key = key.Trim();
-        var user = UserMessage(sentences, context, game, names, target, slang, reference, speaker);
+        var user = UserMessage(sentences, context, game, names, target, slang, reference, speaker, playerCharacter);
         var system = SystemPromptWith(instruction, target);
         HttpRequestMessage request;
         JsonObject body;
@@ -882,6 +890,8 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
     private string CacheKey(string text, string? game)
     {
         var key = string.IsNullOrEmpty(game) ? text : game + "\u001f" + text;
+        if (_target == "ar" && PlayerCharacterInference.Normalize(TranslationDialogue.CurrentPlayerCharacter) is { } player)
+            key = "player:" + player + "\u001f" + key;
         return _instructionTag is null ? key : "i:" + _instructionTag + "\u001f" + key;
     }
 
@@ -1121,6 +1131,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         lock (_log)
             return _log.Lines.LastOrDefault(line => line.Translation is not null && line.Source != text
                                                     && line.Speaker == TranslationDialogue.CurrentSpeaker
+                                                    && line.PlayerCharacter == PlayerCharacterInference.Normalize(TranslationDialogue.CurrentPlayerCharacter)
                                                     && TextMatch.IsSimilar(TextMatch.Normalize(line.Source), normalized, 0.85))?.Translation;
     }
 
@@ -1135,11 +1146,11 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
             }
             // Arabic fork: a chain's links share one log, so the line may already be in it from the link before.
             var speaker = _target == "ar" ? TranslationDialogue.CurrentSpeaker : null;
-            var context = _target == "ar" ? _log.Lines.Where(line => line.Source != text || line.Speaker != speaker).ToList() : new List<AiContextLine>(_log.Lines);
+            var context = _target == "ar" ? _log.Lines.Where(line => line.Source != text || line.Speaker != speaker || line.PlayerCharacter != PlayerCharacterInference.Normalize(TranslationDialogue.CurrentPlayerCharacter)).ToList() : new List<AiContextLine>(_log.Lines);
             // Aynı satır yeniden okunduysa bağlam tekrarla dolmasın.
-            if (_log.Lines.Count == 0 || _log.Lines[^1].Source != text || (_target == "ar" && _log.Lines[^1].Speaker != speaker))
+            if (_log.Lines.Count == 0 || _log.Lines[^1].Source != text || (_target == "ar" && (_log.Lines[^1].Speaker != speaker || _log.Lines[^1].PlayerCharacter != PlayerCharacterInference.Normalize(TranslationDialogue.CurrentPlayerCharacter))))
             {
-                _log.Lines.Add(new AiContextLine(text, Speaker: speaker));
+                _log.Lines.Add(new AiContextLine(text, Speaker: speaker) { PlayerCharacter = _target == "ar" ? PlayerCharacterInference.Normalize(TranslationDialogue.CurrentPlayerCharacter) : null });
                 if (_log.Lines.Count > (_target == "ar" ? ArabicContextLines : ContextLines)) _log.Lines.RemoveAt(0);
             }
             return context;
@@ -1153,7 +1164,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         {
             if (!string.Equals(_log.Game, game, StringComparison.Ordinal)) return translation;
             var index = _log.Lines.FindLastIndex(line => line.Source == text &&
-                (_target != "ar" || line.Speaker == TranslationDialogue.CurrentSpeaker));
+                (_target != "ar" || (line.Speaker == TranslationDialogue.CurrentSpeaker && line.PlayerCharacter == PlayerCharacterInference.Normalize(TranslationDialogue.CurrentPlayerCharacter))));
             if (index >= 0) _log.Lines[index] = _log.Lines[index] with { Translation = translation };
         }
         return translation;
@@ -1196,7 +1207,8 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         PerformAsync(thinkingOff => AiRequest.Build(Provider, _key, Model, sentences, context, game, Server, thinkingOff: thinkingOff, names: names,
                                                        instruction: _instruction, target: _target,
                                                        slang: AiRequest.SlangIn(_glossary, sentences), reference: reference,
-                                                       speaker: _target == "ar" ? TranslationDialogue.CurrentSpeaker : null),
+                                                       speaker: _target == "ar" ? TranslationDialogue.CurrentSpeaker : null,
+                                                       playerCharacter: _target == "ar" ? TranslationDialogue.CurrentPlayerCharacter : null),
                      _http, sentences.Count, cancellationToken);
 
     /// <summary>Düşünmeyi kapatan alanları reddeden Ollama sunucuları; uygulama açık kaldıkça hatırlanır.</summary>

@@ -630,7 +630,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             if (old.Output != value.Output) OutputChanged();
             if (old.Dubbing != value.Dubbing) DubbingSettingsChanged(old.Dubbing);
             if (old.GamePacks != value.GamePacks && pipeline is not null) ConnectPacks(pipeline);
-            if (pipeline is not null) pipeline.ShowSpeakerNames = value.ShowSpeakerNames;
+            if (pipeline is not null)
+            {
+                pipeline.ShowSpeakerNames = value.ShowSpeakerNames;
+                pipeline.PlayerCharacter = value.PlayerCharacter;
+            }
             server.SpeakerColors = value.SpeakerColors;
             if ((old.MisreadWaitMs != value.MisreadWaitMs || old.PartialWaitMs != value.PartialWaitMs) && pipeline is not null) ApplyWaits(pipeline);
             if (old.SharePool != value.SharePool) services.Pool?.SetEnabled(value.SharePool);
@@ -2947,6 +2951,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         {
             ShowSpeakerNames = settings.ShowSpeakerNames,
             TargetLanguage = settings.TargetLanguage,
+            PlayerCharacter = settings.PlayerCharacter,
             SkipsTurkish = settings.TargetLanguage == "tr",
             WatchSubtitleBackground = settings.WatchSubtitleBackground,
             // Arabic fork: the Arabic packs are GTA 6 only, so screen text is dropped even before the game is known.
