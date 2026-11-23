@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -37,6 +38,15 @@ import com.couchsubs.mobile.service.TranslationService
  */
 @Composable
 fun SecondScreenTile(modifier: Modifier = Modifier, version: Int = 0) {
+    Tile(modifier.fillMaxWidth()) {
+        SectionTitle(stringResource(R.string.second_screen_title))
+        SecondScreenBody(version)
+    }
+}
+
+/** Address, QR code and Copy of [SecondScreenTile] without its own tile and title (the display chooser's browser card embeds it). */
+@Composable
+internal fun ColumnScope.SecondScreenBody(version: Int = 0) {
     val context = LocalContext.current
     val address = remember(version) { TranslationService.secondScreenAddress() }
     val code = remember(address) { address?.let { runCatching { qrBitmap(it) }.getOrNull() } }
@@ -47,29 +57,26 @@ fun SecondScreenTile(modifier: Modifier = Modifier, version: Int = 0) {
             copied = false
         }
     }
-    Tile(modifier.fillMaxWidth()) {
-        SectionTitle(stringResource(R.string.second_screen_title))
-        if (address == null) {
-            Text(stringResource(R.string.second_screen_offline), style = Tokens.Type.caption, color = Tokens.Color.secondary)
-            return@Tile
-        }
-        code?.let { bitmap ->
-            // Koyu temada da okunsun diye kod beyaz zeminde.
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Image(bitmap.asImageBitmap(), contentDescription = stringResource(R.string.second_screen_title),
-                    filterQuality = FilterQuality.None,
-                    modifier = Modifier.size(200.dp).background(Color.White, RoundedCornerShape(Tokens.Radius.control)).padding(8.dp))
-            }
-        }
-        SelectionContainer {
-            Text(address, style = Tokens.Type.caption.copy(fontFamily = FontFamily.Monospace), color = Tokens.Color.text)
-        }
-        SecondaryButton(stringResource(if (copied) R.string.history_copied else R.string.history_copy)) {
-            context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("CouchSubs", address))
-            copied = true
-        }
-        Text(stringResource(R.string.second_screen_caption), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+    if (address == null) {
+        Text(stringResource(R.string.second_screen_offline), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        return
     }
+    code?.let { bitmap ->
+        // Koyu temada da okunsun diye kod beyaz zeminde.
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Image(bitmap.asImageBitmap(), contentDescription = stringResource(R.string.second_screen_title),
+                filterQuality = FilterQuality.None,
+                modifier = Modifier.size(200.dp).background(Color.White, RoundedCornerShape(Tokens.Radius.control)).padding(8.dp))
+        }
+    }
+    SelectionContainer {
+        Text(address, style = Tokens.Type.caption.copy(fontFamily = FontFamily.Monospace), color = Tokens.Color.text)
+    }
+    SecondaryButton(stringResource(if (copied) R.string.history_copied else R.string.history_copy)) {
+        context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("CouchSubs", address))
+        copied = true
+    }
+    Text(stringResource(R.string.second_screen_caption), style = Tokens.Type.caption, color = Tokens.Color.secondary)
 }
 
 /** QR modülleri birer piksel; görüntü büyütülürken yumuşatılmaz (FilterQuality.None). */

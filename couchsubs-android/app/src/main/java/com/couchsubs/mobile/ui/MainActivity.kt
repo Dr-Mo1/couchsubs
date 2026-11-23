@@ -160,7 +160,11 @@ class MainActivity : ComponentActivity() {
                     composable(Routes.PAIR) { PairScreen(onBack = back(navigation), onSkip = skip(navigation)) { advance(navigation) } }
                     composable(Routes.TARGET) {
                         val onboarding = navigation.previousBackStackEntry == null
-                        TargetScreen(onBack = back(navigation), onTvInstall = { navigation.navigate(Routes.TV_INSTALL) }) {
+                        TargetScreen(onBack = back(navigation), onTvInstall = { brand ->
+                            // The chooser's choice wins over the TV registered earlier (TvInstallScreen reads tvInstallBrand first).
+                            settings.tvInstallBrand = brand
+                            navigation.navigate(Routes.TV_INSTALL)
+                        }) {
                             if (onboarding) Telemetry.event(Telemetry.ONBOARDING_DONE, "target" to settings.target.name.lowercase())
                             advance(navigation)
                         }

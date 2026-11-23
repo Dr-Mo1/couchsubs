@@ -21,6 +21,22 @@ object TvPackages {
         runCatching { context.assets.open(INDEX).use { parse(String(it.readBytes(), Charsets.UTF_8)) } }.getOrDefault(emptyMap())
 
     const val LG_IPK = "couchsubs-lg.ipk"
+    private const val SAMSUNG_WGT = "tv/couchsubs-samsung.wgt"
+
+    /** [index] lists the package the phone can install on [brand]; Samsung's .wgt is not in the index (always built). */
+    fun listed(index: Map<String, String>, brand: TvBrand): Boolean = when (brand) {
+        TvBrand.LG -> LG_IPK in index
+        TvBrand.ANDROID_TV -> ANDROID_TV_APK in index
+        TvBrand.SAMSUNG -> true
+    }
+
+    /**
+     * Whether this build can install the TV app on [brand] from the phone. The LG and Android TV packages are downloaded at
+     * build time (tvReleasePackages) and are missing when that fails; the install screens must not offer a path that ends in
+     * "package missing". The Samsung .wgt is built from source every time.
+     */
+    fun bundled(context: Context, brand: TvBrand): Boolean =
+        if (brand == TvBrand.SAMSUNG) runCatching { context.assets.open(SAMSUNG_WGT).close() }.isSuccess else listed(index(context), brand)
 
     /** LG paketi, sürümdeki adı (`com.couchsubs.tv_0.9.18_all.ipk`) ve sürümü; paket yoksa null. */
     fun lg(context: Context): Triple<ByteArray, String, String>? {

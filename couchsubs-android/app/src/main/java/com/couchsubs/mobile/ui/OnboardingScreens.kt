@@ -50,6 +50,7 @@ import com.couchsubs.mobile.remoteplay.Registration
 import com.couchsubs.mobile.remoteplay.RegistrationException
 import com.couchsubs.mobile.remoteplay.RegistrationFailure
 import com.couchsubs.mobile.settings.SubtitleTarget
+import com.couchsubs.mobile.tv.DisplayChoice
 import com.couchsubs.mobile.tv.FoundTv
 import com.couchsubs.mobile.tv.TvBrand
 import com.couchsubs.mobile.tv.TvDiscovery
@@ -229,7 +230,7 @@ fun registrationErrors(): (RegistrationFailure) -> String {
 }
 
 @Composable
-fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: (() -> Unit)? = null, onDone: () -> Unit) {
+fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: ((TvBrand) -> Unit)? = null, onDone: () -> Unit) {
     val context = LocalContext.current
     val settings = Services.settings
     var target by remember { mutableStateOf(settings.target) }
@@ -237,8 +238,11 @@ fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: (() -> Unit)? = null
     // Seçilen TV: çeviride açılacak ve önde tutulacak TV (iPhone ile aynı; TvChoice).
     var chosen by remember { mutableStateOf(settings.installedTv) }
     var chosenName by remember { mutableStateOf(settings.tvName) }
-    var showManual by remember { mutableStateOf(false) }
+    // Elle TV ekleme penceresi: açıksa içinde önseçili marka.
+    var manualFor by remember { mutableStateOf<TvBrand?>(null) }
     var searchVersion by remember { mutableStateOf(0) }
+    // Açık kart: kaydedilmiş TV'nin ya da telefon ekranının kartı.
+    var open by remember { mutableStateOf(DisplayChoice.initial(settings.target, settings.installedTv)) }
     LaunchedEffect(searchVersion) {
         tvs = null
         tvs = withContext(Dispatchers.IO) { runCatching { TvDiscovery.search() }.getOrDefault(emptyList()) }
@@ -249,50 +253,43 @@ fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: (() -> Unit)? = null
         chosenName = tv.name
         settings.tvName = tv.name
         if (!target.showsOnTv) target = SubtitleTarget.TV
+        open = DisplayChoice.of(tv.brand)
     }
+    // Kart başlığına dokunma: kartı açar (açıksa kapatır); TV kartı hedefi TV yapar, telefon kartı "Bu telefonda".
+    fun show(choice: DisplayChoice) {
+        open = choice
+        if (choice == DisplayChoice.PHONE) target = SubtitleTarget.PHONE
+        else if (choice.brand != null && !target.showsOnTv) target = SubtitleTarget.TV
+    }
+    fun toggle(choice: DisplayChoice) = if (open == choice) open = null else show(choice)
     ScreenScaffold(top = { TopBar(onBack = onBack) }, bottom = {
         PrimaryButton(stringResource(R.string.next_continue)) {
             settings.target = target
-            // Seçim yapılmadıysa ağda görülen ilk TV kullanılır (eski davranış).
-            if (chosen == null && target.showsOnTv) tvs?.firstOrNull()?.let { choose(it) }
+            // Seçim yapılmadıysa ağda görülen ilk TV (açık kart bir markaysa o markanınki) kullanılır (eski davranış).
+            if (chosen == null && target.showsOnTv) tvs?.firstOrNull { open?.brand == null || it.brand == open?.brand }?.let { choose(it) }
             settings.onboarded = true
             onDone()
         }
     }) {
         Heading(stringResource(R.string.target_title), stringResource(R.string.target_body), if (onBack == null) stringResource(R.string.setup_step, 3) else null)
-        Tile(Modifier.fillMaxWidth(), style = if (target == SubtitleTarget.TV) TileStyle.ACTIVE else TileStyle.NORMAL, onClick = { target = SubtitleTarget.TV }) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
-                TileIcon(CouchIcons.Tv)
-                Text(stringResource(R.string.target_tv), style = Tokens.Type.headline, color = Tokens.Color.text, modifier = Modifier.weight(1f))
-                if (target == SubtitleTarget.TV) SelectedCheck()
-            }
-            when (val found = tvs) {
-                null -> Text(stringResource(R.string.target_searching), style = Tokens.Type.caption, color = Tokens.Color.secondary)
-                // Bulunamayınca ne yapılacağı da söylenir: TV uygulaması yoksa buradan kurulur; monitör ya da akıllı olmayan
-                // TV'de "Bu telefonda" seçilir (iPhone'daki gibi; kullanıcı monitörde "Ağda TV bulunamadı"da kalmıştı).
-                else -> if (found.isEmpty()) Text(stringResource(if (onTvInstall != null) R.string.target_tvs_none_help else R.string.target_tvs_none),
-                    style = Tokens.Type.caption, color = Tokens.Color.secondary)
-                else Unit
-            }
-            // Bulunan TV'ler (kayıtlı TV ağda görünmese de en üstte): dokununca seçilir.
-            val listed = com.couchsubs.mobile.tv.TvChoice.list(tvs.orEmpty(), chosen, chosenName)
-            listed.forEach { tv ->
-                val selected = com.couchsubs.mobile.tv.TvChoice.isSelected(tv, chosen)
-                Row(Modifier.fillMaxWidth().clickable { choose(tv) }.padding(vertical = Tokens.Space.inline),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(tv.name, style = Tokens.Type.body, color = Tokens.Color.text)
-                        Text(brandName(tv.brand), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        val phoneIp = remember { phoneAddress(context) }
+        DisplayChoice.entries.forEach { choice ->
+            if (choice == DisplayChoice.ANDROID_TV) TileLabel(stringResource(R.string.chooser_group_tv))
+            if (choice == DisplayChoice.BROWSER) TileLabel(stringResource(R.string.chooser_group_other))
+            val brand = choice.brand
+            val isChosen = if (brand != null) target.showsOnTv && chosen?.brand == brand else choice == DisplayChoice.PHONE && target == SubtitleTarget.PHONE
+            DisplayCard(choice, open == choice, isChosen, onClick = { toggle(choice) }) {
+                when {
+                    brand != null -> {
+                        val installable = remember(brand) { com.couchsubs.mobile.tv.TvPackages.bundled(context, brand) }
+                        TvCardBody(brand, installable, phoneIp, tvs, chosen, chosenName, onPick = { choose(it) }, onSearchAgain = { searchVersion++ },
+                            onManual = { manualFor = brand }, onInstall = onTvInstall?.let { go -> { go(brand) } }, onAlternative = ::show)
                     }
-                    if (selected) SelectedCheck()
-                    else if (tvs?.any { it.host == tv.host && it.brand == tv.brand } == true) StatusLabel(stringResource(R.string.target_tv_on_network))
+                    choice == DisplayChoice.BROWSER -> BrowserCardBody()
+                    choice == DisplayChoice.PHONE -> PhoneCardBody()
+                    choice == DisplayChoice.UNKNOWN -> UnknownCardBody(tvs, onPick = { choose(it) }, onOpen = ::show)
                 }
             }
-            if (tvs != null) GhostButton(stringResource(R.string.target_search_again)) { searchVersion++ }
-            if (chosen != null) Text(stringResource(R.string.target_tv_selected_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
-            Text(stringResource(R.string.target_tv_body), style = Tokens.Type.caption, color = Tokens.Color.secondary)
-            // TV uygulamasını bilgisayarsız, bu telefondan kurmak (ilk kurulumda da).
-            if (onTvInstall != null) GhostButton(stringResource(R.string.tvinstall_entry), onClick = onTvInstall)
         }
         // Mac ve Windows'taki "İkisi de": altyazı hem TV'de hem bu telefonda görünür.
         Tile(Modifier.fillMaxWidth(), style = if (target == SubtitleTarget.BOTH) TileStyle.ACTIVE else TileStyle.NORMAL, onClick = { target = SubtitleTarget.BOTH }) {
@@ -305,16 +302,11 @@ fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: (() -> Unit)? = null
                 if (target == SubtitleTarget.BOTH) SelectedCheck()
             }
         }
-        TwoColumns(
-            { StatusTile(CouchIcons.Smartphone, stringResource(R.string.target_phone_note), stringResource(R.string.target_phone), it,
-                style = if (target == SubtitleTarget.PHONE) TileStyle.ACTIVE else TileStyle.NORMAL,
-                corner = { if (target == SubtitleTarget.PHONE) SelectedCheck() }, onClick = { target = SubtitleTarget.PHONE }) },
-            { StatusTile(Icons.Filled.Info, stringResource(R.string.target_unlisted_note), stringResource(R.string.target_unlisted), it,
-                onClick = { showManual = true }) },
-        )
-        if (showManual) ManualTvDialog(onDismiss = { showManual = false }, onSupported = { open(context, context.getString(R.string.url_tvs)) }) { tv ->
-            showManual = false
-            choose(tv)
+        manualFor?.let { initial ->
+            ManualTvDialog(initial, onDismiss = { manualFor = null }, onSupported = { open(context, context.getString(R.string.url_tvs)) }) { tv ->
+                manualFor = null
+                choose(tv)
+            }
         }
         // Mac ve Windows'taki "Yalnız OBS (yayın)": TV aranmaz, bu telefonda altyazı ekranı açılmaz; altyazı yalnız aynı Wi-Fi'daki
         // bilgisayarda OBS'in tarayıcı kaynağına gider (iPhone ile aynı). Seçiliyken adres ve kopyala düğmesi görünür.
@@ -329,8 +321,6 @@ fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: (() -> Unit)? = null
             }
             if (target == SubtitleTarget.OBS) ObsOnlyAddress()
         }
-        // TV'si olmayan ya da monitörde oynayan için: hangi hedef seçilirse seçilsin altyazı ayrıca bir tarayıcıda da görünür.
-        SecondScreenTile()
         // TV kurulumu bitti: her çeviride TV uygulaması kendiliğinden açılmaya çalışılır; açılmazsa TV'den açılır.
         if (onBack == null && target.showsOnTv && settings.installedTv != null)
             Text(stringResource(R.string.tv_open_wizard_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
@@ -342,8 +332,8 @@ fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: (() -> Unit)? = null
  * söylenir); Android TV'de adres gerekmez, oradaki uygulama telefonu kendisi bulur.
  */
 @Composable
-private fun ManualTvDialog(onDismiss: () -> Unit, onSupported: () -> Unit, onConnect: (FoundTv) -> Unit) {
-    var brand by remember { mutableStateOf(TvBrand.LG) }
+private fun ManualTvDialog(initial: TvBrand, onDismiss: () -> Unit, onSupported: () -> Unit, onConnect: (FoundTv) -> Unit) {
+    var brand by remember { mutableStateOf(initial) }
     var host by remember { mutableStateOf("") }
     var invalid by remember { mutableStateOf(false) }
     AlertDialog(

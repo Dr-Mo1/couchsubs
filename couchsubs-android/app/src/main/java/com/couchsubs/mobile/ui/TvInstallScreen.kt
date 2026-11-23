@@ -67,6 +67,7 @@ import com.couchsubs.mobile.tv.TvAppStatus
 import com.couchsubs.mobile.tv.TvAppUpdate
 import com.couchsubs.mobile.tv.TvBrand
 import com.couchsubs.mobile.tv.TvDiscovery
+import com.couchsubs.mobile.tv.TvPackages
 import com.couchsubs.mobile.tv.samsung.AdbKey
 import com.couchsubs.mobile.tv.samsung.InstallLog
 import com.couchsubs.mobile.tv.samsung.InstallStep
@@ -111,7 +112,7 @@ fun TvInstallScreen(onBack: () -> Unit, onDone: () -> Unit = onBack) {
     val settings = Services.settings
     // Ana ekrandaki "TV uygulamasını güncelle": bu TV seçilir ve kurulum kendiliğinden başlar.
     val preset = remember { TvAppUpdate.takePending() }
-    var brand by remember { mutableStateOf(preset?.brand ?: settings.installedTv?.brand ?: settings.tvInstallBrand) }
+    var brand by remember { mutableStateOf(preset?.brand ?: settings.tvInstallBrand ?: settings.installedTv?.brand) }
     val brands = listOf(TvBrand.SAMSUNG, TvBrand.LG, TvBrand.ANDROID_TV)
     val picker: @Composable () -> Unit = {
         Segmented(listOf(stringResource(R.string.tvinstall_brand_samsung), stringResource(R.string.tvinstall_brand_lg),
@@ -133,6 +134,16 @@ fun TvInstallScreen(onBack: () -> Unit, onDone: () -> Unit = onBack) {
         return
     }
     val forBrand = preset?.takeIf { it.brand == brand }
+    // LG and Android TV packages come from a build-time download; without them the flow would end in "package missing".
+    val context = LocalContext.current
+    if (!remember(brand) { brand?.let { TvPackages.bundled(context, it) } == true }) {
+        ScreenScaffold(top = { TopBar(onBack = onBack) }) {
+            Heading(stringResource(R.string.tvinstall_title), stringResource(R.string.tvinstall_any_body))
+            picker()
+            UnavailableInstall(listBelow = false)
+        }
+        return
+    }
     when (brand) {
         TvBrand.ANDROID_TV -> AndroidTvInstallScreen(onBack, onDone, picker, forBrand)
         TvBrand.LG -> LgInstallScreen(onBack, onDone, picker, forBrand)

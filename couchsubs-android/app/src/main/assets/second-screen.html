@@ -22,25 +22,26 @@
   }
   /* Altyazı ekranın ortasında: telefon monitörün yanında ya da masada dururken göz hep aynı yere bakar. */
   #stage {
-    position: absolute; inset: 0; box-sizing: border-box;
+    position: absolute; top: 0; right: 0; bottom: 0; left: 0; box-sizing: border-box;
+    padding: 16px 20px; /* TV browsers: no max()/env() */
     padding: max(16px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right))
              max(16px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
     display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 0.6em;
   }
   #previous {
     max-width: 100%; text-align: center; white-space: pre-line; overflow-wrap: anywhere;
-    font-weight: 500; line-height: 1.25; color: rgba(255, 255, 255, 0.45); font-size: 24px;
+    font-weight: 500; line-height: 1.25; color: rgba(255, 255, 255, 0.45); font-size: 24px; word-wrap: break-word;
     min-height: 1.25em;
   }
   #line {
     max-width: 100%; text-align: center; white-space: pre-line; overflow-wrap: anywhere;
-    font-weight: 600; line-height: 1.22; font-size: 48px;
+    font-weight: 600; line-height: 1.22; font-size: 48px; word-wrap: break-word;
     opacity: 0; transition: opacity 0.15s;
   }
   #line.on { opacity: 1; }
   #line.bold { font-weight: 800; }
   #status {
-    position: absolute; left: 0; right: 0; bottom: max(12px, env(safe-area-inset-bottom));
+    position: absolute; left: 0; right: 0; bottom: 12px; bottom: max(12px, env(safe-area-inset-bottom));
     text-align: center; font-size: 15px; color: rgba(255, 255, 255, 0.5);
   }
   #status .dot {
@@ -211,7 +212,9 @@ bdi { unicode-bidi: isolate; }
 
   window.addEventListener('resize', function () { if (current) fit(line, 2); });
 
-  var key = new URLSearchParams(location.search).get('k') || '';
+  // Regex, not URLSearchParams: older TV browsers (Chromium 38-48) lack it.
+  var keyMatch = /[?&]k=([^&]*)/.exec(location.search);
+  var key = keyMatch ? decodeURIComponent(keyMatch[1]) : '';
   setStatus('connecting');
   var events = new EventSource('/events?viewer=second&k=' + encodeURIComponent(key));
   events.onopen = function () { setStatus('live'); };
