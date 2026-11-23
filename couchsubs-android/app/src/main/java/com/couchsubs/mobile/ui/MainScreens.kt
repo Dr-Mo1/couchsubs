@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -171,8 +172,7 @@ fun MainScreen(
                 if (running) RunningScreen(status, topBar, if (status.demo) onExitDemo else onStop, onPhoneView, onTvUpdate)
                 else ScreenScaffold(top = topBar, bottom = {
                     // PS5 eşlenmemişse (kurulum atlandı) başlatmak yerine eşleme açılır.
-                    if (paired) PrimaryButton(stringResource(R.string.start), modifier = mark(TourStep.START), onClick = onStart)
-                    else {
+                    if (!paired) {
                         PrimaryButton(stringResource(R.string.main_pair_button), modifier = mark(TourStep.START), onClick = onPairing)
                         // Kurulum bitmeden de uygulama örnek görüntülerle denenebilir.
                         GhostButton(stringResource(R.string.demo_mode_try), Modifier.fillMaxWidth(), onClick = onDemo)
@@ -185,31 +185,23 @@ fun MainScreen(
                     }
                     AnimatedNote(status.error)
                     TvAppUpdateCard(onTvUpdate)
-                    // Telefon ana ekranı (TASARIM.md): PS5 ve Altyazı durum karoları ilgili ayarı açar (`›`).
-                    TwoColumns(
-                        { if (xbox) StatusTile(CouchIcons.Gamepad, "Xbox", settings.xboxConsole?.name ?: stringResource(R.string.profile_not_paired), it,
-                            corner = { Pill(stringResource(R.string.beta)) }, chevron = true, onClick = onPairing)
-                          else StatusTile(CouchIcons.Gamepad, "PS5", settings.console?.name ?: stringResource(R.string.profile_not_paired), it,
-                            corner = { if (settings.console != null) StatusLabel(stringResource(R.string.main_paired)) }, chevron = true, onClick = onPairing) },
-                        { StatusTile(if (settings.target.showsOnTv) CouchIcons.Tv else CouchIcons.Smartphone, stringResource(R.string.main_target),
-                            targetName(settings),
-                            it.then(mark(TourStep.TARGET)), chevron = true, onClick = onTarget) },
-                    )
-                    // Paket karosu: başlık ve not tek satır, sağda yalnız `›`; paketler kapalıysa nötr "Kapalı" etiketi.
-                    Box(mark(TourStep.PACKS)) {
-                        Tile(Modifier.fillMaxWidth(), onClick = onPacks) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
-                                TileIcon(CouchIcons.Package, Tokens.Color.pro)
-                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
-                                    Text(stringResource(R.string.main_packs_title), style = Tokens.Type.headline, color = Tokens.Color.text,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text(stringResource(R.string.main_packs_games), style = Tokens.Type.caption, color = Tokens.Color.secondary,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                                if (!settings.packsEnabled) Pill(stringResource(R.string.main_packs_off))
-                                Chevron()
-                            }
+                    // Eşleme ile canlı bağlantı farklı durumlardır; hazır olmayan cihaz yeşil gösterilmez.
+                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
+                        StatusChip(if (xbox) "Xbox" else "PS5", paired, Modifier.weight(1f), onPairing)
+                        StatusChip(targetName(settings), !settings.target.showsOnTv || status.connectedTvs > 0,
+                            Modifier.weight(1f).then(mark(TourStep.TARGET)), onTarget)
+                    }
+                    status.game?.let { Pill(it) }
+                    PackSummaryTile(onPacks)
+                    if (paired) TranslationStartDisc(mark(TourStep.START), onStart)
+                    status.recent.firstOrNull()?.let { line ->
+                        Tile(Modifier.fillMaxWidth()) {
+                            TileLabel(stringResource(R.string.running_now))
+                            Text(line.translation, style = Tokens.Type.headline, color = Tokens.Color.text)
                         }
+                    }
+                    Box(mark(TourStep.PACKS)) {
+                        GhostButton(stringResource(R.string.settings_packs), onClick = onPacks)
                     }
                     // Çeviri motoru ve son oturum durum değil ayar bilgisidir: tek bilgi karosunda iki satır.
                     InfoCard(listOf(
@@ -638,4 +630,39 @@ fun ScreenTranslateButton(status: LiveStatus, modifier: Modifier = Modifier) {
         LiveStatus.ScreenState.SHOWN -> R.string.screen_remove
     }
     SecondaryButton(stringResource(label), modifier) { com.couchsubs.mobile.service.TranslationService.translateScreen() }
+}
+
+@Composable
+private fun TranslationStartDisc(modifier: Modifier = Modifier, onStart: () -> Unit) {
+    Box(Modifier.fillMaxWidth().padding(vertical = 22.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(234.dp).background(Tokens.Color.accent.copy(alpha = 0.05f), androidx.compose.foundation.shape.CircleShape))
+        Box(Modifier.size(210.dp).background(Tokens.Color.accent.copy(alpha = 0.12f), androidx.compose.foundation.shape.CircleShape))
+        androidx.compose.material3.Button(onClick = onStart,
+            shape = androidx.compose.foundation.shape.CircleShape,
+            colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Tokens.Color.accent, contentColor = Tokens.Color.onAccent),
+            modifier = modifier.then(Modifier.size(190.dp))) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
+                Text(stringResource(R.string.start), style = Tokens.Type.title, textAlign = TextAlign.Center)
+                Text(stringResource(R.string.targamgi_return_to_game), style = Tokens.Type.caption, textAlign = TextAlign.Center)
+            }
+        }
+    }
+}
+
+/** Yalnız kurulu paketin gerçek boyutu; taslaktaki örnek sayı kullanılmaz. */
+@Composable
+internal fun PackSummaryTile(onPacks: (() -> Unit)? = null) {
+    val context = LocalContext.current
+    val language = Services.settings.translationLanguage
+    val version by Services.packsVersion.collectAsState()
+    var pack by remember(language) { mutableStateOf<com.couchsubs.mobile.core.GamePackLibrary.Info?>(null) }
+    LaunchedEffect(version, language) {
+        pack = withContext(Dispatchers.IO) { Services.packLibrary(context).infos.firstOrNull { it.id == "gta-6-ar" } }
+    }
+    if (language == "ar") pack?.let { installed ->
+        Tile(Modifier.fillMaxWidth(), onClick = onPacks) {
+            TileLabel(stringResource(R.string.targamgi_arabic_pack))
+            Text(stringResource(R.string.lines_count, installed.entries), style = Tokens.Type.headline, color = Tokens.Color.text)
+        }
+    }
 }

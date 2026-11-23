@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Mobil tasarım sistemi (düz bento): design/tokens.json v3 ve TASARIM-MOBIL.md. Uygulama yalnız koyu temadır.
-// Değerler yalnız buradan gelir; ekranlar bu dosyadaki bileşenleri kullanır. Parıltı, degrade ve renkli gölge yoktur.
+// Targamgi tasarım sistemi: knowledge/design/targamgi-mockup-v6.html.
 package com.couchsubs.mobile.ui
 
 import android.provider.Settings
@@ -77,6 +76,14 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import com.couchsubs.mobile.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -84,32 +91,38 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+val AppFont = FontFamily(Font(R.font.almarai_regular, FontWeight.Normal), Font(R.font.almarai_bold, FontWeight.Bold))
+
+@OptIn(ExperimentalTextApi::class)
+val WordmarkFont = FontFamily(Font(R.font.baloo_bhaijaan2, FontWeight.Bold,
+    variationSettings = FontVariation.Settings(FontVariation.weight(700))))
+
 object Tokens {
     /** design/tokens.json v3, koyu görünüm. Parıltı rengi yoktur. */
     object Color {
-        val bg = androidx.compose.ui.graphics.Color(0xFF141518)
-        val surface = androidx.compose.ui.graphics.Color(0xFF1C1E23)
-        val surface2 = androidx.compose.ui.graphics.Color(0xFF25282F)
+        val bg = androidx.compose.ui.graphics.Color(0xFF0B0714)
+        val surface = androidx.compose.ui.graphics.Color(0xFF161022)
+        val surface2 = androidx.compose.ui.graphics.Color(0xFF161022)
         /** Seçili segment gibi yükseltilmiş parça (surface2'nin bir basamak üstü). */
-        val raised = androidx.compose.ui.graphics.Color(0xFF30333A)
+        val raised = androidx.compose.ui.graphics.Color(0xFF2A2140)
         /** Karo çerçevesi (tokens.json tileBorder). */
-        val border = androidx.compose.ui.graphics.Color(0xFF2C2E32)
+        val border = androidx.compose.ui.graphics.Color(0xFF2A2140)
         /** Alan çerçevesi ve ayraçlar (tokens.json border). */
-        val borderStrong = androidx.compose.ui.graphics.Color(0xFF30333A)
-        val text = androidx.compose.ui.graphics.Color(0xFFF3EEE4)
-        val secondary = androidx.compose.ui.graphics.Color(0xFFA9A59C)
+        val borderStrong = androidx.compose.ui.graphics.Color(0xFF2A2140)
+        val text = androidx.compose.ui.graphics.Color(0xFFF3EEE6)
+        val secondary = androidx.compose.ui.graphics.Color(0xFFA99FBD)
         /** Yalnız dolgu (birincil düğme, seçili şey, ilerleme); sarı yazı ve simge için [accentText]. */
-        val accent = androidx.compose.ui.graphics.Color(0xFFF5B83D)
-        val accentHi = androidx.compose.ui.graphics.Color(0xFFFFCF6B)
-        val accentText = androidx.compose.ui.graphics.Color(0xFFF5B83D)
-        val onAccent = androidx.compose.ui.graphics.Color(0xFF17181B)
+        val accent = androidx.compose.ui.graphics.Color(0xFFFFB627)
+        val accentHi = androidx.compose.ui.graphics.Color(0xFFFFB627)
+        val accentText = androidx.compose.ui.graphics.Color(0xFFFFB627)
+        val onAccent = androidx.compose.ui.graphics.Color(0xFF0B0714)
         /** Sarının koyu zemindeki yumuşak tonu; yalnız M3'ün kendi parçalarındaki (primaryContainer) mor yerine. */
-        val accentSoft = androidx.compose.ui.graphics.Color(0xFF3A3020)
+        val accentSoft = androidx.compose.ui.graphics.Color(0xFF2A2140)
         /** Yalnız oyun paketleri: düz mor simge ve yazı; [proSoft] paket etiketinin zemini. */
-        val pro = androidx.compose.ui.graphics.Color(0xFFA78BFA)
-        val proSoft = androidx.compose.ui.graphics.Color(0xFF322F45)
-        val success = androidx.compose.ui.graphics.Color(0xFF62C990)
-        val warning = androidx.compose.ui.graphics.Color(0xFFF2A55A)
+        val pro = androidx.compose.ui.graphics.Color(0xFFFFB627)
+        val proSoft = androidx.compose.ui.graphics.Color(0xFF161022)
+        val success = androidx.compose.ui.graphics.Color(0xFF57D68D)
+        val warning = androidx.compose.ui.graphics.Color(0xFFFFB627)
         val danger = androidx.compose.ui.graphics.Color(0xFFF28B82)
         val dangerSoft = androidx.compose.ui.graphics.Color(0xFF2F2325)
     }
@@ -125,10 +138,10 @@ object Tokens {
 
     /** Tek köşe ölçeği: karo 16, denetim 12, karo içi kutu 8, etiket 6. */
     object Radius {
-        val tile = 16.dp
-        val control = 12.dp
+        val tile = 12.dp
+        val control = 24.dp
         val inner = 8.dp
-        val tag = 6.dp
+        val tag = 24.dp
     }
 
     object Control {
@@ -148,21 +161,21 @@ object Tokens {
 
     /** Beş boy (28/22/17/15/13), kalınlık 400–600; altyazı içeriği (subtitle*) dışında başka boy yok. */
     object Type {
-        val display = TextStyle(fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp)
-        val title = TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold)
-        val headline = TextStyle(fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold)
+        val display = TextStyle(fontFamily = AppFont, fontSize = 24.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.sp)
+        val title = TextStyle(fontFamily = AppFont, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold)
+        val headline = TextStyle(fontFamily = AppFont, fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.Bold)
         /** Önceki altyazı satırları: headline boyu, normal kalınlık. */
-        val line = TextStyle(fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal)
-        val body = TextStyle(fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.Normal)
-        val caption = TextStyle(fontSize = 13.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium)
+        val line = TextStyle(fontFamily = AppFont, fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal)
+        val body = TextStyle(fontFamily = AppFont, fontSize = 15.sp, lineHeight = 24.sp, fontWeight = FontWeight.Normal)
+        val caption = TextStyle(fontFamily = AppFont, fontSize = 13.sp, lineHeight = 20.sp, fontWeight = FontWeight.Normal)
         // Tablo rakamları (TASARIM.md ilke 5): süre, sayaç ve kaydırıcı değeri değişirken rakamlar eş genişlikte kalır,
         // satır kaymaz.
         val titleNumeric = title.copy(fontFeatureSettings = "tnum")
         val captionNumeric = caption.copy(fontFeatureSettings = "tnum")
         /** Bilgi karosundaki ve kaydırıcının yanındaki değer: body yarı kalın, tablo rakamlı. */
-        val value = body.copy(fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum")
-        val subtitleCurrent = TextStyle(fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.SemiBold)
-        val subtitleLandscape = TextStyle(fontSize = 36.sp, lineHeight = 44.sp, fontWeight = FontWeight.SemiBold)
+        val value = body.copy(fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum")
+        val subtitleCurrent = TextStyle(fontFamily = AppFont, fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold)
+        val subtitleLandscape = TextStyle(fontFamily = AppFont, fontSize = 36.sp, lineHeight = 44.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -190,7 +203,10 @@ fun CouchSubsTheme(content: @Composable () -> Unit) {
         typography = Typography(
             displaySmall = Tokens.Type.display, titleLarge = Tokens.Type.title, titleMedium = Tokens.Type.headline,
             bodyLarge = Tokens.Type.body, bodyMedium = Tokens.Type.body, bodySmall = Tokens.Type.caption,
-            labelLarge = Tokens.Type.headline, labelMedium = Tokens.Type.caption,
+            labelLarge = Tokens.Type.headline, labelMedium = Tokens.Type.caption, labelSmall = Tokens.Type.caption,
+            displayLarge = Tokens.Type.display, displayMedium = Tokens.Type.display,
+            headlineLarge = Tokens.Type.display, headlineMedium = Tokens.Type.title, headlineSmall = Tokens.Type.headline,
+            titleSmall = Tokens.Type.headline,
         ),
         shapes = Shapes(
             extraSmall = RoundedCornerShape(Tokens.Radius.tag), small = RoundedCornerShape(Tokens.Radius.inner),
@@ -199,7 +215,8 @@ fun CouchSubsTheme(content: @Composable () -> Unit) {
         ),
     ) {
         // Dalga (ripple) ve renk verilmemiş simgeler açık renkte: varsayılan içerik rengi siyahtır, koyu zeminde basış görünmez.
-        CompositionLocalProvider(LocalContentColor provides c.text, content = content)
+        val direction = if (LocalConfiguration.current.locales[0].language == "ar") LayoutDirection.Rtl else LocalLayoutDirection.current
+        CompositionLocalProvider(LocalContentColor provides c.text, LocalLayoutDirection provides direction, content = content)
     }
 }
 
@@ -313,7 +330,7 @@ fun DestructiveButton(text: String, modifier: Modifier = Modifier, onClick: () -
  */
 @Composable
 fun IconSquare(label: String, modifier: Modifier = Modifier, onClick: () -> Unit, content: @Composable () -> Unit) {
-    val shape = RoundedCornerShape(Tokens.Radius.control)
+    val shape = CircleShape
     Box(
         modifier.minimumInteractiveComponentSize().size(Tokens.Control.icon).clip(shape)
             .background(Tokens.Color.surface2).border(1.dp, Tokens.Color.border, shape)
@@ -340,7 +357,7 @@ fun Pill(text: String, modifier: Modifier = Modifier, pro: Boolean = false) {
 /** Kaydırıcı renkleri (tüm kaydırıcılar aynı): sarı dolu kısım, border ray, açık tutamaç; adım işaretleri görünmez. */
 @Composable
 fun couchSliderColors(): SliderColors = SliderDefaults.colors(
-    thumbColor = Tokens.Color.text, activeTrackColor = Tokens.Color.accent, inactiveTrackColor = Tokens.Color.borderStrong,
+    thumbColor = Tokens.Color.accent, activeTrackColor = Tokens.Color.accent, inactiveTrackColor = Tokens.Color.borderStrong,
     activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent,
 )
 

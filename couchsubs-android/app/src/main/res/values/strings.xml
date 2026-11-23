@@ -740,4 +740,11 @@
     <string name="translation_language">Translation language</string>
     <string name="translation_language_code">Language code (ar, tr, en, fr, de, es…)</string>
     <string name="translation_language_apply">Apply and stop translation</string>
+    <string name="targamgi_appearance">Subtitle appearance</string>
+    <string name="targamgi_content">Translation content</string>
+    <string name="targamgi_devices">Devices and connection</string>
+    <string name="targamgi_translation">Translation settings</string>
+    <string name="targamgi_arabic">Arabic (Egyptian colloquial)</string>
+    <string name="targamgi_arabic_pack">GTA VI Arabic pack</string>
+    <string name="targamgi_return_to_game">Then return to the game</string>
 </resources>

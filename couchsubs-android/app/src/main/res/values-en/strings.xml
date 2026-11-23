@@ -727,4 +727,11 @@
     <string name="local_ai_ollama_down">Ollama is not running: %1$s could not be reached, or the model did not answer in time. Open Ollama and download the model: ollama pull %2$s</string>
     <string name="local_ai_lmstudio_down">LM Studio is not running: %1$s could not be reached, or the model did not answer in time. Open LM Studio, load the model and start the local server.</string>
     <string name="local_ai_other_down">The local model server at %1$s could not be reached, or the model did not answer in time. Check the address and that the server is running.</string>
+    <string name="targamgi_appearance">Subtitle appearance</string>
+    <string name="targamgi_content">Translation content</string>
+    <string name="targamgi_devices">Devices and connection</string>
+    <string name="targamgi_translation">Translation settings</string>
+    <string name="targamgi_arabic">Arabic (Egyptian colloquial)</string>
+    <string name="targamgi_arabic_pack">GTA VI Arabic pack</string>
+    <string name="targamgi_return_to_game">Then return to the game</string>
 </resources>

@@ -40,6 +40,9 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -64,7 +67,7 @@ fun TopBar(title: String? = null, onBack: (() -> Unit)? = null, onClose: (() -> 
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
         when {
             onBack != null -> IconAction(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back), onBack)
-            else -> Image(painterResource(R.mipmap.icon), null, Modifier.size(36.dp))
+            else -> Text(stringResource(R.string.app_name), style = Tokens.Type.title.copy(fontFamily = WordmarkFont), color = Tokens.Color.accent)
         }
         if (title != null) Text(title, style = Tokens.Type.title, color = Tokens.Color.text, modifier = Modifier.weight(1f), maxLines = 1,
             overflow = TextOverflow.Ellipsis)
@@ -85,6 +88,17 @@ fun Chevron() = Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = 
 
 @Composable
 fun SettingsAction(onClick: () -> Unit) = IconAction(Icons.Filled.Settings, stringResource(R.string.settings), onClick)
+
+@Composable
+fun StatusChip(text: String, ready: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Row(modifier.heightIn(min = Tokens.Control.touch).clip(CircleShape)
+        .background(Tokens.Color.surface).border(1.dp, Tokens.Color.border, CircleShape)
+        .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
+        LiveDot(if (ready) Tokens.Color.success else Tokens.Color.secondary)
+        Text(text, style = Tokens.Type.caption, color = Tokens.Color.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
 
 /** Profil (cihazlar ve tercihler) simge düğmesi. */
 @Composable
@@ -158,7 +172,7 @@ fun PackTile(
 @Composable
 fun GameMonogram(code: String) {
     Box(Modifier.size(Tokens.Control.icon).background(Tokens.Color.surface2, RoundedCornerShape(Tokens.Radius.inner)), contentAlignment = Alignment.Center) {
-        Text(code, style = Tokens.Type.caption.copy(fontWeight = FontWeight.SemiBold), color = Tokens.Color.text)
+        Text(code, style = Tokens.Type.caption.copy(fontWeight = FontWeight.Bold), color = Tokens.Color.text)
     }
 }
 
@@ -194,14 +208,14 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
             val shape = RoundedCornerShape(Tokens.Radius.inner)
             Box(
                 Modifier.weight(1f).heightIn(min = Tokens.Control.segment).clip(shape)
-                    .background(if (on) Tokens.Color.raised else Color.Transparent)
+                    .background(if (on) Tokens.Color.accent else Color.Transparent)
                     .border(1.dp, if (on) Tokens.Color.accent else Color.Transparent, shape)
                     .selectable(selected = on, role = Role.Tab) { onSelect(index) }
                     .padding(Tokens.Space.hair),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(option, style = base.copy(fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium),
-                    color = if (on) Tokens.Color.text else Tokens.Color.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                Text(option, style = base.copy(fontWeight = if (on) FontWeight.Bold else FontWeight.Normal),
+                    color = if (on) Tokens.Color.onAccent else Tokens.Color.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center)
             }
         }
@@ -211,14 +225,16 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
 /** Sekiz haneli eşleme kodu kutuları (radius.inner); yazılan rakamlar kutulara dağılır, sıradaki kutu sarı çerçeveli. */
 @Composable
 fun CodeCells(code: String, length: Int = 8) {
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-        repeat(length) { index ->
-            val digit = code.getOrNull(index)?.toString() ?: ""
-            Box(
-                Modifier.weight(1f).heightIn(min = 48.dp).background(Tokens.Color.surface2, RoundedCornerShape(Tokens.Radius.inner))
-                    .border(1.dp, if (index == code.length) Tokens.Color.accent else Tokens.Color.borderStrong, RoundedCornerShape(Tokens.Radius.inner)),
-                contentAlignment = Alignment.Center,
-            ) { Text(digit, style = Tokens.Type.title, color = Tokens.Color.text) }
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+            repeat(length) { index ->
+                val digit = code.getOrNull(index)?.toString() ?: ""
+                Box(
+                    Modifier.weight(1f).heightIn(min = 48.dp).background(Tokens.Color.surface2, RoundedCornerShape(Tokens.Radius.inner))
+                        .border(1.dp, if (index == code.length) Tokens.Color.accent else Tokens.Color.borderStrong, RoundedCornerShape(Tokens.Radius.inner)),
+                    contentAlignment = Alignment.Center,
+                ) { Text(digit, style = Tokens.Type.title, color = Tokens.Color.text) }
+            }
         }
     }
 }

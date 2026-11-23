@@ -90,20 +90,7 @@ fun WelcomeScreen(onDemo: () -> Unit = {}, onDone: () -> Unit) {
                         Heading(stringResource(R.string.welcome1_title), stringResource(R.string.welcome1_body))
                     }
                     1 -> {
-                        Tile(Modifier.fillMaxWidth()) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
-                                GameMonogram("GTA")
-                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
-                                    Text("Grand Theft Auto V", style = Tokens.Type.headline, color = Tokens.Color.text)
-                                    Text(stringResource(R.string.welcome2_gta), style = Tokens.Type.caption, color = Tokens.Color.secondary)
-                                }
-                                Pill(stringResource(R.string.packs_free))
-                            }
-                        }
-                        TwoColumns(
-                            { PackTile("RDR", "Red Dead 2", stringResource(R.string.welcome2_rdr_lines), it) },
-                            { PackTile("MAF", "Mafia", stringResource(R.string.welcome2_maf_lines), it) },
-                        )
+                        PackSummaryTile()
                         Heading(stringResource(R.string.welcome2_title), stringResource(R.string.welcome2_body))
                     }
                     else -> {
