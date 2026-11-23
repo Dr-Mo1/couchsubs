@@ -351,6 +351,9 @@ internal sealed class FakeServices : IAppServices
         BrandInstalls.Add((TvBrand.AndroidTv, host));
         return Task.FromResult(app.Version);
     }
+    public List<(Frame Frame, string Reason)> ScreenDebug { get; } = [];
+    public void SaveScreenDebug(Frame frame, string reason) => ScreenDebug.Add((frame, reason));
+
     public ITextReader? MakeReader(string language)
     {
         ReaderLanguages.Add(language);

@@ -94,6 +94,12 @@ public sealed partial class RegionWatcher
         area.PanelLifetime?.ThrowIfCancellationRequested();
         Interlocked.Increment(ref reads);
         ReadMeasured?.Invoke(now() - clock);
+        if (GameName.Key(Game?.Invoke()) == "gta 6")
+        {
+            var place = new TextBox(area.Region.Left, area.Region.Top, area.Region.Right, area.Region.Bottom);
+            var chat = GtaViPhoneMessages.Find(reading.PlacedIn(place)) ?? ManualPhoneChat?.Invoke();
+            if (chat is not null) reading = chat.WithoutMessages(reading, place);
+        }
         reading = GamePhoneText.ForTranslation(reading);
         var candidate = MakeCandidate(reading, area.Region, crop, phone: true);
         return candidate.Key.Length > 0

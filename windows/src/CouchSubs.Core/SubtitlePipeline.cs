@@ -175,6 +175,10 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     public bool WatchSubtitleBackground { get; set; }
     /// <summary>true dönerse (GTA) küçük harfsiz, noktalamasız ekran yazısı satırları çevrilmez (<see cref="ScreenText"/>).</summary>
     public Func<bool>? DropsScreenText { get; set; }
+    public Func<bool>? ManualPhoneMessages { get; set; }
+    private GtaViPhoneMessages.Chat? phoneChat;
+    public GtaViPhoneMessages.Chat? PhoneChat => Volatile.Read(ref phoneChat);
+    private long? lastPhoneCheck;
 
     /// <summary>Paket önce adlı satırla, bulunmazsa adsız cümleyle aranır (paket anahtarları çoğu zaman adsızdır).</summary>
     private PackMatch? FindPack(string source)
@@ -297,6 +301,19 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
             try
             {
                 var area = RegionCropper.Crop(frame, region);
+                if (ManualPhoneMessages?.Invoke() == true)
+                {
+                    if (lastPhoneCheck is null || now() - lastPhoneCheck.Value >= 750)
+                    {
+                        lastPhoneCheck = now();
+                        // A failed optional header probe must not discard ordinary dialogue OCR.
+                        GtaViPhoneMessages.Chat? chat = null;
+                        try { chat = GtaViPhoneMessages.Read(frame, reader); }
+                        catch (Exception error) when (error is not OutOfMemoryException and not OperationCanceledException) { }
+                        lock (gate) { if (startedSession == session) Volatile.Write(ref phoneChat, chat); }
+                    }
+                }
+                else Volatile.Write(ref phoneChat, null);
                 signature = RegionCropper.Signature(area);
                 ReadPlan plan;
                 Reading recognized;
@@ -356,8 +373,9 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         var area = new TextBox(region.Left, region.Top, region.Right, region.Bottom);
         // Konuşma değişirken sabit duran görev/HUD satırı ("Get in the sea plane", GTA 6) altyazı bloğuna katılmaz.
         // Route controller instructions before the short-button filter discards their location.
-        var controllerRows = raw.Lines.Where(line => ControllerPrompt.IsPrompt(line.Text)).ToList();
-        var cleaned = new Reading(raw.Lines.Except(controllerRows)).WithoutButtonPrompts().WithoutOcrNoise();
+        var dialogue = PhoneChat?.WithoutMessages(raw, area) ?? raw;
+        var controllerRows = dialogue.Lines.Where(line => ControllerPrompt.IsPrompt(line.Text)).ToList();
+        var cleaned = new Reading(dialogue.Lines.Except(controllerRows)).WithoutButtonPrompts().WithoutOcrNoise();
         // GTA ekran yazısı (silah adı, plaka, tabela, menü) altyazı değildir; konuşmaya yapışsa da çevrilmez.
         if (DropsScreenText?.Invoke() == true) cleaned = WithoutScreenText(cleaned, line => LogOnce("tabela|" + line, $"tabela atıldı: {SubtitleLog.Excerpt(line)}"));
         var rows = new Reading(cleaned.JoiningRows().Lines.Concat(controllerRows));
@@ -1110,6 +1128,8 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
             pairs.Clear();
             lastOcrReading = Reading.Empty;
             lastPanelReading = Reading.Empty;
+            Volatile.Write(ref phoneChat, null);
+            lastPhoneCheck = null;
             lastReadMs = null;
             currentRead = null;
             schedule.Reset();

@@ -17,6 +17,7 @@ public static class ScreenTranslation
     public sealed record Group(IReadOnlyList<string> Paragraphs, TextBox Box, double LineHeight,
                                IReadOnlyList<IReadOnlyList<IconSlot>>? Icons = null)
     {
+        public bool IsPhoneMessage { get; init; }
         /// <summary>GTA 6 telefonunun ekranındaki grubun rolü ve düz ekrandaki yeri (<see cref="PhoneChat"/>); telefon dışındaysa null.</summary>
         internal ScreenPhoneCard.Placement? Phone { get; init; }
     }
@@ -26,6 +27,7 @@ public static class ScreenTranslation
     public sealed record Item(string Source, string Translation, TextBox Box, double LineHeight,
                               IReadOnlyList<IconPlacement>? Icons = null)
     {
+        public bool IsPhoneMessage { get; init; }
         public PhoneTextStyle? Style { get; init; }
         /// <summary>Özgün yazının görünüşü (otomatik ekran yazısı ve "Ekranı çevir"); TV ve masaüstü çeviriyi bu stilde çizer.</summary>
         public TextLook? Look { get; init; }
@@ -75,7 +77,11 @@ public static class ScreenTranslation
         // ReadScreen: altyazıya göre seçilmiş hazırlık değil, karenin bütün yazıları (bkz. ITextReader.ReadScreen).
         var reading = await Task.Run(() => reader.ReadScreen(frame.Height < 900 ? frame.Scaled(2) : frame), cancellationToken)
             .ConfigureAwait(false);
-        return echo is null ? reading : echo.Filter(reading, geometry: echo.HasRecent);
+        // A phone fragment previously mistaken for dialogue must not erase the complete message on Num 9.
+        var chat = GtaViPhoneMessages.Find(reading);
+        if (echo is null) return reading;
+        var filtered = echo.Filter(chat?.WithoutMessages(reading) ?? reading, geometry: echo.HasRecent);
+        return chat is null ? filtered : new Reading(filtered.Lines.Concat(chat.Lines));
     }
 
     /// <summary>
@@ -358,7 +364,8 @@ public static class ScreenTranslation
         if (!changed && !keepUnchanged) return null;
         var (translation, placements) = IconText.Render(string.Join('\n', texts), slots);
         return new Item(string.Join('\n', group.Paragraphs.Select(IconText.Plain)), translation, group.Box, group.LineHeight,
-                        placements.Count > 0 ? placements : null) { Unchanged = !changed, Phone = group.Phone };
+                        placements.Count > 0 ? placements : null)
+            { Unchanged = !changed, Phone = group.Phone, IsPhoneMessage = group.IsPhoneMessage };
     }
 
     /// <summary>
@@ -385,6 +392,9 @@ public static class ScreenTranslation
     private static IReadOnlyList<Group> ReadGroups(Reading reading, bool menuRows, Frame? frame, bool keepIdentifiers = false,
                                                    bool wholeScreen = false, ScreenPhoneCard.Handset? handset = null)
     {
+        if (wholeScreen && GtaViPhoneMessages.Find(reading) is { } chat)
+            return [.. ReadGroups(chat.WithoutMessages(reading), menuRows, frame, keepIdentifiers, wholeScreen, handset),
+                    .. chat.Bubbles];
         var marked = (wholeScreen ? new Reading(reading.Lines.Select(Repaired)) : reading).WithButtonIcons();
         if (wholeScreen)
         {
@@ -915,9 +925,9 @@ public static class ScreenTranslation
     /// </summary>
     public static string? SubtitleBlock(IReadOnlyList<Item> items)
     {
-        var kept = items.Where(item => WordCount(item.Source) >= 3
+        var kept = items.Where(item => item.IsPhoneMessage || (WordCount(item.Source) >= 3
                                        && item.Source.Count(char.IsLetter) > item.Source.Count(c => char.IsDigit(c) || c == '%')
-                                       && !item.Source.Split('\n').All(line => ButtonPrompts.IsPrompt(line) || ButtonPrompts.IsActionLabel(line)))
+                                       && !item.Source.Split('\n').All(line => ButtonPrompts.IsPrompt(line) || ButtonPrompts.IsActionLabel(line))))
             .OrderBy(item => item.Box.Top).Take(6).Select(item => item.Translation).ToList();
         return kept.Count == 0 ? null : string.Join("\n", kept);
     }

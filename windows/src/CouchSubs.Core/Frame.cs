@@ -120,6 +120,22 @@ public sealed class Frame(byte[] pixels, int width, int height, int stride)
 /// <summary>Yazı tanıma öncesi görüntü hazırlığı.</summary>
 public static class TextImage
 {
+    /// <summary>Dark lettering on light message bubbles; the white-text pass alone erases these letters.</summary>
+    public static Frame DarkTextOnly(Frame image)
+    {
+        if (!image.IsConsistent) return image;
+        var inverted = Frame.Blank(image.Width, image.Height);
+        for (var y = 0; y < image.Height; y++)
+            for (var x = 0; x < image.Width; x++)
+            {
+                var source = y * image.Stride + x * 4;
+                var target = y * inverted.Stride + x * 4;
+                for (var c = 0; c < 3; c++) inverted.Pixels[target + c] = (byte)(255 - image.Pixels[source + c]);
+                inverted.Pixels[target + 3] = 255;
+            }
+        return WhiteTextOnly(inverted);
+    }
+
     /// <summary>
     /// Oyun altyazıları çoğunlukla koyu kenarlı ya da gölgeli beyaz yazıdır. Parlak zeminde (kum, gökyüzü) Windows'un
     /// yazı tanıması harfleri zeminden ayıramıyor ve "CESAREiVJütt'h" gibi okuyordu. Burada yakınında koyu piksel olan

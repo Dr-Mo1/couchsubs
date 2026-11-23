@@ -827,6 +827,8 @@ public interface IAppServices
     int? PreferredServerPort => null;
     /// <summary>Oyun dili için yazı tanıyıcı; bilgisayarda hiç OCR dili yoksa null.</summary>
     ITextReader? MakeReader(string language);
+    /// <summary>Production saves diagnostics; fake services keep tests away from the user's data.</summary>
+    void SaveScreenDebug(Frame frame, string reason) { }
     /// <summary>
     /// Altyazı okuyucusu: <paramref name="engine"/> gelişmişse ve modeli kuruluysa PP-OCRv6, değilse
     /// <see cref="MakeReader(string)"/>.

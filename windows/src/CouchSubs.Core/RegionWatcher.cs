@@ -184,6 +184,7 @@ public sealed partial class RegionWatcher
     public bool EnglishPhoneMessages { get; set; }
     /// <summary>Oynanan oyunun adı (bilinmiyorsa null); oyuna özgü yerleşim kuralları için.</summary>
     public Func<string?>? Game { get; set; }
+    public Func<GtaViPhoneMessages.Chat?>? ManualPhoneChat { get; set; }
 
     /// <summary>
     /// Menü satırları ayrı ayrı yerleştirilir (<see cref="ScreenTranslation.Groups"/>): yalnız GTA 6. Etkileşim
@@ -451,6 +452,12 @@ public sealed partial class RegionWatcher
         state.Signature = signature;
         state.LastReadCrop = crop;
         state.LastFullCheck = now();
+        if (GameName.Key(Game?.Invoke()) == "gta 6")
+        {
+            var place = new TextBox(area.Region.Left, area.Region.Top, area.Region.Right, area.Region.Bottom);
+            var chat = GtaViPhoneMessages.Find(reading.PlacedIn(place)) ?? ManualPhoneChat?.Invoke();
+            if (chat is not null) reading = chat.WithoutMessages(reading, place);
+        }
         state.Lines = [.. reading.Lines.Where(line => line.Box.HasValue).Take(32).Select(line => line.Box!.Value)];
         // Altyazı alanındaki ya da altyazı hattının okuduğu satırlar ekran yazısı değildir; altyazı iki yerde çizilmesin
         // (bkz. SubtitleEcho). Menüde ve görev satırının kendi alanında yalnız metin eşleşmesi uygulanır.

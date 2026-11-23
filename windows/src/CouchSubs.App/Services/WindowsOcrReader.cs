@@ -63,7 +63,7 @@ public sealed class WindowsOcrReader : ITextReader
     }
 
     /// <summary>
-    /// "Ekranı çevir": kare olduğu gibi okunur, yalnız beyaz yazı bırakılan okumadan da ham okumanın bulmadığı satırlar
+    /// "Ekranı çevir": kare olduğu gibi okunur, beyaz ve koyu yazı okumalarından da ham okumanın bulmadığı satırlar
     /// eklenir (<see cref="ScreenTranslation.Combined"/>). Altyazının hazırlık zinciri (<see cref="Recognize(Frame)"/>)
     /// kullanılmaz: o zincir pakete/sözlüğe en uyan hazırlığı seçiyor, ekranın tamamında altyazıyı bırakıp menü, görev ve
     /// bilgi yazılarını silen gölgeli-beyaz hazırlık kazanıyordu (GTA 6'da yalnız altyazı çevriliyordu).
@@ -73,7 +73,8 @@ public sealed class WindowsOcrReader : ITextReader
         if (!Usable(image)) return Reading.Empty;
         if (image.Width < 40 || image.Height < 40) return RecognizeOnce(image);
         if (UseAutoLevel) image = AutoLevel(image);
-        return ScreenTranslation.Combined(RecognizeOnce(image), RecognizeOnce(TextImage.WhiteTextOnly(image)));
+        var reading = ScreenTranslation.Combined(RecognizeOnce(image), RecognizeOnce(TextImage.WhiteTextOnly(image)));
+        return ScreenTranslation.Combined(reading, RecognizeOnce(TextImage.DarkTextOnly(image)));
     }
 
     /// <summary>

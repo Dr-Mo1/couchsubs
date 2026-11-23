@@ -366,6 +366,41 @@ public class ScreenTranslationControllerTests
         await controller.StartAsync();
         services.Streams[0].Emit(Frame.Blank(64, 64));
         Assert.Equal(ScreenOutcome.NoText, await controller.TranslateScreenAsync());
+        Assert.Same(controller.LastFrame, Assert.Single(services.ScreenDebug).Frame);
+        Assert.Equal("no screen text", services.ScreenDebug[0].Reason);
+        controller.Stop();
+    }
+
+    [Fact]
+    public async Task StaleFrameIsSavedEvenWhenScreenTranslationSucceeds()
+    {
+        var (controller, services) = Ready();
+        controller.SubtitleEcho = null;
+        services.ReaderLines = new Reading([new TextLine("Open the door.", new TextBox(.4, .8, .6, .84))]);
+        await controller.StartAsync();
+        services.Streams[0].Emit(Frame.Blank(64, 64));
+        await Task.Delay(2100);
+        Assert.Equal(ScreenOutcome.Shown, await controller.TranslateScreenAsync());
+        var saved = Assert.Single(services.ScreenDebug);
+        Assert.Same(controller.LastFrame, saved.Frame);
+        Assert.Contains("stale frame", saved.Reason);
+        controller.Stop();
+    }
+
+    [Fact]
+    public async Task PhoneFollowRefreshDoesNotAutomaticallyTranslateEncryptedMessages()
+    {
+        var (controller, services) = Ready();
+        controller.SubtitleEcho = null;
+        services.ReaderLines = new Reading([
+            new TextLine("Messages encrypted", new TextBox(.73, .24, .95, .258)),
+            new TextLine("New message", new TextBox(.73, .28, .95, .298)),
+            new TextLine("Congratulations.", new TextBox(.73, .38, .95, .398)),
+            new TextLine("By scanning that code", new TextBox(.73, .404, .95, .422)),
+        ]);
+        await controller.StartAsync();
+        services.Streams[0].Emit(Frame.Blank(64, 64));
+        Assert.Equal(ScreenOutcome.Cleared, await controller.TranslateScreenAsync(refresh: true));
         controller.Stop();
     }
 

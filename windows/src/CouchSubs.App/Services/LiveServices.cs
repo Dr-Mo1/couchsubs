@@ -476,6 +476,8 @@ public sealed class LiveServices : IAppServices
         }
     }
 
+    public void SaveScreenDebug(Frame frame, string reason) => ScreenDebugFrames.Save(frame, reason);
+
     public ITextReader? MakeReader(string language)
     {
         var reader = WindowsOcrReader.Create(language);

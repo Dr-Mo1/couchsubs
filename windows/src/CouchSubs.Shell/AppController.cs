@@ -62,6 +62,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private OnlineKeyState? onlineIssue;
     private bool ocrMissing;
     private Frame? lastFrame;
+    private long? lastFrameArrived;
     private bool modelDownloading;
     private double modelProgress;
     private string? modelError;
@@ -1628,6 +1629,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             HideScreen();
             return ScreenOutcome.Cleared;
         }
+        var frameAge = lastFrameArrived is { } received ? Environment.TickCount64 - received : (long?)null;
+        var debugSaved = frameAge > 2000;
+        if (debugSaved) services.SaveScreenDebug(frame, $"stale frame, {frameAge} ms since arrival");
         var wasShown = !refresh && DateTime.UtcNow < screenShownUntil;
         var previous = screenFingerprint;
 
@@ -1648,6 +1652,12 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             translator = MakeTranslator();
             // Altyazı zaten kendi yerinde çevriliyor: ekran çevirisinde ikinci kez çizilmez (bkz. SubtitleEcho).
             var reading = await ScreenTranslation.ReadAsync(frame, reader, SubtitleEcho, work.Token);
+            if (GtaViPhoneMessages.Find(reading) is not null)
+            {
+                // This chat is manual-only, including when a previously opened phone card was being followed.
+                if (refresh) { HideScreen(); return ScreenOutcome.Cleared; }
+                StopFollowing();
+            }
             var fingerprint = ScreenTranslation.Fingerprint(reading);
             if (wasShown)
             {
@@ -1681,6 +1691,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             SubtitleLog.Write($"ekran çevirisi: {items.Count} parça" + (block ? $", blok {joined?.Split('\n').Length ?? 0} satır" : ""));
             if (items.Count == 0 || (block && joined is null))
             {
+                if (!debugSaved) services.SaveScreenDebug(frame, "no screen text");
                 // Yeni karede yazı yok: önceki ekranın çevirileri de kalkar.
                 if (wasShown || refresh) HideScreen();
                 if (!refresh) server.SendSubtitle(text["No text found on the screen."], 2500);
@@ -1692,7 +1703,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                 server.SendSubtitle(joined, ms, paragraphs: true);
                 screenShownUntil = DateTime.UtcNow.AddMilliseconds(ms);
             }
-            else _ = FollowPhoneAsync(frame);
+            else if (!items.Any(item => item.IsPhoneMessage)) _ = FollowPhoneAsync(frame);
             return ScreenOutcome.Shown;
         }
         catch (OperationCanceledException)
@@ -2956,6 +2967,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             WatchSubtitleBackground = settings.WatchSubtitleBackground,
             // Arabic fork: the Arabic packs are GTA 6 only, so screen text is dropped even before the game is known.
             DropsScreenText = () => !demoMode && (settings.TargetLanguage == "ar" || ScreenText.IsGta(gameSense.Current?.Name)),
+            ManualPhoneMessages = () => !demoMode && settings.SourceLanguage == "en" && GameName.Key(gameSense.Current?.Name) == "gta 6",
             Echo = SubtitleEcho,
             EchoPaused = () => Volatile.Read(ref screenText)?.InMenu == true,
         };
@@ -3131,6 +3143,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             regionWatcher.TranslatesUiCommands = settings.SourceLanguage == "en" && settings.TargetLanguage == "tr";
             regionWatcher.EnglishPhoneMessages = settings.SourceLanguage == "en";
             regionWatcher.Game = () => gameSense.Current?.Name;
+            regionWatcher.ManualPhoneChat = () => pipeline?.PhoneChat;
             // Ayarlar'daki ekran yazısı türleri (telefon, görev, yardım/eylemler, menüler, diğer).
             regionWatcher.Allows = kind => Volatile.Read(ref settings).ScreenTextAllows(kind);
             regionWatcher.Slowdown = () => ReadPressure.Slowdown(pipeline?.LastReadMs, frameGate.BusyMs(Environment.TickCount64));
@@ -3557,6 +3570,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             post(() =>
             {
                 LastFrame = frame;
+                lastFrameArrived = arrived;
                 UpdateSubtitleOffTip(frameArrived: true);
             });
             // Duraklatıldıysa kare yalnız ek bölgeler ve serbest alan için saklanır; altyazı okunmaz.
