@@ -104,6 +104,15 @@ public static class AiRequest
         "\"يا ابن الشرموطة\"; at a woman \"يا شرموطة\", \"يا بنت الشرموطة\" or \"يا وسخة\"; a man's friends joking with " +
         "him say \"يلا يا علق\" or \"يا متناك\". When nothing shows who is addressed, a strong insult takes the man's form, " +
         "the Arabic default, and a mild one uses a word that fits both: \"يا زفت\", \"يا زبالة\", \"يا عرّة\" or \"يا جزمة\". " +
+        // DocMo 2026-11-23 (road rage): "You got some balls you know that asshole?" came out «أنت فتي جريء، أتدرك ذلك يا خول؟»,
+        // praise in Standard Arabic. Angry lines are Egyptian as a whole and idioms go by meaning; the examples are his.
+        "A line that carries anger or an insult is Egyptian street Arabic from start to end, however long it is, never a " +
+        "Standard Arabic sentence with an Egyptian insult stuck on. Road rage and street shouting (a driver you cut off, a " +
+        "pedestrian you nearly hit, someone you crash into) is said the way Egyptian drivers shout, by meaning, not word for " +
+        "word: \"You got some balls, you know that, asshole?\" is about nerve, not praise = \"إنت شكل قلبك جايبك، عارف كده يا معرص؟\"; " +
+        "\"Learn to drive!\" = \"اتعلم السواقة!\"; \"Are you blind?\" = \"إنت أعمى؟!\"; \"Watch where you're going, idiot!\" = " +
+        "\"بص قدامك يا بهيمة!\"; \"Who gave you a license?\" = \"مين اللي إداك الرخصة؟ تلاقي أمك اللي جايباهالك!\"; \"idiot\" or " +
+        "\"moron\" at a driver = \"يا متخلف\" or \"يا أعمى\". " +
         "Examples: \"Damn, they saw us! Run!\" = \"أحيه، شافونا! اجري يا سطى!\"; \"Run, girl!\" = \"اجري يا بت!\"; " +
         "\"What're you doing? Stop!\" = \"بتعمل إيه؟ اقف!\"; \"Get the fuck out of my car, motherfucker!\" = " +
         "\"انزل من العربية يا ابن المتناكة!\"; \"Fuck, I forgot the bag.\" = \"أحيه، نسيت الشنطة.\"; \"Thanks, man.\" = \"تسلم يا سطى.\"; " +
