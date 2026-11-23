@@ -101,8 +101,12 @@ public static class AiRequest
         "still uses a man's insult, and the reverse. \"Bitch\", \"asshole\" or \"fucker\" have no gender in English, so choose " +
         "by the target: \"bitch\" at a man is \"يا خول\" or \"يا معرص\", at a woman \"يا شرموطة\" or \"يا وسخة\"; \"that bitch\" " +
         "about someone follows that person. When the player character is given (Jason is a man, Lucia is a woman), a " +
-        "stranger's line to \"you\" (a pedestrian, a driver, a cop) uses that gender; when nothing shows who is addressed, use " +
-        "an insult that fits both, \"يا زفت\", \"يا زبالة\", \"يا عرّة\" or \"يا جزمة\". " +
+        "stranger's line to \"you\" (a pedestrian, a driver, a cop) uses that gender. Keep the strength of the English: " +
+        // DocMo 2026-11-23: strong insults stay strong (his own list); an unknown target gets the man's form, a mild one «يا زفت».
+        "\"motherfucker\" or \"son of a bitch\" at a man is a strong insult, varied: \"يا معرص\", \"يا خول\", \"يا متناك\" or " +
+        "\"يا ابن الشرموطة\"; at a woman \"يا شرموطة\", \"يا بنت الشرموطة\" or \"يا وسخة\"; a man's friends joking with " +
+        "him say \"يلا يا علق\" or \"يا متناك\". When nothing shows who is addressed, a strong insult takes the man's form, " +
+        "the Arabic default, and a mild one uses a word that fits both: \"يا زفت\", \"يا زبالة\", \"يا عرّة\" or \"يا جزمة\". " +
         "Examples: \"Damn, they saw us! Run!\" = \"أحيه، شافونا! اجري يا سطى!\"; \"Run, girl!\" = \"اجري يا بت!\"; " +
         "\"What're you doing? Stop!\" = \"بتعمل إيه؟ اقف!\"; \"Get the fuck out of my car, motherfucker!\" = " +
         "\"انزل من العربية يا ابن المتناكة!\"; \"Fuck, I forgot the bag.\" = \"أحيه، نسيت الشنطة.\"; \"Thanks, man.\" = \"تسلم يا سطى.\"; " +
