@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- True only where values-en/ is the UI language (picks the update notes: notesEn instead of notesAr). -->
+<resources>
+    <bool name="ui_english">false</bool>
+</resources>

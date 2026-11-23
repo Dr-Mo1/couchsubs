@@ -79,10 +79,10 @@
     <string name="psn_error_rate_limited">أوقفت Sony المحاولات مؤقتًا لكثرتها. انتظر قليلًا ثم أعد المحاولة.</string>
     <string name="psn_error_http">خادم Sony لا يستجيب حاليًا (HTTP %1$s).</string>
     <string name="psn_error_bad_response">وصل رد غير متوقع من Sony.</string>
-    <string name="psn_browser">فتح في المتصفح</string>
+    <string name="psn_browser">تسجيل الدخول عبر المتصفح</string>
     <string name="psn_browser_reopen">إعادة فتح المتصفح</string>
-    <string name="psn_browser_title">تسجيل الدخول في المتصفح</string>
-    <string name="psn_browser_body">سجّل الدخول بالحساب الثانوي. بعد ظهور صفحة redirect، انسخ عنوان الصفحة كاملًا وعُد إلى ترجمجي. يقرأ التطبيق العنوان المنسوخ؛ ويمكنك لصقه أدناه ثم المتابعة.</string>
+    <string name="psn_browser_title">تسجيل الدخول عبر المتصفح</string>
+    <string name="psn_browser_body">سيُفتح متصفح الهاتف على صفحة Sony. اتبع الخطوات التالية.</string>
     <string name="psn_browser_google">يتطلب تسجيل الدخول عبر Google متصفح الهاتف. يمكنك اختيار المتابعة عبر Google هناك.</string>
     <string name="psn_browser_field">عنوان الصفحة</string>
     <string name="psn_browser_wrong">العنوان لا يحتوي على رمز تسجيل الدخول. يجب أن يبدأ بـ https://remoteplay.dl.playstation.net/remoteplay/redirect?code=</string>
@@ -747,4 +747,29 @@
     <string name="targamgi_arabic">العربية (عامية مصرية)</string>
     <string name="targamgi_arabic_pack">حزمة GTA VI العربية</string>
     <string name="targamgi_return_to_game">ثم عُد إلى اللعبة</string>
+    <!-- Over-the-air update (UpdateController) and the sturdier PSN browser sign-in (C24). -->
+    <string name="psn_step_1">سجّل الدخول بالحساب الثانوي.</string>
+    <string name="psn_step_2">عندما تعرض الصفحة عنوانًا يبدأ بـ remoteplay.dl.playstation.net، اضغط ⋮ ثم «نسخ الرابط».</string>
+    <string name="psn_step_3">عُد إلى ترجمجي؛ يُكمل التطبيق تسجيل الدخول تلقائيًا.</string>
+    <string name="psn_browser_open">فتح المتصفح</string>
+    <string name="psn_browser_paste">إن لم يلتقط التطبيق الرابط تلقائيًا، الصقه هنا.</string>
+    <string name="psn_use_inapp">المحاولة داخل التطبيق</string>
+    <string name="update_title">تحديث جديد متاح</string>
+    <string name="update_version">الإصدار %1$s</string>
+    <string name="update_now">تحديث الآن</string>
+    <string name="update_later">لاحقًا</string>
+    <string name="update_downloading">جارٍ تنزيل التحديث…</string>
+    <string name="update_progress">%1$d%% — %2$s من %3$s ميغابايت</string>
+    <string name="update_failed_title">تعذّر التحديث</string>
+    <string name="update_failed_network">انقطع تنزيل التحديث. تحقق من اتصالك بالإنترنت ثم أعد المحاولة.</string>
+    <string name="update_failed_corrupt">لم يطابق الملف المنزَّل الإصدار المنشور (الحجم أو SHA-256) فحُذف. أعد المحاولة.</string>
+    <string name="update_failed_install">تعذّر تثبيت التحديث.</string>
+    <string name="update_retry">إعادة المحاولة</string>
+    <string name="update_permission">لتثبيت التحديث، اسمح لترجمجي بتثبيت التطبيقات من الإعدادات ثم عُد إلى التطبيق.</string>
+    <string name="update_open_settings">فتح الإعدادات</string>
+    <string name="update_installing">أكّد التثبيت في نافذة النظام التي ظهرت.</string>
+    <string name="update_check">التحقق من التحديثات</string>
+    <string name="update_checking">جارٍ التحقق…</string>
+    <string name="update_up_to_date">أنت على أحدث إصدار</string>
+    <string name="update_check_failed">تعذّر التحقق الآن. حاول لاحقًا.</string>
 </resources>

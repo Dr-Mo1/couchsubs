@@ -5,7 +5,7 @@
      ?size=48 (yazı boyu, 1080p'de piksel), ?bottom=8 (alttan uzaklık, %), ?bg=60 (altyazı kutusunun koyuluğu, 0-100),
      ?bg=green | black | magenta (tüm sayfanın zemini; şeffaflık tanımayan yayın programlarında chroma key ile silinir),
      ?hint=1 / ?hint=0 (altyazı gelene kadar kısa "Altyazı bekleniyor" ipucu; OBS'te varsayılan kapalı, başka yerde açık). -->
-<html lang="tr">
+<html lang="ar">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -66,7 +66,7 @@
 </head>
 <body>
 <div id="wrap"><div id="line"></div></div>
-<div id="hint"></div>
+<div id="hint" dir="auto"></div>
 <div id="regions"></div>
 <script>
 (function () {
@@ -90,10 +90,11 @@
   var shownMode = 'fixed';
   var lastStyle = {};
   var TEXT_COLORS = { white: '#FFFFFF', yellow: '#FFE135' };
-  var turkish = (navigator.language || 'tr').toLowerCase().indexOf('tr') === 0;
-  var TEXTS = turkish
-    ? { waiting: 'CouchSubs: altyazı bekleniyor', offline: 'CouchSubs uygulamasına bağlanılamadı' }
-    : { waiting: 'CouchSubs: waiting for subtitles', offline: 'Cannot reach the CouchSubs app' };
+  // Targamgi: Arabic by default; English only when the browser language is English.
+  var english = (navigator.language || 'ar').toLowerCase().indexOf('en') === 0;
+  var TEXTS = english
+    ? { waiting: 'Targamgi: waiting for subtitles', offline: 'Cannot reach the Targamgi app' }
+    : { waiting: 'ترجمجي: في انتظار الترجمة', offline: 'تعذّر الاتصال بتطبيق ترجمجي' };
 
   if (pageColor) document.documentElement.style.background = document.body.style.background = pageColor;
 

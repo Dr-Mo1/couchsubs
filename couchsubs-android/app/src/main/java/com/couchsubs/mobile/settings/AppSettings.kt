@@ -153,6 +153,14 @@ class AppSettings(context: Context) : AreaStore {
         get() = prefs.getBoolean("setupSkipped", false)
         set(value) = prefs.edit().putBoolean("setupSkipped", value).apply()
 
+    /**
+     * Sony's sign-in page failed to show a form in the in-app WebView on this phone (timeout, blank page, crash): the PSN screen
+     * then offers the browser tab as the main button. Cleared when an in-app sign-in succeeds.
+     */
+    var psnWebFailed: Boolean
+        get() = prefs.getBoolean("psnWebFailed", false)
+        set(value) = prefs.edit().putBoolean("psnWebFailed", value).apply()
+
     var target: SubtitleTarget
         get() = enumOr(prefs.getString("target", null), SubtitleTarget.TV)
         set(value) = prefs.edit().putString("target", value.name).apply()

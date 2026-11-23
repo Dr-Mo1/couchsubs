@@ -466,6 +466,7 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
                     if (settings.xbox) ({ RowItem(stringResource(R.string.settings_xbox_audio), stringResource(R.string.settings_xbox_audio_short)) {
                         Switch(xboxAudio, { xboxAudio = it; settings.xboxAudioOnDevice = it })
                     } }) else null,
+                    { UpdateCheckRow() },
                     { RowItem(stringResource(R.string.settings_about), BuildConfig.VERSION_NAME, onClick = { showAbout = true }) },
                 ))
                 if (showAbout) AboutDialog { showAbout = false }

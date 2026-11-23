@@ -35,6 +35,9 @@ import com.couchsubs.mobile.service.LiveState
 import com.couchsubs.mobile.service.TranslationService
 import com.couchsubs.mobile.settings.SubtitleTarget
 import com.couchsubs.mobile.tv.TvAppUpdate
+import com.couchsubs.mobile.update.UpdateController
+import com.couchsubs.mobile.update.UpdatePolicy
+import kotlinx.coroutines.delay
 
 /** Gezinme yolları (Compose Navigation). */
 object Routes {
@@ -88,6 +91,8 @@ class MainActivity : ComponentActivity() {
             if (event == androidx.lifecycle.Lifecycle.Event.ON_START)
                 PromoController.refresh(applicationContext, Services.scope, setupDone = Routes.next() == Routes.MAIN && settings.tourShown)
         })
+        // Over-the-air update: every cold start (old downloads are deleted first); while the app stays open, every 6 hours below.
+        UpdateController.coldStart(applicationContext)
         setContent {
             CouchSubsTheme {
                 val navigation = rememberNavController()
@@ -103,6 +108,12 @@ class MainActivity : ComponentActivity() {
                 // eskiyse ana ekran "TV uygulamasını güncelle" önerir.
                 val tvConnected = status.connectedTvs > 0
                 LaunchedEffect(tvConnected) { TvAppUpdate.check(applicationContext) }
+                LaunchedEffect(Unit) {
+                    while (true) {
+                        delay(UpdatePolicy.CHECK_INTERVAL_MS)
+                        UpdateController.check(applicationContext, manual = false)
+                    }
+                }
                 DisposableEffect(navigation) {
                     val listener = androidx.navigation.NavController.OnDestinationChangedListener { _, destination, _ ->
                         destination.route?.let { Telemetry.screen(it.substringBefore('/')) }
@@ -205,7 +216,7 @@ class MainActivity : ComponentActivity() {
                 // TV'nin eşleştirme isteği: onay penceresi ve her ekranın üstünde onay satırı (iPhone ile aynı).
                 TvPairingPrompt(status.pairing)
                 // Küçük pencerede (Resim içinde resim) yalnız oyun görüntüsü ve canlı altyazı; gezinme yığını altta durur.
-                if (inPip) PipSubtitleView(status)
+                if (inPip) PipSubtitleView(status) else UpdateHost()
             }
         }
     }
@@ -217,6 +228,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         TranslationService.syncPairing()
+        // Back from the "Install unknown apps" settings page: carry on with the update.
+        UpdateController.onResume(this)
         // Profil'de "Arka planda sürdür" değişmiş olabilir.
         BackgroundPip.update(this, BackgroundPip.wanted(this, LiveState.status.value))
     }

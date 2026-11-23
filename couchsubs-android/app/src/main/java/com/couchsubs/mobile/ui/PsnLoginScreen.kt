@@ -4,6 +4,8 @@
 // LOAD_TIMEOUT_MS içinde giriş formunu çizmezse nedeni ve "Yeniden dene" gösterilir. "Google ile giriş" seçilince
 // (Google WebView'da girişi reddeder) giriş kendiliğinden tarayıcıya geçer. Tarayıcıdan dönünce panodaki yönlendirme
 // adresi kendiliğinden alınır; ekran durumu uygulama arka planda kapatılsa da korunur.
+// C24: WebView Chrome Mobile gibi görünür (PsnFallback); sayfa açılmazsa ya da bu telefonda bir kez açılmadıysa ana düğme
+// "tarayıcıdan giriş" olur: önce 3 adım gösterilir, sonra tarayıcı sekmesi açılır, dönüşte pano her devam edişte okunur.
 package com.couchsubs.mobile.ui
 
 import android.annotation.SuppressLint
@@ -14,6 +16,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.net.http.SslError
+import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
 import android.view.View
@@ -38,6 +41,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
@@ -46,6 +50,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -63,11 +68,16 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.couchsubs.mobile.R
 import com.couchsubs.mobile.Services
 import com.couchsubs.mobile.remoteplay.PsnAccount
 import com.couchsubs.mobile.remoteplay.PsnAccountException
+import com.couchsubs.mobile.remoteplay.PsnFallback
 import com.couchsubs.mobile.remoteplay.PsnLoginFailure
 import com.couchsubs.mobile.remoteplay.PsnLoadWatch
 import com.couchsubs.mobile.remoteplay.PsnPageProblem
@@ -92,6 +102,8 @@ fun PsnLoginScreen(onBack: (() -> Unit)? = null, onSkip: (() -> Unit)? = null, o
     // yerinde kalsın diye kaydedilir (eskiden giriş ekranına dönülüyordu, adresi yapıştıracak yer kalmıyordu).
     var mode by rememberSaveable { mutableStateOf(PsnMode.INTRO) }
     var viaGoogle by rememberSaveable { mutableStateOf(false) }
+    // The browser tab was opened from the steps screen (Android may kill the app meanwhile, so it is saved).
+    var opened by rememberSaveable { mutableStateOf(false) }
     // Son denenen yönlendirme: panoda kalan eski (kullanılmış) kod kendiliğinden yeniden denenmez.
     var tried by rememberSaveable { mutableStateOf<String?>(null) }
     var problem by remember { mutableStateOf<String?>(null) }
@@ -145,21 +157,35 @@ fun PsnLoginScreen(onBack: (() -> Unit)? = null, onSkip: (() -> Unit)? = null, o
         }
     }
 
+    // The browser flow starts on the steps screen; the tab opens from its main button.
     fun openBrowser(google: Boolean = false) {
         viaGoogle = google
+        opened = false
         mode = PsnMode.BROWSER
-        openInBrowser(context)
     }
 
     BackHandler(enabled = mode != PsnMode.INTRO) { mode = PsnMode.INTRO }
     when (mode) {
         PsnMode.INTRO -> {
+            // Uygulama içi sayfa bu telefonda bir kez açılmadıysa ana düğme tarayıcı sekmesidir (uygulama içi deneme ikincil).
+            val browserFirst = PsnFallback.browserFirst(null, Services.settings.psnWebFailed)
             ScreenScaffold(top = { TopBar(onBack = onBack) { SkipAction(onSkip) } }, bottom = {
                 GhostButton(stringResource(R.string.psn_why)) { why = true }
-                // Giriş yarıda kaldıysa ana düğme "Yeniden dene" olur (yeni giriş açar; kullanılmış kod yeniden denenmez).
-                PrimaryButton(stringResource(if (problem != null) R.string.psn_retry else R.string.psn_open)) {
-                    problem = null
-                    mode = PsnMode.WEB
+                if (browserFirst) {
+                    GhostButton(stringResource(R.string.psn_use_inapp)) {
+                        problem = null
+                        mode = PsnMode.WEB
+                    }
+                    PrimaryButton(stringResource(R.string.psn_browser)) {
+                        problem = null
+                        openBrowser()
+                    }
+                } else {
+                    // Giriş yarıda kaldıysa ana düğme "Yeniden dene" olur (yeni giriş açar; kullanılmış kod yeniden denenmez).
+                    PrimaryButton(stringResource(if (problem != null) R.string.psn_retry else R.string.psn_open)) {
+                        problem = null
+                        mode = PsnMode.WEB
+                    }
                 }
             }) {
                 Heading(stringResource(R.string.psn_title), stringResource(R.string.psn_body), stringResource(R.string.setup_step, 1))
@@ -180,7 +206,7 @@ fun PsnLoginScreen(onBack: (() -> Unit)? = null, onSkip: (() -> Unit)? = null, o
                 NoteTile(stringResource(R.string.psn_main_account))
                 problem?.let {
                     NoteTile(stringResource(R.string.psn_failed, it))
-                    GhostButton(stringResource(R.string.psn_browser)) { openBrowser() }
+                    if (!browserFirst) GhostButton(stringResource(R.string.psn_browser)) { openBrowser() }
                 }
             }
             if (why) InfoDialog(stringResource(R.string.psn_why), stringResource(R.string.psn_why_body)) { why = false }
@@ -195,8 +221,12 @@ fun PsnLoginScreen(onBack: (() -> Unit)? = null, onSkip: (() -> Unit)? = null, o
         PsnMode.BROWSER -> PsnBrowserLogin(
             viaGoogle = viaGoogle,
             tried = tried,
+            opened = opened,
             onRedirect = ::finish,
-            onReopen = { openInBrowser(context) },
+            onOpen = {
+                opened = true
+                openInBrowser(context)
+            },
             onClose = { mode = PsnMode.INTRO },
         )
     }
@@ -236,9 +266,16 @@ private fun clearClipIf(context: Context, redirect: String) {
     }
 }
 
+/**
+ * Sony's sign-in in a browser tab. androidx.browser (Custom Tabs library) is not a dependency (it is not in the offline Gradle
+ * cache), so this is the plain ACTION_VIEW intent plus the Custom Tabs "session" extra that CustomTabsIntent.Builder().build()
+ * adds: Chrome and other Custom Tabs browsers show it as a tab with the ⋮ menu ("Copy link"); any other browser just opens the page.
+ */
 private fun openInBrowser(context: Context) {
     try {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PsnAccount.authorizeUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PsnAccount.authorizeUrl)).addCategory(Intent.CATEGORY_BROWSABLE)
+            .putExtras(Bundle().apply { putBinder("android.support.customtabs.extra.SESSION", null) })
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     } catch (error: ActivityNotFoundException) {
         Log.w(TAG, "Tarayıcı bulunamadı", error)
     }
@@ -280,6 +317,8 @@ private fun PsnWebLogin(
     fun fail(problem: PsnPageProblem, detail: String?) {
         Log.w(TAG, "Giriş sayfası açılamadı: $problem ${detail ?: ""}")
         if (failure == null) failure = problem to detail
+        // Bu telefonda uygulama içi sayfa açılmadı: sonraki girişte tarayıcı ana düğme olur.
+        if (PsnFallback.blamesWebView(problem)) Services.settings.psnWebFailed = true
     }
 
     ScreenBackground {
@@ -329,6 +368,8 @@ private fun PsnWebLogin(
                                 setBackgroundColor(background)
                                 settings.javaScriptEnabled = true
                                 settings.domStorageEnabled = true
+                                // Sony blocks some embedded browsers at times (chiaki-ng #495, #664): look like Chrome Mobile ("; wv" and "Version/4.0 " removed).
+                                settings.userAgentString = PsnFallback.chromeLikeUserAgent(settings.userAgentString)
                                 // Sony'nin girişi sonyentertainmentnetwork.com, sony.com ve playstation.com arasında gidip
                                 // gelir; WebView üçüncü taraf çerezleri varsayılan olarak reddeder (masaüstü tarayıcılar kabul eder).
                                 CookieManager.getInstance().setAcceptCookie(true)
@@ -350,6 +391,7 @@ private fun PsnWebLogin(
                                         // Hesap kimliği alınırken sayfa yerine bekleme göstergesi.
                                         visible = false
                                         completing = true
+                                        Services.settings.psnWebFailed = false
                                         onRedirect(url)
                                     },
                                     onVisible = { visible = true },
@@ -389,9 +431,17 @@ private fun PsnWebLogin(
                     ) {
                         Heading(stringResource(R.string.psn_page_failed), failures(problem) + (detail?.let { " ($it)" } ?: ""))
                         NoteTile(stringResource(R.string.psn_page_failed_hint), Tokens.Color.secondary)
-                        PrimaryButton(stringResource(R.string.psn_retry)) { retry() }
-                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            GhostButton(stringResource(R.string.psn_browser), onClick = onBrowser)
+                        // After the load timeout (no form) or any other page failure the browser tab is the main button.
+                        if (PsnFallback.browserFirst(problem, failedBefore = false)) {
+                            PrimaryButton(stringResource(R.string.psn_browser), onClick = onBrowser)
+                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                GhostButton(stringResource(R.string.psn_retry)) { retry() }
+                            }
+                        } else {
+                            PrimaryButton(stringResource(R.string.psn_retry)) { retry() }
+                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                GhostButton(stringResource(R.string.psn_browser), onClick = onBrowser)
+                            }
                         }
                     }
                 }
@@ -544,38 +594,68 @@ private class LoginClient(
 }
 
 /**
- * Tarayıcıda giriş: Sony girişten sonra tarayıcıyı yönlendirme adresine götürür. O adres Sony'nin alanında olduğundan
- * (App Link kurulamaz) tarayıcı uygulamaya kendiliğinden dönmez; kullanıcı adresi kopyalar. Uygulamaya dönülünce
- * panoda yönlendirme adresi varsa kendiliğinden alınır ve giriş tamamlanır; yoksa adres elle yapıştırılır.
+ * Tarayıcıda giriş: önce 3 adım, sonra tarayıcı sekmesi. Sony girişten sonra tarayıcıyı yönlendirme adresine götürür. O adres
+ * Sony'nin alanında olduğundan (App Link kurulamaz) tarayıcı uygulamaya kendiliğinden dönmez; kullanıcı adresi kopyalar.
+ * Uygulamaya dönülünce (her devam edişte, pencere odak alınca) panoda yönlendirme adresi varsa kendiliğinden alınır ve giriş
+ * tamamlanır; yoksa adres elle yapıştırılır.
  */
 @Composable
 private fun PsnBrowserLogin(
     viaGoogle: Boolean,
     tried: String?,
+    opened: Boolean,
     onRedirect: (String) -> Unit,
-    onReopen: () -> Unit,
+    onOpen: () -> Unit,
     onClose: () -> Unit,
 ) {
     var text by rememberSaveable { mutableStateOf("") }
     val redirect = PsnAccount.redirectFromText(text)
     val context = LocalContext.current
-    // Android 10'dan beri pano yalnız pencere odaktayken okunabilir: tarayıcıdan dönüp pencere odak alınca bakılır.
+    // Android 10'dan beri pano yalnız pencere odaktayken okunabilir: tarayıcıdan dönüp pencere odak alınca bakılır. Odak olayı
+    // gelmese de (ör. sekme aynı pencerede kapanınca) her devam edişte yeniden bakılır.
     val focused = LocalWindowInfo.current.isWindowFocused
-    LaunchedEffect(focused) {
-        if (!focused) return@LaunchedEffect
+    var resumes by remember { mutableIntStateOf(0) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) resumes++ }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(focused, resumes, opened) {
+        if (!focused || !opened) return@LaunchedEffect
         val found = readClip(context)?.let(PsnAccount::redirectFromText)?.takeIf { it != tried } ?: return@LaunchedEffect
         Log.i(TAG, "Panoda yönlendirme adresi bulundu")
         text = found
         onRedirect(found)
     }
     ScreenScaffold(top = { TopBar(onBack = onClose) }, bottom = {
-        GhostButton(stringResource(R.string.psn_browser_reopen), onClick = onReopen)
-        PrimaryButton(stringResource(R.string.next), enabled = redirect != null) { redirect?.let(onRedirect) }
+        if (opened) {
+            GhostButton(stringResource(R.string.psn_browser_reopen), onClick = onOpen)
+            PrimaryButton(stringResource(R.string.next), enabled = redirect != null) { redirect?.let(onRedirect) }
+        } else {
+            PrimaryButton(stringResource(R.string.psn_browser_open), onClick = onOpen)
+        }
     }) {
         Heading(stringResource(R.string.psn_browser_title), stringResource(R.string.psn_browser_body))
         if (viaGoogle) NoteTile(stringResource(R.string.psn_browser_google), Tokens.Color.secondary)
-        Field(text, { text = it }, stringResource(R.string.psn_browser_field), keyboard = KeyboardOptions(keyboardType = KeyboardType.Uri))
-        if (text.isNotBlank() && redirect == null) NoteTile(stringResource(R.string.psn_browser_wrong))
+        Tile(Modifier.fillMaxWidth()) {
+            StepRow(1, stringResource(R.string.psn_step_1))
+            StepRow(2, stringResource(R.string.psn_step_2))
+            StepRow(3, stringResource(R.string.psn_step_3))
+        }
+        if (opened) {
+            BodyText(stringResource(R.string.psn_browser_paste))
+            Field(text, { text = it }, stringResource(R.string.psn_browser_field), keyboard = KeyboardOptions(keyboardType = KeyboardType.Uri))
+            if (text.isNotBlank() && redirect == null) NoteTile(stringResource(R.string.psn_browser_wrong))
+        }
+    }
+}
+
+@Composable
+private fun StepRow(number: Int, text: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap), verticalAlignment = Alignment.Top) {
+        Text("$number", style = Tokens.Type.headline, color = Tokens.Color.accentText, modifier = Modifier.width(20.dp))
+        Text(text, style = Tokens.Type.body, color = Tokens.Color.text)
     }
 }
 
