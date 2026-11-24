@@ -6,10 +6,11 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import javax.xml.parsers.DocumentBuilderFactory
 
 /**
  * "Arka planda sürdür (Resim içinde resim)": pencere yalnız çeviri sürerken ve ayar açıkken açılır; iki etkinlik de PiP
- * destekler; ayar adı ve açıklaması iPhone'dakiyle aynıdır (platform eşitliği).
+ * destekler; ayar açıklaması iki dilde de oyun görüntüsünü ve çeviriyi anlatır.
  */
 class BackgroundPipTest {
     private fun file(vararg candidates: String): File =
@@ -32,13 +33,21 @@ class BackgroundPipTest {
     }
 
     @Test
-    fun settingTextMatchesIPhone() {
-        val english = file("app/src/main/res/values-en/strings.xml", "src/main/res/values-en/strings.xml").readText()
-        val catalog = file("../mac/CouchSubs/Resources/Localizable.xcstrings", "mac/CouchSubs/Resources/Localizable.xcstrings").readText()
-        // The default (values) is Arabic now; the iPhone catalog only has Turkish and English, so only English is compared.
-        for (strings in listOf(english)) for (name in listOf("settings_background_pip", "settings_background_pip_short")) {
-            val text = Regex("<string name=\"$name\">([^<]*)</string>").find(strings)!!.groupValues[1]
-            assertTrue("$name iPhone'da yok: $text", catalog.contains("\"$text\""))
+    fun settingExplainsFloatingPictureAndTranslationInBothLanguages() {
+        // C28 gives this fork its own copy; validate the explanation rather than upstream iPhone wording.
+        for ((folder, phrases) in listOf(
+            "values" to listOf("صورة اللعبة", "الترجمة", "نافذة صغيرة", "مغادرة التطبيق"),
+            "values-en" to listOf("game picture", "live subtitle", "small window", "leave the translation app"),
+        )) {
+            val resource = file("app/src/main/res/$folder/strings.xml", "src/main/res/$folder/strings.xml")
+            val nodes = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(resource).getElementsByTagName("string")
+            val strings = (0 until nodes.length).associate { index ->
+                val node = nodes.item(index)
+                node.attributes.getNamedItem("name").nodeValue to node.textContent
+            }
+            assertTrue("$folder title", strings.getValue("settings_background_pip").isNotBlank())
+            val description = strings.getValue("settings_background_pip_short")
+            for (phrase in phrases) assertTrue("$folder: $phrase missing from $description", description.contains(phrase))
         }
     }
 }

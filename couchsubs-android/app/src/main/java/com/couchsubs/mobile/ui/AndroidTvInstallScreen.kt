@@ -225,6 +225,9 @@ internal fun AndroidTvInstallScreen(onBack: () -> Unit, onDone: () -> Unit, bran
                 Text(stringResource(R.string.tvinstall_next), style = Tokens.Type.caption, color = Tokens.Color.secondary)
             }
             is AndroidState.Failed -> {
+                androidx.compose.runtime.LaunchedEffect(current) {
+                    com.couchsubs.mobile.reporting.ProblemReporter.error("tv.install.android", "${current.error}: ${current.detail.orEmpty()}")
+                }
                 if (AdbMode.offersWireless(wireless, current.error)) {
                     // Eskiden yalnız genel "TV yanıt vermedi" yazısı vardı; 5555 kapalı TV'de çözüm kablosuz hata ayıklamadır.
                     NoteTile(stringResource(R.string.tvinstall_android_err_legacy_closed))

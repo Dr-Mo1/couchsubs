@@ -115,7 +115,7 @@
     <string name="target_obs_body">Subtitles go only to OBS. The TV is not searched for and this phone shows no subtitle screen. In OBS on a computer on the same Wi-Fi, add a Browser source with this address (width 1920, height 1080).</string>
     <string name="main_target_both">%1$s and this phone</string>
     <string name="target_tvs_none">No TV seen on the network (it may be off; that\'s fine).</string>
-    <string name="target_tvs_none_help">Turn on the TV and connect it to the phone network, or choose the phone display.</string>
+    <string name="target_tvs_none_help">Turn on the TV and connect it to the phone network, then choose “Install the TV app from this phone”. For a monitor or a non-smart TV, choose “On this phone”.</string>
 
     <string name="main_phone_view">Subtitle screen</string>
     <string name="main_target">Subtitles</string>
@@ -915,4 +915,18 @@
     <string name="game_title_53">The Last of Us Part I</string>
     <string name="game_title_54">God of War</string>
     <string name="game_title_55">Call of Duty: Modern Warfare (2019)</string>
+
+    <string name="report_support">Support</string>
+    <string name="report_title">Report a problem</string>
+    <string name="report_description">Describe the problem</string>
+    <string name="report_hint">What happened, and what were you doing just before?</string>
+    <string name="report_name">Your name (optional)</string>
+    <string name="report_attach">Attach the app log</string>
+    <string name="report_send">Send</string>
+    <string name="report_sent">Report sent. Thank you.</string>
+    <string name="report_failed">Could not send. Check the connection and try again.</string>
+    <string name="report_automatic">Send problem reports automatically</string>
+    <string name="report_automatic_hint">When something fails, the app log is sent, without passwords or sign-in codes.</string>
+    <string name="report_improve">Help improve the translation</string>
+    <string name="report_improve_hint">Only the English and Arabic subtitle text from play sessions is sent, with no personal data.</string>
 </resources>

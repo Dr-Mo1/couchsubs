@@ -728,11 +728,12 @@ class TranslationService : Service() {
                 }.speak(com.couchsubs.mobile.core.SpokenLine.of(pair.source, pair.translation), settings.dubbingCast, settings.dubbingOutput)
                 if (replacement == null) PlayedGame.noteLine(pair.origin == "paket", library)
                 Services.addToHistory(pair.source, pair.translation,
-                    if (pair.origin == "paket") com.couchsubs.mobile.core.SubtitleHistory.PACK else com.couchsubs.mobile.core.SubtitleHistory.ENGINE)
+                    if (pair.origin == "paket") com.couchsubs.mobile.core.SubtitleHistory.PACK else com.couchsubs.mobile.core.SubtitleHistory.ENGINE, review = !demo)
                 // Paket başına oturumda bir kez (her satırda olay göndermeyelim); toplam sayı oturum sonunda gider.
                 pair.packId?.let { id -> if (packsUsed.add(id)) Telemetry.event(Telemetry.PACK_HIT, "pack" to id) }
             }
             onTranslationResult = { error ->
+                if (error != null) com.couchsubs.mobile.reporting.ProblemReporter.error("translation.engine", error.toString())
                 LiveState.update { it.copy(error = error?.let { getString(R.string.error_translation) }) }
             }
         }
@@ -842,6 +843,12 @@ class TranslationService : Service() {
                 reconnectOffer.update(state == SessionState.Streaming, now)
                 session?.hasGivenUp == true
             }
+            if (!demo && state is SessionState.Disconnected && state.kind != DisconnectKind.STOPPED) {
+                com.couchsubs.mobile.reporting.ProblemReporter.error(
+                    if (settings.xbox) "xbox.connection" else "ps5.connection", "${state.kind}: ${state.detail.orEmpty()}")
+            }
+            if (!demo && gaveUp) com.couchsubs.mobile.reporting.ProblemReporter.error(
+                if (settings.xbox) "xbox.gave_up" else "ps5.gave_up", describe(state))
             LiveState.update {
                 it.withStreaming(state == SessionState.Streaming)
                     .copy(phase = describe(state), notLiveSince = reconnectOffer.notLiveSince, gaveUp = gaveUp)
@@ -1193,6 +1200,7 @@ class TranslationService : Service() {
 
     private fun failScreen(generation: Int, message: String) {
         if (screenGeneration.get() != generation) return
+        com.couchsubs.mobile.reporting.ProblemReporter.error("translation.screen", message)
         LiveState.update { it.copy(screenState = LiveStatus.ScreenState.IDLE) }
         server?.clear()
         server?.sendSubtitle(message, 6000)
@@ -1459,6 +1467,7 @@ class TranslationService : Service() {
         wifiLocks.forEach { lock -> runCatching { if (lock.isHeld) lock.release() } }
         wifiLocks = emptyList()
         LiveState.update { it.copy(running = false, phase = "", streaming = false, framesSince = null, subtitleOffTip = false, tvOpenProblem = null, current = "", previous = "", regions = emptyList(), screen = emptyList(), screenState = LiveStatus.ScreenState.IDLE) }
+        Services.flushReviewReports()
         super.onDestroy()
     }
 }

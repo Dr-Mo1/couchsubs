@@ -14,6 +14,9 @@ import com.couchsubs.mobile.settings.AppSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
@@ -76,9 +79,22 @@ object Services {
     private var historyFile: File? = null
     private val historyWriter = java.util.concurrent.Executors.newSingleThreadExecutor { Thread(it, "CouchSubs history").apply { isDaemon = true } }
 
-    fun addToHistory(source: String, translation: String, origin: String) {
+    fun addToHistory(source: String, translation: String, origin: String, review: Boolean = true) {
+        if (review) {
+            val playing = com.couchsubs.mobile.service.PlayedGame.sense.current
+            val game = playing?.titleId ?: playing?.name.orEmpty()
+            val at = System.currentTimeMillis()
+            val enabled = com.couchsubs.mobile.reporting.ProblemReporter.improveTranslation
+            historyWriter.execute {
+                if (enabled) runCatching { com.couchsubs.mobile.reporting.ProblemReporter.recordLine(game, source, translation, origin, at) }
+            }
+        }
         history.add(source, translation, origin)
         historyChanged()
+    }
+
+    fun flushReviewReports() {
+        historyWriter.execute { com.couchsubs.mobile.reporting.ProblemReporter.flush() }
     }
 
     fun clearHistory() {
@@ -108,6 +124,12 @@ object Services {
             }
         }
         settings = AppSettings(app)
+        com.couchsubs.mobile.reporting.ProblemReporter.init(app)
+        scope.launch {
+            com.couchsubs.mobile.service.LiveState.status.map { it.error }.distinctUntilChanged().collect { error ->
+                if (error != null) com.couchsubs.mobile.reporting.ProblemReporter.error("translation.status", error)
+            }
+        }
         Backend.init(app)
         Meta.init(app)
         applyMeasurement()

@@ -202,6 +202,10 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
         engine = choice
         settings.engine = choice
     }
+    if (section == 5) {
+        ProblemReportScreen { section = 0 }
+        return
+    }
     if (section == 4) {
         OpenSourceScreen { section = 0 }
         return
@@ -510,6 +514,7 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
             }
             if (section == 0) {
                 DeveloperSignature()
+                SupportSettings { section = 5 }
                 RowList(listOf({ RowItem(stringResource(R.string.open_source_licenses), onClick = { section = 4 }) }))
             }
         }

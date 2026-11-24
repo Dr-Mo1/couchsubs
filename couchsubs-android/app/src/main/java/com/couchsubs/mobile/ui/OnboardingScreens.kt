@@ -108,8 +108,10 @@ fun PairScreen(onBack: (() -> Unit)? = null, onSkip: (() -> Unit)? = null, onDon
                     settings.console = withContext(Dispatchers.IO) { Registration.register(address, accountId, pin!!) }
                     onDone()
                 } catch (error: RegistrationException) {
+                    com.couchsubs.mobile.reporting.ProblemReporter.error("ps5.pair", "${error.failure}: ${error.detail.orEmpty()}")
                     problem = failures(error.failure) + (error.detail?.let { " ($it)" } ?: "")
                 } catch (error: Exception) {
+                    com.couchsubs.mobile.reporting.ProblemReporter.error("ps5.pair", error.message)
                     problem = error.message
                 } finally {
                     working = false

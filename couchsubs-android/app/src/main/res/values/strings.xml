@@ -113,7 +113,7 @@
     <string name="target_obs_body">تُرسل الترجمة إلى برنامج البث فقط. أضف مصدر متصفح بهذا العنوان، بعرض 1920 وارتفاع 1080، على كمبيوتر متصل بالشبكة نفسها.</string>
     <string name="main_target_both">%1$s والهاتف</string>
     <string name="target_tvs_none">لم يظهر تلفزيون على الشبكة.</string>
-    <string name="target_tvs_none_help">شغّل التلفزيون وصِله بشبكة الهاتف، أو اختر شاشة الهاتف.</string>
+    <string name="target_tvs_none_help">شغّل التلفزيون وصِله بشبكة الهاتف، واختر «تثبيت تطبيق التلفزيون من الهاتف». إذا كنت تستخدم شاشة كمبيوتر أو تلفزيونًا غير ذكي، فاختر «شاشة الهاتف».</string>
 
     <string name="main_phone_view">عرض الترجمة</string>
     <string name="main_target">شاشة العرض</string>
@@ -925,4 +925,18 @@
     <string name="game_title_53">ذا لاست أوف أس الجزء 1</string>
     <string name="game_title_54">جود أوف وور</string>
     <string name="game_title_55">كول أوف ديوتي: مودرن وورفير 2019</string>
+
+    <string name="report_support">الدعم</string>
+    <string name="report_title">الإبلاغ عن مشكلة</string>
+    <string name="report_description">صف المشكلة</string>
+    <string name="report_hint">ماذا حدث، وماذا كنت تفعل قبل ذلك؟</string>
+    <string name="report_name">اسمك (اختياري)</string>
+    <string name="report_attach">إرفاق سجل التطبيق</string>
+    <string name="report_send">إرسال</string>
+    <string name="report_sent">تم إرسال البلاغ. شكرًا لك.</string>
+    <string name="report_failed">تعذّر الإرسال. تحقّق من الاتصال وأعد المحاولة.</string>
+    <string name="report_automatic">إرسال تقارير الأعطال تلقائيًا</string>
+    <string name="report_automatic_hint">عند حدوث عطل يُرسَل سجل التطبيق، دون كلمات المرور أو رموز الدخول.</string>
+    <string name="report_improve">المساهمة في تحسين الترجمة</string>
+    <string name="report_improve_hint">تُرسَل نصوص الترجمة الإنجليزية والعربية من جلسات اللعب فقط، دون أي بيانات شخصية.</string>
 </resources>

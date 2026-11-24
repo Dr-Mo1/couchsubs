@@ -647,6 +647,8 @@ private fun StepRow(number: Int, text: String) {
 internal fun pageProblems(): (PsnPageProblem) -> String {
     val context = LocalContext.current
     return { problem ->
+        // Shared failure presentation: observe Sony's failure without changing PsnWebLogin or LoginClient.
+        com.couchsubs.mobile.reporting.ProblemReporter.error("web.sign_in", problem.name)
         context.getString(when (problem) {
             PsnPageProblem.OFFLINE -> R.string.psn_problem_offline
             PsnPageProblem.TIMEOUT -> R.string.psn_problem_timeout

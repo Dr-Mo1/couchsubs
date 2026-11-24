@@ -212,6 +212,9 @@ internal fun LgInstallScreen(onBack: () -> Unit, onDone: () -> Unit, brandPicker
                 Text(stringResource(R.string.tvinstall_next), style = Tokens.Type.caption, color = Tokens.Color.secondary)
             }
             is LgState.Failed -> {
+                androidx.compose.runtime.LaunchedEffect(current) {
+                    com.couchsubs.mobile.reporting.ProblemReporter.error("tv.install.lg", "${current.error}: ${current.detail.orEmpty()}")
+                }
                 NoteTile(lgFailureText(current))
                 GhostButton(stringResource(R.string.tvinstall_share_log)) { shareLog(context, logFile) }
             }

@@ -70,7 +70,7 @@ class TvGuidesTest {
             val title = listOf("chooser_android_title", "chooser_lg_title", "chooser_samsung_title", "chooser_browser_title", "target_phone", "chooser_unknown_title")[choice.ordinal]
             assertTrue(title, arabic.getValue(title).isNotBlank() && english.getValue(title).isNotBlank())
         }
-        assertEquals("لا أعرف نوع شاشتي", arabic.getValue("chooser_unknown_title"))
+        assertEquals("لا أعرف نوع التلفزيون", arabic.getValue("chooser_unknown_title"))
     }
 
     @Test

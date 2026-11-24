@@ -187,7 +187,10 @@ fun XboxLoginScreen(onBack: (() -> Unit)? = null, onSkip: (() -> Unit)? = null, 
             }
             if (flow.working) BodyText(stringResource(R.string.xbox_login_waiting))
         }
-        flow.problem?.let { NoteTile(stringResource(R.string.xbox_login_failed, it)) }
+        flow.problem?.let { problem ->
+            LaunchedEffect(problem) { com.couchsubs.mobile.reporting.ProblemReporter.error("xbox.sign_in", problem) }
+            NoteTile(stringResource(R.string.xbox_login_failed, problem))
+        }
     }
 }
 
@@ -247,7 +250,10 @@ fun XboxConsoleScreen(onBack: (() -> Unit)? = null, onSkip: (() -> Unit)? = null
                 }
             }
         }
-        problem?.let { NoteTile(it) }
+        problem?.let { detail ->
+            LaunchedEffect(detail) { com.couchsubs.mobile.reporting.ProblemReporter.error("xbox.consoles", detail) }
+            NoteTile(detail)
+        }
     }
 }
 

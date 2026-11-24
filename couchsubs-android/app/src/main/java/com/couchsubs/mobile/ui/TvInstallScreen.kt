@@ -313,6 +313,9 @@ private fun SamsungInstallScreen(onBack: () -> Unit, onDone: () -> Unit, brandPi
                 Text(stringResource(R.string.tvinstall_next), style = Tokens.Type.caption, color = Tokens.Color.secondary)
             }
             is InstallState.Failed -> {
+                androidx.compose.runtime.LaunchedEffect(current) {
+                    com.couchsubs.mobile.reporting.ProblemReporter.error("tv.install.samsung", "${current.error}: ${current.detail.orEmpty()}")
+                }
                 NoteTile(failureText(current, phoneIp))
                 GhostButton(stringResource(R.string.tvinstall_share_log)) { shareLog(context, logFile) }
             }
