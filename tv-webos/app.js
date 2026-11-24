@@ -602,7 +602,7 @@
     var headings = /^(?:الهدف|المهمة|هدف|مهمة|ملاحظة|تنبيه|تحذير|تلميح|الوقت|الرابط|Objective|Objectives|Note|Warning|Tip|Hint|Mission|Task|Time|Status|Info|https?|ftp)$/i;
     for (var i = 0; i < lines.length; i++) {
       var match = /^([A-Z\u00c0-\u024f\u0600-\u06ff][A-Za-z\u00c0-\u024f\u0600-\u06ff .’'\-]{0,47})\s*[:：]\s*(.+)$/.exec(lines[i].trim());
-      var name = match ? match[1].trim() : '';
+      var name = match ? match[1].trim().replace(/\s+/g, ' ') : '';
       if (match && name.split(/\s+/).length <= 3 && !headings.test(name) && match[2].charAt(0) !== '/' && /[A-Za-z\u0600-\u06ff]/.test(match[2])) {
         var names = { 'Jason':'جيسون', 'Lucia':'لوسيا', 'Brian':'برايان', 'Doug':'دوغ', 'Kingfishers':'كينغفيشرز' };
         name = Object.prototype.hasOwnProperty.call(names, name) ? names[name] : name;
@@ -633,7 +633,8 @@
       var body = document.createElement('span');
       body.className = 'arabic-dialogue'; body.dir = 'rtl';
       body.textContent = turns[i].body.replace(/[A-Za-z][A-Za-z0-9'’ .-]*/g, function (latin) {
-        return '\u2068' + latin.trim() + '\u2069' + (/ $/.test(latin) ? ' ' : '');
+        var spaces = (latin.match(/ +$/) || [''])[0];
+        return '\u2068' + latin.replace(/ +$/, '') + '\u2069' + spaces;
       });
       row.appendChild(body);
       el.appendChild(row);

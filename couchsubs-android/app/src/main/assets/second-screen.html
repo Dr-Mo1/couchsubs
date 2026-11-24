@@ -57,13 +57,12 @@ bdi { unicode-bidi: isolate; }
 
 /* Separate RTL speaker labels; dialogue keeps its own bidi context and white color. */
 .arabic-turn { display: flex; flex-direction: row; direction: rtl; unicode-bidi: isolate;
-  align-items: baseline; justify-content: center; max-width: 100%; text-align: right; }
+  align-items: baseline; justify-content: flex-start; width: 100%; max-width: 100%; text-align: right; }
 .arabic-speaker-label { flex: 0 1 auto; min-width: 0; max-width: 32%; padding-left: .28em;
   font-size: 1.15em; font-weight: 800; direction: rtl; unicode-bidi: isolate; white-space: normal; }
-.arabic-dialogue { flex: 0 1 auto; min-width: 0; direction: rtl; unicode-bidi: isolate;
+.arabic-dialogue { flex: 1 1 auto; min-width: 0; direction: rtl; unicode-bidi: isolate;
   font-weight: 600; color: #FFFFFF; white-space: pre-wrap; overflow-wrap: break-word; word-wrap: break-word; }
 .arabic-turn { text-shadow: 0 1px 3px #000, 0 0 2px #000; }
-
 #line, #previous { box-sizing: border-box; min-width: 55%; max-width: 100%; padding: .18em .45em; background: rgba(0,0,0,.88); border-radius: .15em; }
 </style>
 </head>
@@ -135,7 +134,7 @@ bdi { unicode-bidi: isolate; }
     var headings = /^(?:الهدف|المهمة|هدف|مهمة|ملاحظة|تنبيه|تحذير|تلميح|الوقت|الرابط|Objective|Objectives|Note|Warning|Tip|Hint|Mission|Task|Time|Status|Info|https?|ftp)$/i;
     for (var i = 0; i < lines.length; i++) {
       var match = /^([A-Z\u00c0-\u024f\u0600-\u06ff][A-Za-z\u00c0-\u024f\u0600-\u06ff .’'\-]{0,47})\s*[:：]\s*(.+)$/.exec(lines[i].trim());
-      var name = match ? match[1].trim() : '';
+      var name = match ? match[1].trim().replace(/\s+/g, ' ') : '';
       if (match && name.split(/\s+/).length <= 3 && !headings.test(name) && match[2].charAt(0) !== '/' && /[A-Za-z\u0600-\u06ff]/.test(match[2])) {
         var names = { 'Jason':'جيسون', 'Lucia':'لوسيا', 'Brian':'برايان', 'Doug':'دوغ', 'Kingfishers':'كينغفيشرز' };
         name = Object.prototype.hasOwnProperty.call(names, name) ? names[name] : name;
@@ -166,7 +165,8 @@ bdi { unicode-bidi: isolate; }
       var body = document.createElement('span');
       body.className = 'arabic-dialogue'; body.dir = 'rtl';
       body.textContent = turns[i].body.replace(/[A-Za-z][A-Za-z0-9'’ .-]*/g, function (latin) {
-        return '\u2068' + latin.trim() + '\u2069' + (/ $/.test(latin) ? ' ' : '');
+        var spaces = (latin.match(/ +$/) || [''])[0];
+        return '\u2068' + latin.replace(/ +$/, '') + '\u2069' + spaces;
       });
       row.appendChild(body);
       el.appendChild(row);

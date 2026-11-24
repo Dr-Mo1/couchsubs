@@ -6,6 +6,7 @@ import org.junit.Test
 
 class ArabicSubtitleTest {
     @Test fun latinLabelsAndWrappedDialogueAreSeparate() {
+        assertEquals("أبو علي حسن", ArabicSubtitle.turns("أبو  علي  حسن: هنا.").single().name)
         val turns = ArabicSubtitle.turns("Doug: إنه هنا\nفي مكان ما.\nلوسيا: أين؟")
         assertEquals(listOf(ArabicSubtitle.Turn("دوغ", "إنه هنا\nفي مكان ما."), ArabicSubtitle.Turn("لوسيا", "أين؟")), turns)
         assertEquals("كينغفيشرز", ArabicSubtitle.turns("Kingfishers: لا أعرف من هو دوني.").single().name)

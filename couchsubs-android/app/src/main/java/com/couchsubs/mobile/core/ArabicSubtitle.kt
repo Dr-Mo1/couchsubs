@@ -11,7 +11,7 @@ object ArabicSubtitle {
         val result = mutableListOf<Turn>()
         text.replace("\u2066", "").replace("\u2067", "").replace("\u2068", "").replace("\u2069", "").lines().forEach { line ->
             val match = label.matchEntire(line.trim())
-            val name = match?.groupValues?.get(1)?.trim()
+            val name = match?.groupValues?.get(1)?.trim()?.replace(Regex("\\s+"), " ")
             val valid = name != null && (isArabic(name) || name.first().isUpperCase()) && name.split(' ').size <= 3 && name !in headings &&
                 name.lowercase(java.util.Locale.ROOT) !in SubtitleSegmenter.notNames &&
                 match.groupValues[2].let { body -> !body.startsWith('/') && body.any { it.isLetter() } }
