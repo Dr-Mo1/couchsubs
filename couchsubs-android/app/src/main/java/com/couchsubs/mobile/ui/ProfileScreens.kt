@@ -601,28 +601,46 @@ private fun PsnSignOutRow() {
 private fun OpenSourceScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     var versionTaps by remember { mutableStateOf(0) }
+    var channel by remember { mutableStateOf(Services.settings.updateChannel) }
     ScreenScaffold(top = { TopBar(stringResource(R.string.open_source_licenses), onBack = onBack) }) {
         BodyText(stringResource(R.string.licenses_intro))
         BodyText(stringResource(R.string.license_couchsubs))
         BodyText(stringResource(R.string.license_chiaki))
         BodyText(stringResource(R.string.licenses_notice))
-        Text(
-            text = stringResource(R.string.update_version, "\u2068${com.couchsubs.mobile.BuildConfig.VERSION_NAME}\u2069"),
-            style = Tokens.Type.caption,
-            color = Tokens.Color.secondary,
-            modifier = Modifier.clickable(
-                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                indication = null,
-            ) {
-                val result = com.couchsubs.mobile.update.BetaChannelToggle.tap(versionTaps, Services.settings.updateChannel)
-                versionTaps = result.count
-                if (result.toggled) {
-                    Services.settings.updateChannel = result.channel
-                    val message = if (result.channel == com.couchsubs.mobile.update.UpdateChannel.BETA) R.string.beta_channel_on else R.string.beta_channel_off
-                    android.widget.Toast.makeText(context, context.getString(message), android.widget.Toast.LENGTH_SHORT).show()
+        // 1.0.43: the owner tapped the small caption on a Xiaomi and saw nothing. The target was one caption line,
+        // nothing showed that taps counted, and the toast is not reliable on every phone. Now the whole padded row
+        // is the target, and the progress and the channel state are written on the page.
+        Column(
+            Modifier.fillMaxWidth()
+                .clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null,
+                ) {
+                    val result = com.couchsubs.mobile.update.BetaChannelToggle.tap(versionTaps, channel)
+                    versionTaps = result.count
+                    if (result.toggled) {
+                        Services.settings.updateChannel = result.channel
+                        channel = result.channel
+                        // Sent once per version, so the release owner sees at once that this phone is on beta.
+                        com.couchsubs.mobile.reporting.ProblemReporter.start(result.channel)
+                        val message = if (result.channel == com.couchsubs.mobile.update.UpdateChannel.BETA) R.string.beta_channel_on else R.string.beta_channel_off
+                        android.widget.Toast.makeText(context, context.getString(message), android.widget.Toast.LENGTH_SHORT).show()
+                    }
                 }
-            },
-        )
+                .padding(vertical = 12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.update_version, "\u2068${com.couchsubs.mobile.BuildConfig.VERSION_NAME}\u2069"),
+                style = Tokens.Type.caption,
+                color = Tokens.Color.secondary,
+            )
+            val note = when {
+                versionTaps >= 3 -> R.string.beta_channel_keep_tapping
+                channel == com.couchsubs.mobile.update.UpdateChannel.BETA -> R.string.beta_channel_active
+                else -> null
+            }
+            if (note != null) Text(stringResource(note), style = Tokens.Type.caption, color = Tokens.Color.accentText)
+        }
         SecondaryButton(stringResource(R.string.about_source)) { open(context, context.getString(R.string.url_source)) }
     }
 }

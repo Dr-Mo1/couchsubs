@@ -959,6 +959,8 @@
     <string name="player_character_lucia">لوسيا</string>
     <string name="beta_channel_on">تم تفعيل قناة التجربة</string>
     <string name="beta_channel_off">تم إيقاف قناة التجربة</string>
+    <string name="beta_channel_keep_tapping">واصل الضغط لتغيير قناة التجربة</string>
+    <string name="beta_channel_active">قناة التجربة مفعّلة</string>
     <string name="rescue_body">تعذّر تشغيل هذه النسخة. جارٍ البحث عن تحديث…</string>
     <string name="rescue_update">تحديث</string>
 </resources>

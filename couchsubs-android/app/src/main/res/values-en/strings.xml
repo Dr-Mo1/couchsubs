@@ -949,6 +949,8 @@
     <string name="player_character_lucia">Lucia</string>
     <string name="beta_channel_on">Test channel on</string>
     <string name="beta_channel_off">Test channel off</string>
+    <string name="beta_channel_keep_tapping">Keep tapping to switch the test channel</string>
+    <string name="beta_channel_active">Test channel is on</string>
     <string name="rescue_body">This version failed to start. Checking for an update…</string>
     <string name="rescue_update">Update</string>
 </resources>
