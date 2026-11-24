@@ -4,7 +4,7 @@ package com.couchsubs.mobile.ui
 
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import com.couchsubs.mobile.core.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row

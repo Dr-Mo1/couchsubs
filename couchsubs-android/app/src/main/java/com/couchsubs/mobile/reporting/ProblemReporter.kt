@@ -264,7 +264,10 @@ object ProblemReporter {
         } finally { connection.disconnect() }
     }
 
-    private fun logTail(): String = try {
+    private fun logTail(): String =
+        ReportLog.combine(com.couchsubs.mobile.core.Log.readAll(ReportLog.MAX_CHARS), logcatTail())
+
+    private fun logcatTail(): String = try {
         val process = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-v", "time", "-t", "600", "--pid", Process.myPid().toString()))
         val result = java.util.concurrent.atomic.AtomicReference<String?>(null)
         val reader = Thread({
@@ -276,7 +279,7 @@ object ProblemReporter {
                         val count = input.read(buffer)
                         if (count < 0) break
                         tail.append(buffer, 0, count)
-                        if (tail.length > 200000) tail.delete(0, tail.length - 200000)
+                        if (tail.length > ReportLog.MAX_CHARS) tail.delete(0, tail.length - ReportLog.MAX_CHARS)
                     }
                     result.set(tail.toString())
                 }
@@ -285,7 +288,7 @@ object ProblemReporter {
         try {
             reader.join(2000)
             if (!reader.isAlive && process.waitFor(100, TimeUnit.MILLISECONDS) && process.exitValue() == 0)
-                ReportScrubber.scrub(result.get().orEmpty()) else ""
+                result.get().orEmpty() else ""
         } finally { process.destroy(); reader.interrupt() }
     } catch (_: Exception) { "" }
 }

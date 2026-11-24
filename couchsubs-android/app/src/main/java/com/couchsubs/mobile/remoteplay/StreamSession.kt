@@ -2,7 +2,7 @@
 package com.couchsubs.mobile.remoteplay
 
 import android.os.SystemClock
-import android.util.Log
+import com.couchsubs.mobile.core.Log
 import com.couchsubs.mobile.account.Backend
 import com.couchsubs.mobile.account.Telemetry
 import java.util.concurrent.Executors

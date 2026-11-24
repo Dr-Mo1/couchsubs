@@ -4,7 +4,7 @@
 package com.couchsubs.mobile.tv
 
 import android.content.Context
-import android.util.Log
+import com.couchsubs.mobile.core.Log
 import com.couchsubs.mobile.BuildConfig
 import com.couchsubs.mobile.Services
 import com.couchsubs.mobile.settings.SubtitleTarget

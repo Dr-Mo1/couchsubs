@@ -2,7 +2,7 @@
 package com.couchsubs.mobile.account
 
 import android.app.Application
-import android.util.Log
+import com.couchsubs.mobile.core.Log
 import com.couchsubs.mobile.BuildConfig
 import com.facebook.FacebookSdk
 import com.facebook.appevents.AppEventsLogger

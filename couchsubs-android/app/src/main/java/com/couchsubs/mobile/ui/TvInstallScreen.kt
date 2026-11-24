@@ -11,7 +11,7 @@ import android.net.NetworkCapabilities
 import android.net.http.SslError
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import com.couchsubs.mobile.core.Log
 import android.webkit.CookieManager
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.SslErrorHandler

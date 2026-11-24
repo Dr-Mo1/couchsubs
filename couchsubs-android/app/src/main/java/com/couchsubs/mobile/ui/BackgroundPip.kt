@@ -8,7 +8,7 @@ import android.app.Activity
 import android.app.PictureInPictureParams
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Log
+import com.couchsubs.mobile.core.Log
 import android.util.Rational
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background

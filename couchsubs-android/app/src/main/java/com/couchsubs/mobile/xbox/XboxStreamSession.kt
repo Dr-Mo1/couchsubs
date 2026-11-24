@@ -9,7 +9,7 @@ package com.couchsubs.mobile.xbox
 import android.content.Context
 import android.media.AudioAttributes
 import android.os.SystemClock
-import android.util.Log
+import com.couchsubs.mobile.core.Log
 import com.couchsubs.mobile.R
 import com.couchsubs.mobile.account.Backend
 import com.couchsubs.mobile.remoteplay.DisconnectKind

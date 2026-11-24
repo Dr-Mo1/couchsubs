@@ -22,6 +22,26 @@ object ReportScrubber {
     }
 }
 
+/** Combines the in-app log buffer and optional logcat output, scrubbed and capped at [MAX_CHARS] (newest last). */
+object ReportLog {
+    const val MAX_CHARS = 200_000
+
+    fun combine(appLog: String, logcat: String, cap: Int = MAX_CHARS): String {
+        if (cap <= 0) return ""
+        val scrubbedApp = ReportScrubber.scrub(appLog)
+        val scrubbedLogcat = ReportScrubber.scrub(logcat)
+        val combined = when {
+            scrubbedLogcat.isBlank() -> scrubbedApp
+            scrubbedApp.isBlank() -> scrubbedLogcat
+            else -> {
+                val sep = if (scrubbedApp.endsWith('\n')) "--- logcat ---\n" else "\n--- logcat ---\n"
+                scrubbedApp + sep + scrubbedLogcat
+            }
+        }
+        return if (combined.length > cap) combined.takeLast(cap) else combined
+    }
+}
+
 data class ReportInfo(val version: String, val versionCode: Int, val device: String, val android: String, val installId: String)
 
 object ReportJson {

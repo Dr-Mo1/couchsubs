@@ -3,11 +3,11 @@ package com.couchsubs.mobile
 
 import android.app.Application
 import android.content.Context
-import android.util.Log
 import com.couchsubs.mobile.account.Backend
 import com.couchsubs.mobile.account.MeasurementPolicy
 import com.couchsubs.mobile.account.Meta
 import com.couchsubs.mobile.core.GamePackLibrary
+import com.couchsubs.mobile.core.Log
 import com.couchsubs.mobile.packs.HttpPackServer
 import com.couchsubs.mobile.packs.PackStore
 import com.couchsubs.mobile.settings.AppSettings
@@ -27,6 +27,8 @@ class CouchSubsApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // The in-app log must never stop the app from starting.
+        runCatching { Log.init(filesDir) }
         if (com.couchsubs.mobile.update.RescueMarker.onAppStart(filesDir, BuildConfig.VERSION_CODE)) {
             rescueMode = true
             return

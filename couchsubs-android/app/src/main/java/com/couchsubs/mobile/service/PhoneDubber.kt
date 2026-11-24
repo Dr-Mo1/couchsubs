@@ -4,7 +4,7 @@ package com.couchsubs.mobile.service
 import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
-import android.util.Log
+import com.couchsubs.mobile.core.Log
 import com.couchsubs.mobile.core.DubbingOutput
 import com.couchsubs.mobile.core.DubbingVoice
 import com.couchsubs.mobile.core.SpokenLine
