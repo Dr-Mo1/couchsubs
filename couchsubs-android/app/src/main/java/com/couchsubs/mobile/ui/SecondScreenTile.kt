@@ -73,7 +73,7 @@ internal fun ColumnScope.SecondScreenBody(version: Int = 0) {
         Text(address, style = Tokens.Type.caption.copy(fontFamily = FontFamily.Monospace), color = Tokens.Color.text)
     }
     SecondaryButton(stringResource(if (copied) R.string.history_copied else R.string.history_copy)) {
-        context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("CouchSubs", address))
+        context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText(context.getString(R.string.app_name), address))
         copied = true
     }
     Text(stringResource(R.string.second_screen_caption), style = Tokens.Type.caption, color = Tokens.Color.secondary)

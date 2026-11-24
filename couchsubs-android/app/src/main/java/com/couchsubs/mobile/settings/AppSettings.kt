@@ -133,6 +133,13 @@ class AppSettings(context: Context) : AreaStore {
     private val prefs: SharedPreferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     val secrets = SecretStore(context)
 
+    var uiLanguage: String
+        get() = if (prefs.getString(com.couchsubs.mobile.AppLanguage.KEY, "ar") == "en") "en" else "ar"
+        set(value) {
+            require(value == "ar" || value == "en")
+            check(prefs.edit().putString(com.couchsubs.mobile.AppLanguage.KEY, value).commit())
+        }
+
     /** Kuruluma özel; sunucu durdurulup başlatılınca değişmez. */
     val subtitleAccessKey: String
         get() = synchronized(AppSettings::class.java) {
@@ -166,7 +173,7 @@ class AppSettings(context: Context) : AreaStore {
         set(value) = prefs.edit().putString("target", value.name).apply()
 
     var translationLanguage: String
-        get() = com.couchsubs.mobile.translation.TranslationLanguage.stored(prefs.getString("translationLanguage", null))
+        get() = com.couchsubs.mobile.translation.TranslationLanguage.DEFAULT
         set(value) = prefs.edit().putString("translationLanguage", com.couchsubs.mobile.translation.TranslationLanguage.code(value)).apply()
 
     var engine: EngineChoice

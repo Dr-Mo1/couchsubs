@@ -21,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
@@ -51,11 +52,12 @@ fun GameSection(status: LiveStatus) {
  */
 @Composable
 private fun GameAreasRow(status: LiveStatus) {
+    val context = LocalContext.current
     val offered = status.offeredAreaProfileGame
     val active = status.areaProfileGame
     if (offered != null) {
         Tile(Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.area_profile_offer, offered), style = Tokens.Type.body, color = Tokens.Color.text)
+            Text(stringResource(R.string.area_profile_offer, gameLabel(context, offered)), style = Tokens.Type.body, color = Tokens.Color.text)
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
                 SecondaryButton(stringResource(R.string.area_profile_use)) { PlayedGame.areas.useOffered() }
                 GhostButton(stringResource(R.string.area_profile_no), color = Tokens.Color.secondary) { PlayedGame.areas.declineOffered() }
@@ -64,7 +66,7 @@ private fun GameAreasRow(status: LiveStatus) {
     } else if (active != null) {
         Tile(Modifier.fillMaxWidth()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.area_profile_using, active), Modifier.weight(1f), style = Tokens.Type.body, color = Tokens.Color.text)
+                Text(stringResource(R.string.area_profile_using, gameLabel(context, active)), Modifier.weight(1f), style = Tokens.Type.body, color = Tokens.Color.text)
                 GhostButton(stringResource(R.string.area_profile_undo)) { PlayedGame.areas.undo() }
             }
         }
@@ -77,9 +79,14 @@ private fun GameAreasRow(status: LiveStatus) {
  */
 @Composable
 private fun GameAskCard() {
+    val context = LocalContext.current
     var query by rememberSaveable { mutableStateOf("") }
     val typed = query.trim()
-    val suggestions = remember(query) { PlayedGame.suggestions(query).take(5) }
+    val suggestions = remember(query, context) {
+        (PlayedGame.suggestions(query) + com.couchsubs.mobile.core.GameCatalog.POPULAR.filter {
+            query.isNotBlank() && gameLabel(context, it).contains(query.trim(), ignoreCase = true)
+        }).distinctBy { GameName.key(it) }.take(5)
+    }
     val last = remember { PlayedGame.lastPlayed }
     Tile(Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -94,12 +101,12 @@ private fun GameAskCard() {
                 if (index > 0) HorizontalDivider(color = Tokens.Color.border)
                 Row(Modifier.fillMaxWidth().clickable { PlayedGame.choose(name) }.padding(vertical = Tokens.Space.gap),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
-                    Text(name, style = Tokens.Type.body, color = Tokens.Color.text, modifier = Modifier.weight(1f))
+                    Text(gameLabel(context, name), style = Tokens.Type.body, color = Tokens.Color.text, modifier = Modifier.weight(1f))
                     if (name == last) Text(stringResource(R.string.game_last_played), style = Tokens.Type.caption, color = Tokens.Color.secondary)
                 }
             }
         }
-        if (typed.isNotEmpty() && suggestions.none { GameName.key(it) == GameName.key(typed) }) {
+        if (typed.isNotEmpty() && suggestions.none { GameName.key(it) == GameName.key(typed) || GameName.key(gameLabel(context, it)) == GameName.key(typed) }) {
             SecondaryButton(stringResource(R.string.game_ask_not_listed, typed)) { PlayedGame.choose(typed) }
         }
     }
@@ -108,11 +115,12 @@ private fun GameAskCard() {
 /** "Oynanan oyun" satırı; "Değiştir" kartı açar. */
 @Composable
 private fun PlayedGameRow(game: String?) {
+    val context = LocalContext.current
     Tile(Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
                 TileLabel(stringResource(R.string.game_played))
-                Text(game ?: stringResource(R.string.game_unknown), style = Tokens.Type.headline, color = Tokens.Color.text, maxLines = 1)
+                Text(game?.let { gameLabel(context, it) } ?: stringResource(R.string.game_unknown), style = Tokens.Type.headline, color = Tokens.Color.text, maxLines = 1)
             }
             GhostButton(stringResource(if (game == null) R.string.game_choose else R.string.game_change)) { PlayedGame.ask() }
         }

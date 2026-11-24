@@ -270,6 +270,6 @@ private fun openLink(context: Context, url: String): Boolean = try {
 
 private fun copy(context: Context, code: String) {
     val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
-    clipboard.setPrimaryClip(ClipData.newPlainText("Microsoft", code))
+    clipboard.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.platform_xbox), code))
     Toast.makeText(context, context.getString(R.string.xbox_login_copied), Toast.LENGTH_SHORT).show()
 }

@@ -29,8 +29,8 @@ class TargamgiPrivacyRenderingTest {
         assertTrue(page.contains("\u2068") || page.contains("\\u2068"))
         for (locale in listOf("values", "values-en")) {
             val strings = File(app, "src/main/res/$locale/strings.xml").readText()
-            assertTrue(strings.contains(if (locale == "values") "نسخة معدّلة لترجمجي، 2026-11-22" else "Modified for Targamgi (ترجمجي), 2026-11-22"))
-            assertTrue(strings.contains("Sinan Yorulmaz"))
+            assertTrue(strings.contains(if (locale == "values") "نسخة معدّلة بتاريخ 2026-11-23" else "modified version (2026-11-23)"))
+            assertTrue(strings.contains(if (locale == "values") "سنان يورولماز" else "Sinan Yorulmaz"))
         }
     }
 }

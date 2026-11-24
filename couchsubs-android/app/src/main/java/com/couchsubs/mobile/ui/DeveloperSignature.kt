@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Developer signature at the bottom of the home, Profile and Settings screens: plain text «تطوير DrMo». DocMo
+// Developer signature once at the bottom of Settings: plain text «تطوير DrMo». DocMo
 // (2026-11-24): no other developer's name or logo on any screen; the upstream notice lives on the licenses screen only.
 package com.couchsubs.mobile.ui
 

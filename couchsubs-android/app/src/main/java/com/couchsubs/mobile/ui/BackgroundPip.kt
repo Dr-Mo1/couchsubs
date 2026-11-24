@@ -89,7 +89,7 @@ fun PipSubtitleView(status: LiveStatus) {
         if (image != null) {
             Image(image.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
         } else {
-            Text("ترجمجي", color = Color.White.copy(alpha = 0.5f), fontSize = 18.sp, fontWeight = FontWeight.Bold,
+            Text(androidx.compose.ui.res.stringResource(com.couchsubs.mobile.R.string.app_name), color = Color.White.copy(alpha = 0.5f), fontSize = 18.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.align(Alignment.Center))
         }
         val line = status.current.trim()

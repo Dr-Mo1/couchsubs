@@ -46,58 +46,59 @@ class PromoPolicyTest {
     }
 
     @Test
-    fun showsWhenActiveTargetedAndNeverShown() {
-        assertTrue(PromoPolicy.shouldShow(popup(), never, now, idle))
+    fun appNeverShowsEvenAnEligiblePromotion() {
+        assertTrue(PromoPolicy.due(popup(), never, now))
+        assertFalse(PromoPolicy.shouldShow(popup(), never, now, idle))
     }
 
     @Test
     fun inactiveIsNeverShown() {
-        assertFalse(PromoPolicy.shouldShow(popup { it.copy(active = false) }, never, now, idle))
-        assertFalse(PromoPolicy.shouldShow(null, never, now, idle))
+        assertFalse(PromoPolicy.due(popup { it.copy(active = false) }, never, now))
+        assertFalse(PromoPolicy.due(null, never, now))
     }
 
     @Test
     fun platformMustBeTargeted() {
         val siteOnly = popup { it.copy(targets = setOf("site", "ios")) }
-        assertFalse(PromoPolicy.shouldShow(siteOnly, never, now, idle))
-        assertTrue(PromoPolicy.shouldShow(siteOnly, never, now, idle, platform = "ios"))
-        assertFalse(PromoPolicy.shouldShow(popup { it.copy(targets = emptySet()) }, never, now, idle))
+        assertFalse(PromoPolicy.due(siteOnly, never, now))
+        assertTrue(PromoPolicy.due(siteOnly, never, now, platform = "ios"))
+        assertFalse(PromoPolicy.due(popup { it.copy(targets = emptySet()) }, never, now))
     }
 
     @Test
     fun waitsEveryHoursPerPopupId() {
         val popup = popup()
         val shown = PromoRecord("enmera-commerce-1", now - 23 * hour)
-        assertFalse(PromoPolicy.shouldShow(popup, shown, now, idle))
-        assertTrue(PromoPolicy.shouldShow(popup, shown.copy(shownAtMs = now - 24 * hour), now, idle))
+        assertFalse(PromoPolicy.due(popup, shown, now))
+        assertTrue(PromoPolicy.due(popup, shown.copy(shownAtMs = now - 24 * hour), now))
         // Yeni kampanya (başka kimlik) beklemeden gösterilir.
-        assertTrue(PromoPolicy.shouldShow(popup.copy(id = "enmera-commerce-2"), shown, now, idle))
+        assertTrue(PromoPolicy.due(popup.copy(id = "enmera-commerce-2"), shown, now))
         // everyHours 72: bir gün sonra henüz değil.
-        assertFalse(PromoPolicy.shouldShow(popup.copy(everyHours = 72), shown.copy(shownAtMs = now - 30 * hour), now, idle))
+        assertFalse(PromoPolicy.due(popup.copy(everyHours = 72), shown.copy(shownAtMs = now - 30 * hour), now))
         // Geçersiz everyHours 24 sayılır.
-        assertFalse(PromoPolicy.shouldShow(popup.copy(everyHours = 0), shown, now, idle))
+        assertFalse(PromoPolicy.due(popup.copy(everyHours = 0), shown, now))
         // Saat geri alındıysa susmaz.
-        assertTrue(PromoPolicy.shouldShow(popup, shown.copy(shownAtMs = now + hour), now, idle))
+        assertTrue(PromoPolicy.due(popup, shown.copy(shownAtMs = now + hour), now))
     }
 
     @Test
     fun neverDuringSessionDemoOnboardingTourOrOtherScreens() {
         val popup = popup()
-        assertFalse(PromoPolicy.shouldShow(popup, never, now, idle.copy(sessionActive = true)))
-        assertFalse(PromoPolicy.shouldShow(popup, never, now, idle.copy(demo = true)))
-        assertFalse(PromoPolicy.shouldShow(popup, never, now, idle.copy(onboarding = true)))
-        assertFalse(PromoPolicy.shouldShow(popup, never, now, idle.copy(tour = true)))
+        assertFalse(PromoPolicy.idle(idle.copy(sessionActive = true)))
+        assertFalse(PromoPolicy.idle(idle.copy(demo = true)))
+        assertFalse(PromoPolicy.idle(idle.copy(onboarding = true)))
+        assertFalse(PromoPolicy.idle(idle.copy(tour = true)))
         // Uygulamaya girdikten 10 saniye geçmeden açılmaz.
-        assertFalse(PromoPolicy.shouldShow(popup, never, now, idle.copy(inAppMs = 9_999L)))
+        assertFalse(PromoPolicy.idle(idle.copy(inAppMs = 9_999L)))
         // Eşleme, TV kurulumu, Ayarlar gibi ekranlar ana ekranın üstündeyken.
-        assertFalse(PromoPolicy.shouldShow(popup, never, now, idle.copy(onHome = false)))
+        assertFalse(PromoPolicy.idle(idle.copy(onHome = false)))
     }
 
     @Test
     fun onlyWebLinksAndHttpsImages() {
-        assertFalse(PromoPolicy.shouldShow(popup { it.copy(image = "http://couchsubs.enmeraapps.com/p.webp") }, never, now, idle))
-        assertFalse(PromoPolicy.shouldShow(popup { it.copy(link = "intent://evil#Intent;end") }, never, now, idle))
-        assertFalse(PromoPolicy.shouldShow(popup { it.copy(link = "") }, never, now, idle))
-        assertFalse(PromoPolicy.shouldShow(popup { it.copy(id = "") }, never, now, idle))
+        assertFalse(PromoPolicy.due(popup { it.copy(image = "http://couchsubs.enmeraapps.com/p.webp") }, never, now))
+        assertFalse(PromoPolicy.due(popup { it.copy(link = "intent://evil#Intent;end") }, never, now))
+        assertFalse(PromoPolicy.due(popup { it.copy(link = "") }, never, now))
+        assertFalse(PromoPolicy.due(popup { it.copy(id = "") }, never, now))
     }
 }

@@ -12,13 +12,11 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -29,7 +27,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
@@ -43,7 +40,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -52,25 +48,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.couchsubs.mobile.R
 import com.couchsubs.mobile.Services
@@ -79,39 +63,20 @@ import com.couchsubs.mobile.packs.PackUpdateOutcome
 import com.couchsubs.mobile.packs.PackUpdateSummary
 import com.couchsubs.mobile.service.FramePreview
 import com.couchsubs.mobile.service.LiveStatus
-import com.couchsubs.mobile.settings.SubtitleTarget
 import com.couchsubs.mobile.tv.InstalledTv
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Turda vurgulanan öğeler (TASARIM-MOBIL.md §10, tuval Telefon-Tur); [radius] öğenin köşesi (delik ona göre çizilir). */
-private enum class TourStep(val title: Int, val body: Int, val radius: Dp) {
-    START(R.string.tour1_title, R.string.tour1_body, Tokens.Radius.control),
-    TARGET(R.string.tour2_title, R.string.tour2_body, Tokens.Radius.tile),
-    PACKS(R.string.tour3_title, R.string.tour3_body, Tokens.Radius.tile),
-    PROFILE(R.string.tour4_title, R.string.tour4_body, Tokens.Radius.control),
-}
-
-/** Tanıtım popup'ı açıkken ana ekranın bulanıklığı. */
-private val PROMO_BLUR = 16.dp
-
 /** Boşta ↔ çeviri ekranı geçişinin süresi (ms). */
 private const val MOTION_MS = 250
 
 /** Paket kimliğinden kısa ad ve kod (tuvaldeki karolar). */
-fun packShort(id: String, title: String): Pair<String, String> = when (id) {
-    "gta-v" -> "GTA" to "GTA V"
-    "red-dead-redemption-2" -> "RDR" to "Red Dead 2"
-    "mafia-the-old-country" -> "MAF" to "Mafia: TOC"
-    "assassins-creed-shadows" -> "ACS" to "AC Shadows"
-    "death-stranding-2" -> "DS2" to "Death Str. 2"
-    "call-of-duty-modern-warfare-2019" -> "MW" to "CoD MW 2019"
-    else -> title.filter { it.isLetterOrDigit() }.take(3).uppercase() to title
-}
+fun packShort(id: String, title: String): Pair<String, String> =
+    title.filter { it.isLetterOrDigit() }.take(3).uppercase() to title
 
-/** "190 bin satır" */
+/** Localized installed-line count. */
 fun linesText(context: Context, entries: Int): String =
     if (entries >= 1000) context.getString(R.string.lines_thousands, (entries + 500) / 1000) else context.getString(R.string.lines_count, entries)
 
@@ -135,37 +100,21 @@ fun MainScreen(
     onSettings: () -> Unit,
     onHistory: () -> Unit = {},
     onTvUpdate: (InstalledTv) -> Unit = {},
-    /** Ana ekran en üstte (geçişte ya da üstünde başka ekran varken false): tanıtım popup'ı yalnız o zaman açılır. */
     onHome: Boolean = true,
 ) {
     val context = LocalContext.current
     val settings = Services.settings
-    val bounds = remember { mutableStateMapOf<TourStep, Rect>() }
-    var tour by remember { mutableStateOf(if (settings.tourShown) null else TourStep.START) }
     val xbox = settings.xbox
     val paired = if (xbox) settings.xboxConsole != null && Services.xboxAuth.signedIn else settings.console != null
-    fun mark(step: TourStep) = Modifier.onGloballyPositioned { bounds[step] = it.boundsInRoot() }
     val topBar: @Composable () -> Unit = {
         TopBar {
-            // iPhone'daki gibi: geçmiş, ayarlar, profil.
+            // History and settings are the only home actions.
             IconAction(CouchIcons.History, stringResource(R.string.history), onHistory)
             SettingsAction(onSettings)
-            Box(mark(TourStep.PROFILE)) { ProfileAction(onProfile) }
         }
     }
 
-    // Kendi ürünlerimizin tanıtımı (promo.json): yalnız boştaki ana ekranda, girişten 10 sn sonra; oturum, deneme,
-    // kurulum ve tur sırasında asla. Açıkken ana ekran bulanıklaşır (Android 12+; altında yalnız karartma).
-    val promo by com.couchsubs.mobile.promo.PromoController.ready.collectAsState()
-    val promoShown = promo?.let { ready ->
-        val moment = com.couchsubs.mobile.promo.PromoMoment(onHome = onHome, sessionActive = status.running, demo = status.demo,
-            onboarding = Routes.next() != Routes.MAIN, tour = tour != null && !status.demo,
-            inAppMs = System.currentTimeMillis() - com.couchsubs.mobile.promo.PromoController.foregroundAtMs)
-        val record = com.couchsubs.mobile.promo.PromoController.record(context)
-        ready.takeIf { com.couchsubs.mobile.promo.PromoPolicy.shouldShow(it.popup, record, System.currentTimeMillis(), moment) }
-    }
     Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().then(if (promoShown != null) Modifier.blur(PROMO_BLUR) else Modifier)) {
             // Başlatınca ve durdurunca boşta ve çeviri ekranları solarak yer değiştirir.
             AnimatedContent(status.running, transitionSpec = { fadeIn(tween(MOTION_MS)) togetherWith fadeOut(tween(MOTION_MS)) },
                 label = "running") { running ->
@@ -173,57 +122,31 @@ fun MainScreen(
                 else ScreenScaffold(top = topBar, bottom = {
                     // PS5 eşlenmemişse (kurulum atlandı) başlatmak yerine eşleme açılır.
                     if (!paired) {
-                        PrimaryButton(stringResource(R.string.main_pair_button), modifier = mark(TourStep.START), onClick = onPairing)
-                        // Kurulum bitmeden de uygulama örnek görüntülerle denenebilir.
-                        GhostButton(stringResource(R.string.demo_mode_try), Modifier.fillMaxWidth(), onClick = onDemo)
+                        PrimaryButton(stringResource(R.string.main_pair_button), onClick = onPairing)
                     }
                 }) {
                     if (paired) Heading(stringResource(R.string.main_ready), stringResource(R.string.main_ready_body))
                     else {
                         Heading(stringResource(R.string.main_unpaired), stringResource(R.string.main_unpaired_body))
-                        NoteTile(stringResource(R.string.main_unpaired_note), Tokens.Color.secondary)
                     }
                     AnimatedNote(status.error)
-                    TvAppUpdateCard(onTvUpdate)
                     // Eşleme ile canlı bağlantı farklı durumlardır; hazır olmayan cihaz yeşil gösterilmez.
                     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
-                        StatusChip(if (xbox) "Xbox" else "PS5", paired, Modifier.weight(1f), onPairing)
+                        StatusChip(stringResource(if (xbox) R.string.platform_xbox else R.string.platform_ps), paired, Modifier.weight(1f), onPairing)
                         StatusChip(targetName(settings), !settings.target.showsOnTv || status.connectedTvs > 0,
-                            Modifier.weight(1f).then(mark(TourStep.TARGET)), onTarget)
+                            Modifier.weight(1f), onTarget)
                     }
-                    status.game?.let { Pill(it) }
                     PackSummaryTile(onPacks)
-                    if (paired) TranslationStartDisc(mark(TourStep.START), onStart)
+                    if (paired) TranslationStartDisc(onStart = onStart)
                     status.recent.firstOrNull()?.let { line ->
                         Tile(Modifier.fillMaxWidth()) {
                             TileLabel(stringResource(R.string.running_now))
                             Text(line.translation, style = Tokens.Type.headline, color = Tokens.Color.text)
                         }
                     }
-                    Box(mark(TourStep.PACKS)) {
-                        GhostButton(stringResource(R.string.settings_packs), onClick = onPacks)
-                    }
-                    // Çeviri motoru ve son oturum durum değil ayar bilgisidir: tek bilgi karosunda iki satır.
-                    InfoCard(listOf(
-                        { InfoRow(stringResource(R.string.main_engine), status.engineLabel.ifEmpty { engineName(context) }, onClick = onSettings) },
-                        { InfoRow(stringResource(R.string.main_last_session),
-                            if (settings.lastSessionMs > 0) durationText(context, settings.lastSessionMs) else "—", onClick = onHistory) },
-                    ))
-                    DeveloperSignature()
+
                 }
             }
-            if (!status.demo) tour?.let { step ->
-                TourOverlay(step, bounds[step], onSkip = {
-                    settings.tourShown = true
-                    tour = null
-                }, onNext = {
-                    val next = TourStep.entries.getOrNull(step.ordinal + 1)
-                    if (next == null) settings.tourShown = true
-                    tour = next
-                })
-            }
-        }
-        promoShown?.let { ready -> PromoOverlay(ready) { com.couchsubs.mobile.promo.PromoController.dismissed(context, ready.popup) } }
     }
 }
 
@@ -240,10 +163,10 @@ fun metricsText(context: Context, pair: com.couchsubs.mobile.core.ShownPair): St
 
 fun engineName(context: Context): String = when (Services.settings.engine) {
     com.couchsubs.mobile.settings.EngineChoice.FREE -> context.getString(R.string.engine_free_short)
-    com.couchsubs.mobile.settings.EngineChoice.DEEPL -> "DeepL"
-    com.couchsubs.mobile.settings.EngineChoice.GEMINI -> "Gemini"
-    com.couchsubs.mobile.settings.EngineChoice.OPENAI -> "OpenAI"
-    com.couchsubs.mobile.settings.EngineChoice.CLAUDE -> "Claude"
+    com.couchsubs.mobile.settings.EngineChoice.DEEPL -> context.getString(R.string.engine_deepl)
+    com.couchsubs.mobile.settings.EngineChoice.GEMINI -> context.getString(R.string.engine_gemini)
+    com.couchsubs.mobile.settings.EngineChoice.OPENAI -> context.getString(R.string.engine_openai)
+    com.couchsubs.mobile.settings.EngineChoice.CLAUDE -> context.getString(R.string.engine_claude)
     com.couchsubs.mobile.settings.EngineChoice.LOCAL -> context.getString(R.string.engine_local)
 }
 
@@ -302,9 +225,8 @@ private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, on
             // Bir saati geçince "1:12:10" (DateUtils: s:dd:ss), öncesinde "12:10"; rakamlar tablo rakamı, süre akarken kaymaz.
             StatusLabel(stringResource(R.string.running_pill, DateUtils.formatElapsedTime(elapsed)), live = true,
                 style = Tokens.Type.captionNumeric)
-            Spacer(Modifier.weight(1f))
-            status.packInUse?.let { Pill(stringResource(R.string.running_pack, it), pro = true) }
         }
+        PackSummaryTile()
         // Görüntü gelirken durum metni ("Altyazılar okunuyor") üstteki "Çeviri sürüyor" satırını tekrarlar; yalnız
         // bağlanırken ve bağlantı sorunlarında gösterilir.
         if (!status.streaming && status.phase.isNotEmpty()) Text(status.phase, style = Tokens.Type.caption, color = Tokens.Color.secondary)
@@ -333,49 +255,13 @@ private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, on
             NoteTile(stringResource(R.string.subtitle_off_tip), Tokens.Color.secondary)
             if (Services.settings.watchSubtitleBackground) NoteTile(stringResource(R.string.subtitle_background_tip), Tokens.Color.secondary)
         }
-        if (!status.demo) GameSection(status)
         Tile(Modifier.fillMaxWidth()) {
             TileLabel(stringResource(R.string.running_now))
-            // Son çeviri altyazı sarısında (içerik), altında özgün metin.
+            // Show the latest translation; the full bilingual log is in History.
             Text(current?.translation ?: stringResource(R.string.running_waiting), style = Tokens.Type.subtitleCurrent,
                 color = if (current != null) Tokens.Color.accentText else Tokens.Color.secondary)
-            current?.let {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
-                    Text(it.source, style = Tokens.Type.caption, color = Tokens.Color.secondary, modifier = Modifier.weight(1f))
-                    if (it.origin == "paket") Text(stringResource(R.string.running_ready_translation), style = Tokens.Type.caption, color = Tokens.Color.pro)
-                }
-                // Ölçüm satırı (iPhone ile aynı): "OCR 42 ms · Çeviri 310 ms · Gecikme 520 ms".
-                metricsText(context, it)?.let { line -> Text(line, style = Tokens.Type.caption, color = Tokens.Color.secondary) }
-            }
         }
-        // Önceki 8 satır (iPhone ile aynı).
-        val previous = status.recent.drop(1).take(8)
-        if (previous.isNotEmpty()) RowList(previous.map { pair ->
-            {
-                // Satır iki ya da daha çok satıra uzayınca kaynak etiketi ilk satırın hizasında kalır.
-                Row(Modifier.padding(vertical = Tokens.Space.inline), verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
-                        Text(pair.translation, style = Tokens.Type.line, color = Tokens.Color.secondary)
-                        Text(pair.source, style = Tokens.Type.caption, color = Tokens.Color.secondary)
-                    }
-                    if (pair.origin == "paket") Text(stringResource(R.string.running_ready), style = Tokens.Type.caption, color = Tokens.Color.pro)
-                    else Text(status.engineLabel, style = Tokens.Type.caption, color = Tokens.Color.secondary)
-                }
-            }
-        })
-        TwoColumns(
-            { Tile(it) {
-                TileLabel(stringResource(R.string.running_from_pack))
-                Text("${status.packLines} / ${status.shownLines}", style = Tokens.Type.titleNumeric, color = Tokens.Color.text)
-            } },
-            { Tile(it) {
-                TileLabel(stringResource(R.string.main_tvs_label))
-                Text(if (Services.settings.target.showsOnTv) status.connectedTvs.toString()
-                    else stringResource(if (Services.settings.target == SubtitleTarget.OBS) R.string.target_obs else R.string.main_target_phone),
-                    style = Tokens.Type.titleNumeric, color = Tokens.Color.text)
-            } },
-        )
+
     }
 }
 
@@ -396,42 +282,6 @@ private fun TvOpenCard(brand: com.couchsubs.mobile.tv.TvBrand, problem: com.couc
         }
         // TV uygulaması kurulu değilse ya da açılmıyorsa bu telefondan kurulur (iPhone'daki "TV uygulamasını bu telefondan kur").
         GhostButton(stringResource(R.string.tvinstall_entry), onClick = onInstall)
-    }
-}
-
-/**
- * Karartma %70, vurgulanan öğe çevresinde amber çerçeveli delik (köşesi öğenin köşesi + 6 boşluk, iç içe köşeler
- * paralel kalsın); kart surface2. Karartma alttaki ekrana dokunuş geçirmez; Geri tuşu turu "Geç" gibi kapatır.
- */
-@Composable
-private fun TourOverlay(step: TourStep, target: Rect?, onSkip: () -> Unit, onNext: () -> Unit) {
-    BackHandler(onBack = onSkip)
-    BoxWithConstraints(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { } }) {
-        Canvas(Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
-            drawRect(Color.Black.copy(alpha = 0.7f))
-            target?.let { rect ->
-                val pad = TOUR_PAD.toPx()
-                val topLeft = Offset(rect.left - pad, rect.top - pad)
-                val size = Size(rect.width + 2 * pad, rect.height + 2 * pad)
-                val corner = CornerRadius((step.radius + TOUR_PAD).toPx())
-                drawRoundRect(Color.Transparent, topLeft, size, corner, blendMode = BlendMode.Clear)
-                drawRoundRect(Tokens.Color.accent, topLeft, size, corner, style = Stroke(2.dp.toPx()))
-            }
-        }
-        // Öğe ekranın alt yarısındaysa kart üstte durur (piksel eşiği değil, ekran yüksekliğine göre).
-        val above = target != null && target.center.y > constraints.maxHeight / 2f
-        Column(Modifier.align(if (above) Alignment.TopCenter else Alignment.BottomCenter).safeDrawingPadding().padding(Tokens.Space.screen)
-            .background(Tokens.Color.surface2, RoundedCornerShape(Tokens.Radius.tile)).padding(Tokens.Space.tile),
-            verticalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("${step.ordinal + 1} / ${TourStep.entries.size}", style = Tokens.Type.caption, color = Tokens.Color.secondary)
-                Spacer(Modifier.weight(1f))
-                GhostButton(stringResource(R.string.skip), onClick = onSkip)
-            }
-            Text(stringResource(step.title), style = Tokens.Type.headline, color = Tokens.Color.text)
-            Text(stringResource(step.body), style = Tokens.Type.body, color = Tokens.Color.secondary)
-            PrimaryButton(stringResource(if (step == TourStep.PROFILE) R.string.tour_done else R.string.next), onClick = onNext)
-        }
     }
 }
 
@@ -500,7 +350,7 @@ fun PacksScreen(onBack: () -> Unit, packInUse: String?) {
                 list.chunked(2).forEach { row ->
                     Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
                         row.forEach { entry ->
-                            val (code, short) = packShort(entry.id, entry.title)
+                            val (code, short) = packShort(entry.id, gameLabel(context, entry.title))
                             val on = entry.packIds.none { it in disabled }
                             val playing = packInUse != null && packInUse in entry.titles
                             PackTile(code, short, linesText(context, entry.entries), Modifier.weight(1f).fillMaxHeight(),
@@ -593,9 +443,9 @@ private fun packSummaryText(context: Context, summary: PackUpdateSummary): Strin
     if (updated.isNotEmpty()) {
         val items = updated.joinToString(", ") { change ->
             when {
-                change.lineDelta > 0 -> context.getString(R.string.packs_result_item_more, change.title, number(change.lineDelta))
-                change.lineDelta < 0 -> context.getString(R.string.packs_result_item_fewer, change.title, number(-change.lineDelta))
-                else -> context.getString(R.string.packs_result_item_revised, change.title)
+                change.lineDelta > 0 -> context.getString(R.string.packs_result_item_more, gameLabel(context, change.title), number(change.lineDelta))
+                change.lineDelta < 0 -> context.getString(R.string.packs_result_item_fewer, gameLabel(context, change.title), number(-change.lineDelta))
+                else -> context.getString(R.string.packs_result_item_revised, gameLabel(context, change.title))
             }
         }
         parts += if (updated.size == 1) context.getString(R.string.packs_result_updated_one, items)
@@ -603,16 +453,13 @@ private fun packSummaryText(context: Context, summary: PackUpdateSummary): Strin
     }
     val added = summary.added
     if (added.isNotEmpty()) {
-        val items = added.joinToString(", ") { context.getString(R.string.packs_result_item_lines, it.title, number(it.lines)) }
+        val items = added.joinToString(", ") { context.getString(R.string.packs_result_item_lines, gameLabel(context, it.title), number(it.lines)) }
         parts += if (added.size == 1) context.getString(R.string.packs_result_added_one, items)
         else context.getString(R.string.packs_result_added_many, added.size, items)
     }
     if (summary.newLines > 0) parts += context.getString(R.string.packs_result_total, number(summary.newLines))
     return parts.joinToString("\n")
 }
-
-/** Tur deliğinin öğeden taşma payı. */
-private val TOUR_PAD = 6.dp
 
 fun open(context: Context, url: String) {
     try {
@@ -661,8 +508,7 @@ internal fun PackSummaryTile(onPacks: (() -> Unit)? = null) {
     }
     if (language == "ar") pack?.let { installed ->
         Tile(Modifier.fillMaxWidth(), onClick = onPacks) {
-            TileLabel(stringResource(R.string.targamgi_arabic_pack))
-            Text(stringResource(R.string.lines_count, installed.entries), style = Tokens.Type.headline, color = Tokens.Color.text)
+            Text(stringResource(R.string.pack_summary, installed.entries), style = Tokens.Type.body, color = Tokens.Color.text)
         }
     }
 }

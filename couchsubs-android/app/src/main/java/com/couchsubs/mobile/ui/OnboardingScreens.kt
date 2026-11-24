@@ -3,29 +3,17 @@
 // hesap; PsnLoginScreen.kt) → PS5 eşleme → altyazı nerede. Uygulamada hesap yoktur.
 package com.couchsubs.mobile.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -59,55 +47,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Karşılama: üç sayfa, yatay kaydırma, nokta göstergesi; otomatik geçiş yok. */
+/** One welcome screen before the three setup steps. */
 @Composable
 fun WelcomeScreen(onDemo: () -> Unit = {}, onDone: () -> Unit) {
-    val pager = rememberPagerState { 3 }
-    val scope = rememberCoroutineScope()
-    val last = pager.currentPage == 2
-    ScreenScaffold(scroll = false, top = {
-        TopBar { if (!last) GhostButton(stringResource(R.string.skip), onClick = onDone) }
-    }, bottom = {
-        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
-            repeat(3) { index ->
-                val on = pager.currentPage == index
-                Box(Modifier.size(if (on) 10.dp else 8.dp).background(if (on) Tokens.Color.accent else Tokens.Color.borderStrong, CircleShape))
-            }
-        }
-        PrimaryButton(stringResource(if (last) R.string.welcome_start else R.string.next)) {
-            if (last) onDone() else scope.launch { pager.animateScrollToPage(pager.currentPage + 1) }
-        }
-        // Kurulumdan önce: konsolu olmayan (ve mağaza incelemesi) uygulamayı örnek görüntülerle dener.
-        GhostButton(stringResource(R.string.demo_mode_try), Modifier.fillMaxWidth(), onClick = onDemo)
+    ScreenScaffold(top = { TopBar() }, bottom = {
+        PrimaryButton(stringResource(R.string.welcome_start), onClick = onDone)
     }) {
-        HorizontalPager(pager, Modifier.fillMaxWidth().weight(1f)) { page ->
-            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.gap, Alignment.Bottom)) {
-                when (page) {
-                    0 -> {
-                        Tile(Modifier.fillMaxWidth()) {
-                            Text(stringResource(R.string.welcome1_sample_tr), style = Tokens.Type.subtitleCurrent, color = Tokens.Color.accentText)
-                            Text(stringResource(R.string.welcome1_sample_en), style = Tokens.Type.caption, color = Tokens.Color.secondary)
-                        }
-                        Heading(stringResource(R.string.welcome1_title), stringResource(R.string.welcome1_body))
-                    }
-                    1 -> {
-                        PackSummaryTile()
-                        Heading(stringResource(R.string.welcome2_title), stringResource(R.string.welcome2_body))
-                    }
-                    else -> {
-                        TwoColumns(
-                            { StatusTile(CouchIcons.Tv, stringResource(R.string.welcome3_tv_label), stringResource(R.string.welcome3_tv), it) },
-                            { StatusTile(CouchIcons.Smartphone, stringResource(R.string.welcome3_phone_label), stringResource(R.string.welcome3_phone), it) },
-                        )
-                        Tile(Modifier.fillMaxWidth()) {
-                            Text(stringResource(R.string.welcome3_wifi), style = Tokens.Type.headline, color = Tokens.Color.text)
-                            Text(stringResource(R.string.welcome3_wifi_body), style = Tokens.Type.caption, color = Tokens.Color.secondary)
-                        }
-                        Heading(stringResource(R.string.welcome3_title), stringResource(R.string.welcome3_body))
-                    }
-                }
-            }
-        }
+        Heading(stringResource(R.string.welcome1_title), stringResource(R.string.welcome1_body))
     }
 }
 
@@ -199,8 +145,6 @@ fun PairScreen(onBack: (() -> Unit)? = null, onSkip: (() -> Unit)? = null, onDon
             Text(stringResource(R.string.pair_code_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
         }
         problem?.let { NoteTile(stringResource(R.string.pair_failed, it)) }
-        // PS5 bağlıyken "Uzaktan Oynama bağlandı" yazısı kalıcıdır; bildirim ayarı değil, bu ayar gizler (GitHub #177).
-        Text(stringResource(R.string.pair_hide_status), style = Tokens.Type.caption, color = Tokens.Color.secondary)
         if (working) Text(stringResource(R.string.pair_working), style = Tokens.Type.body, color = Tokens.Color.secondary)
     }
 }
@@ -233,6 +177,8 @@ fun registrationErrors(): (RegistrationFailure) -> String {
 fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: ((TvBrand) -> Unit)? = null, onDone: () -> Unit) {
     val context = LocalContext.current
     val settings = Services.settings
+    val firstRun = !settings.onboarded
+    var showTv by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(!firstRun) }
     var target by remember { mutableStateOf(settings.target) }
     var tvs by remember { mutableStateOf<List<FoundTv>?>(null) }
     // Seçilen TV: çeviride açılacak ve önde tutulacak TV (iPhone ile aynı; TvChoice).
@@ -258,12 +204,19 @@ fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: ((TvBrand) -> Unit)?
     // Kart başlığına dokunma: kartı açar (açıksa kapatır); TV kartı hedefi TV yapar, telefon kartı "Bu telefonda".
     fun show(choice: DisplayChoice) {
         open = choice
-        if (choice == DisplayChoice.PHONE) target = SubtitleTarget.PHONE
+        if (choice == DisplayChoice.PHONE) {
+            target = SubtitleTarget.PHONE
+            if (firstRun) {
+                settings.target = target
+                settings.onboarded = true
+                onDone()
+            }
+        }
         else if (choice.brand != null && !target.showsOnTv) target = SubtitleTarget.TV
     }
     fun toggle(choice: DisplayChoice) = if (open == choice) open = null else show(choice)
     ScreenScaffold(top = { TopBar(onBack = onBack) }, bottom = {
-        PrimaryButton(stringResource(R.string.next_continue)) {
+        if (!firstRun || showTv) PrimaryButton(stringResource(R.string.next_continue)) {
             settings.target = target
             // Seçim yapılmadıysa ağda görülen ilk TV (açık kart bir markaysa o markanınki) kullanılır (eski davranış).
             if (chosen == null && target.showsOnTv) tvs?.firstOrNull { open?.brand == null || it.brand == open?.brand }?.let { choose(it) }
@@ -271,9 +224,17 @@ fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: ((TvBrand) -> Unit)?
             onDone()
         }
     }) {
-        Heading(stringResource(R.string.target_title), stringResource(R.string.target_body), if (onBack == null) stringResource(R.string.setup_step, 3) else null)
+        Heading(stringResource(R.string.target_title), stringResource(R.string.target_body), if (firstRun) stringResource(R.string.setup_step, 3) else null)
         val phoneIp = remember { phoneAddress(context) }
-        DisplayChoice.entries.forEach { choice ->
+        if (firstRun) {
+            TwoColumns(
+                { StatusTile(CouchIcons.Tv, stringResource(R.string.target_tv), stringResource(R.string.display_tv_note), it,
+                    onClick = { showTv = true; target = SubtitleTarget.TV }) },
+                { StatusTile(CouchIcons.Smartphone, stringResource(R.string.target_phone), stringResource(R.string.display_phone_note), it,
+                    onClick = { show(DisplayChoice.PHONE) }) },
+            )
+        }
+        if (!firstRun || showTv) DisplayChoice.entries.filter { !firstRun || it != DisplayChoice.PHONE }.forEach { choice ->
             if (choice == DisplayChoice.ANDROID_TV) TileLabel(stringResource(R.string.chooser_group_tv))
             if (choice == DisplayChoice.BROWSER) TileLabel(stringResource(R.string.chooser_group_other))
             val brand = choice.brand
@@ -292,7 +253,7 @@ fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: ((TvBrand) -> Unit)?
             }
         }
         // Mac ve Windows'taki "İkisi de": altyazı hem TV'de hem bu telefonda görünür.
-        Tile(Modifier.fillMaxWidth(), style = if (target == SubtitleTarget.BOTH) TileStyle.ACTIVE else TileStyle.NORMAL, onClick = { target = SubtitleTarget.BOTH }) {
+        if (!firstRun) Tile(Modifier.fillMaxWidth(), style = if (target == SubtitleTarget.BOTH) TileStyle.ACTIVE else TileStyle.NORMAL, onClick = { target = SubtitleTarget.BOTH }) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
                 TileIcon(CouchIcons.Tv)
                 Column(Modifier.weight(1f)) {
@@ -310,7 +271,7 @@ fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: ((TvBrand) -> Unit)?
         }
         // Mac ve Windows'taki "Yalnız OBS (yayın)": TV aranmaz, bu telefonda altyazı ekranı açılmaz; altyazı yalnız aynı Wi-Fi'daki
         // bilgisayarda OBS'in tarayıcı kaynağına gider (iPhone ile aynı). Seçiliyken adres ve kopyala düğmesi görünür.
-        Tile(Modifier.fillMaxWidth(), style = if (target == SubtitleTarget.OBS) TileStyle.ACTIVE else TileStyle.NORMAL, onClick = { target = SubtitleTarget.OBS }) {
+        if (!firstRun) Tile(Modifier.fillMaxWidth(), style = if (target == SubtitleTarget.OBS) TileStyle.ACTIVE else TileStyle.NORMAL, onClick = { target = SubtitleTarget.OBS }) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
                 TileIcon(CouchIcons.Tv)
                 Column(Modifier.weight(1f)) {
@@ -333,6 +294,7 @@ fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: ((TvBrand) -> Unit)?
  */
 @Composable
 private fun ManualTvDialog(initial: TvBrand, onDismiss: () -> Unit, onSupported: () -> Unit, onConnect: (FoundTv) -> Unit) {
+    val context = LocalContext.current
     var brand by remember { mutableStateOf(initial) }
     var host by remember { mutableStateOf("") }
     var invalid by remember { mutableStateOf(false) }
@@ -342,7 +304,7 @@ private fun ManualTvDialog(initial: TvBrand, onDismiss: () -> Unit, onSupported:
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
                 Text(stringResource(R.string.target_unlisted_body), style = Tokens.Type.caption, color = Tokens.Color.secondary)
-                Segmented(listOf("LG", "Samsung", "Android TV"), TvBrand.entries.indexOf(brand)) { brand = TvBrand.entries[it]; invalid = false }
+                Segmented(TvBrand.entries.map { brandName(it) }, TvBrand.entries.indexOf(brand)) { brand = TvBrand.entries[it]; invalid = false }
                 if (brand != TvBrand.ANDROID_TV) {
                     Field(host, { host = it; invalid = false }, stringResource(R.string.target_ip_hint),
                         keyboard = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri))
@@ -353,7 +315,7 @@ private fun ManualTvDialog(initial: TvBrand, onDismiss: () -> Unit, onSupported:
         },
         confirmButton = {
             TextButton({
-                if (brand == TvBrand.ANDROID_TV) onConnect(FoundTv("Android TV", "", brand))
+                if (brand == TvBrand.ANDROID_TV) onConnect(FoundTv(context.getString(R.string.tvinstall_brand_android), "", brand))
                 else com.couchsubs.mobile.core.ManualAddress.normalize(host)?.let { onConnect(FoundTv(it, it, brand)) } ?: run { invalid = true }
             }, enabled = brand == TvBrand.ANDROID_TV || host.isNotBlank()) { Text(stringResource(R.string.target_connect)) }
         },
@@ -380,14 +342,15 @@ private fun ObsOnlyAddress() {
             Text(shown, style = Tokens.Type.caption.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace), color = Tokens.Color.text)
         }
         SecondaryButton(stringResource(if (copied) R.string.history_copied else R.string.history_copy), Modifier.fillMaxWidth()) {
-            context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("CouchSubs", shown))
+            context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText(context.getString(R.string.app_name), shown))
             copied = true
         }
     }
 }
 
-fun brandName(brand: TvBrand) = when (brand) {
-    TvBrand.LG -> "LG"
-    TvBrand.SAMSUNG -> "Samsung"
-    TvBrand.ANDROID_TV -> "Android TV"
-}
+@Composable
+fun brandName(brand: TvBrand): String = stringResource(when (brand) {
+    TvBrand.LG -> R.string.tvinstall_brand_lg
+    TvBrand.SAMSUNG -> R.string.tvinstall_brand_samsung
+    TvBrand.ANDROID_TV -> R.string.tvinstall_brand_android
+})

@@ -30,7 +30,6 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.couchsubs.mobile.Services
 import com.couchsubs.mobile.account.Telemetry
-import com.couchsubs.mobile.promo.PromoController
 import com.couchsubs.mobile.service.LiveState
 import com.couchsubs.mobile.service.TranslationService
 import com.couchsubs.mobile.settings.SubtitleTarget
@@ -61,7 +60,6 @@ object Routes {
         return when {
             !settings.welcomeSeen -> WELCOME
             // Konsol türü bir kez sorulur; PS5'i önceden eşlenmiş kurulumlar PlayStation sayılır.
-            settings.platformChoice == null && settings.accountId == null && settings.console == null && !settings.setupSkipped -> PLATFORM
             // Xbox (Beta): Microsoft girişi ve Xbox seçimi; ikinci hesap (PSN) adımı yok.
             settings.xbox && !Services.xboxAuth.signedIn && !settings.setupSkipped -> XBOX_LOGIN
             settings.xbox && settings.xboxConsole == null && !settings.setupSkipped -> XBOX_CONSOLE
@@ -90,12 +88,6 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge(SystemBarStyle.dark(Color.TRANSPARENT), SystemBarStyle.dark(Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
         val settings = Services.settings
-        // Tanıtım popup'ı: uygulama ön plana her geldiğinde (soğuk açılışta hemen, sonra en çok günde bir) promo.json'a
-        // arka planda bakılır; ağ hatası sessizdir. Kurulum ya da ilk tur bitmediyse bu açılışta hazırlanmaz.
-        lifecycle.addObserver(androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_START)
-                PromoController.refresh(applicationContext, Services.scope, setupDone = Routes.next() == Routes.MAIN && settings.tourShown)
-        })
         // Over-the-air update: every cold start (old downloads are deleted first); while the app stays open, every 6 hours below.
         UpdateController.coldStart(applicationContext)
         setContent {
@@ -137,6 +129,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     composable(Routes.WELCOME) {
                         WelcomeScreen(onDemo = { startDemo(navigation) }) {
+                            if (settings.platformChoice == null) settings.platformChoice = com.couchsubs.mobile.settings.ConsolePlatform.PLAYSTATION
                             settings.welcomeSeen = true
                             Services.applyMeasurement()
                             advance(navigation)
@@ -211,7 +204,8 @@ class MainActivity : ComponentActivity() {
                         SettingsScreen(onBack = { pop(navigation) }, onPacks = { navigation.navigate(Routes.PACKS) },
                             onTarget = { navigation.navigate(Routes.TARGET) }, onPairing = { pairing(navigation) },
                             onTvInstall = { navigation.navigate(Routes.TV_INSTALL) },
-                            onPlatform = { navigation.navigate(Routes.PLATFORM) }, onDemo = { startDemo(navigation) })
+                            onPlatform = { navigation.navigate(Routes.PLATFORM) }, onDemo = { startDemo(navigation) },
+                            onProfile = { navigation.navigate(Routes.PROFILE) })
                     }
                     composable(Routes.HISTORY) { HistoryScreen(onBack = { pop(navigation) }) }
                     composable(Routes.TV_INSTALL) {

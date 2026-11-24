@@ -45,9 +45,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
@@ -191,21 +188,6 @@ fun PsnLoginScreen(onBack: (() -> Unit)? = null, onSkip: (() -> Unit)? = null, o
                 }
             }) {
                 Heading(stringResource(R.string.psn_title), stringResource(R.string.psn_body), stringResource(R.string.setup_step, 1))
-                TwoColumns(
-                    { StatusTile(Icons.Filled.Person, stringResource(R.string.psn_free_note), stringResource(R.string.psn_free), it) },
-                    { StatusTile(CouchIcons.Gamepad, stringResource(R.string.psn_you_play_note), stringResource(R.string.psn_you_play), it) },
-                )
-                Tile(Modifier.fillMaxWidth()) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
-                        TileIcon(Icons.Filled.Lock)
-                        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
-                            Text(stringResource(R.string.psn_password_safe), style = Tokens.Type.headline, color = Tokens.Color.text)
-                            Text(stringResource(R.string.psn_password_safe_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
-                        }
-                    }
-                }
-                // Kol ikinci hesaba atanırsa ana hesapla açılan oyun onu kendi kolu saymaz (GitHub #231).
-                NoteTile(stringResource(R.string.psn_main_account))
                 problem?.let {
                     NoteTile(stringResource(R.string.psn_failed, it))
                     if (!browserFirst) GhostButton(stringResource(R.string.psn_browser)) { openBrowser() }

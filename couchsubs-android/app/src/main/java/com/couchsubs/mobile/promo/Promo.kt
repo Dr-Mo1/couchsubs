@@ -86,5 +86,5 @@ object PromoPolicy {
         !moment.tour && moment.inAppMs >= SHOW_DELAY_MS
 
     fun shouldShow(popup: PromoPopup?, record: PromoRecord, nowMs: Long, moment: PromoMoment, platform: String = PLATFORM) =
-        idle(moment) && due(popup, record, nowMs, platform)
+        com.couchsubs.mobile.core.TargamgiPrivacy.PROMO && idle(moment) && due(popup, record, nowMs, platform)
 }
