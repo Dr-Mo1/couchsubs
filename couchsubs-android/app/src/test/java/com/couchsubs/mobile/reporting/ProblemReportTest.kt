@@ -133,4 +133,24 @@ class ProblemReportTest {
         assertEquals(2000, row.getString("arabic_text").length)
         assertEquals(0, ReviewBatch.json(emptyList(), info).length())
     }
+
+    @Test fun startReportBuiltOncePerVersionCodeOnBetaOnly() {
+        assertNull(StartReport.buildIfNeeded("stable", 0, "1.0.41", 41, info))
+        val first = StartReport.buildIfNeeded("beta", 0, "1.0.41", 41, info)!!
+        assertEquals("start", first.getString("kind"))
+        assertEquals("started 1.0.41 (41)", first.getString("message"))
+        assertEquals("", first.getString("log"))
+        assertFalse(first.has("name"))
+        assertEquals(41, first.getInt("version_code"))
+
+        // Same versionCode is not reported a second time.
+        assertNull(StartReport.buildIfNeeded("beta", 41, "1.0.41", 41, info))
+
+        // A newer versionCode builds a new start report.
+        val nextInfo = info.copy(version = "1.0.42", versionCode = 42)
+        val second = StartReport.buildIfNeeded("beta", 41, "1.0.42", 42, nextInfo)!!
+        assertEquals("start", second.getString("kind"))
+        assertEquals("started 1.0.42 (42)", second.getString("message"))
+        assertEquals("", second.getString("log"))
+    }
 }

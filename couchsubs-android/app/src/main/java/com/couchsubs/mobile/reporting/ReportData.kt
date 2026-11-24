@@ -34,6 +34,21 @@ object ReportJson {
             }
 }
 
+object StartReport {
+    fun message(versionName: String, versionCode: Int): String = "started $versionName ($versionCode)"
+
+    fun buildIfNeeded(
+        channel: String,
+        lastReportedVersionCode: Int,
+        versionName: String,
+        versionCode: Int,
+        info: ReportInfo,
+    ): JSONObject? {
+        if (channel != "beta" || versionCode <= 0 || lastReportedVersionCode == versionCode) return null
+        return ReportJson.build("start", message(versionName, versionCode), null, "", info)
+    }
+}
+
 /** Caller serializes access and persists a timestamp only after the report was saved. */
 class ReportLimiter(private val clock: () -> Long = System::currentTimeMillis) {
     fun allowed(last: Long?): Boolean = last == null || clock() - last >= 30 * 60 * 1000L

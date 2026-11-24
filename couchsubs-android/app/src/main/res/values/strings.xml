@@ -948,4 +948,8 @@
     <string name="player_character_auto">تلقائي</string>
     <string name="player_character_jason">جيسون</string>
     <string name="player_character_lucia">لوسيا</string>
+    <string name="beta_channel_on">تم تفعيل قناة التجربة</string>
+    <string name="beta_channel_off">تم إيقاف قناة التجربة</string>
+    <string name="rescue_body">تعذّر تشغيل هذه النسخة. جارٍ البحث عن تحديث…</string>
+    <string name="rescue_update">تحديث</string>
 </resources>

@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -599,11 +600,29 @@ private fun PsnSignOutRow() {
 @Composable
 private fun OpenSourceScreen(onBack: () -> Unit) {
     val context = LocalContext.current
+    var versionTaps by remember { mutableStateOf(0) }
     ScreenScaffold(top = { TopBar(stringResource(R.string.open_source_licenses), onBack = onBack) }) {
         BodyText(stringResource(R.string.licenses_intro))
         BodyText(stringResource(R.string.license_couchsubs))
         BodyText(stringResource(R.string.license_chiaki))
         BodyText(stringResource(R.string.licenses_notice))
+        Text(
+            text = stringResource(R.string.update_version, "\u2068${com.couchsubs.mobile.BuildConfig.VERSION_NAME}\u2069"),
+            style = Tokens.Type.caption,
+            color = Tokens.Color.secondary,
+            modifier = Modifier.clickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null,
+            ) {
+                val result = com.couchsubs.mobile.update.BetaChannelToggle.tap(versionTaps, Services.settings.updateChannel)
+                versionTaps = result.count
+                if (result.toggled) {
+                    Services.settings.updateChannel = result.channel
+                    val message = if (result.channel == com.couchsubs.mobile.update.UpdateChannel.BETA) R.string.beta_channel_on else R.string.beta_channel_off
+                    android.widget.Toast.makeText(context, context.getString(message), android.widget.Toast.LENGTH_SHORT).show()
+                }
+            },
+        )
         SecondaryButton(stringResource(R.string.about_source)) { open(context, context.getString(R.string.url_source)) }
     }
 }

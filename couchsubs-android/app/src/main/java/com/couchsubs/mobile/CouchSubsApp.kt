@@ -27,7 +27,27 @@ class CouchSubsApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        if (com.couchsubs.mobile.update.RescueMarker.onAppStart(filesDir, BuildConfig.VERSION_CODE)) {
+            rescueMode = true
+            return
+        }
         Services.init(this)
+        // A process that stays alive 5 s did not crash at startup. Background starts (the translation service, the
+        // update receiver) never draw MainActivity's first frame, so without this they would count as crashes and open
+        // rescue mode by mistake; a real startup crash happens within a second or two.
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
+            { com.couchsubs.mobile.update.RescueMarker.clear(filesDir) }, 5_000L)
+    }
+
+    companion object {
+        @Volatile var rescueMode: Boolean = false
+            private set
+
+        fun exitRescue(app: Application) {
+            com.couchsubs.mobile.update.RescueMarker.clear(app.filesDir)
+            rescueMode = false
+            if (!Services.isInitialized) Services.init(app)
+        }
     }
 }
 
@@ -36,6 +56,7 @@ object Services {
     private const val TAG = "CouchSubsServices"
     lateinit var settings: AppSettings
         private set
+    val isInitialized: Boolean get() = ::settings.isInitialized
     lateinit var packStore: PackStore
         private set
     /** Paket sunucusu: workers.dev, ulaşılamazsa yedek adres (couchsubs-packs.enmeraapps.com); çalışan adres hatırlanır. */

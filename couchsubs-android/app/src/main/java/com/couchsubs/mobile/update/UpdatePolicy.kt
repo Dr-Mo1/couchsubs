@@ -34,7 +34,121 @@ data class UpdateInfo(
 
 enum class UpdateFailureKind { NETWORK, SIZE, HASH }
 
-class UpdateException(val kind: UpdateFailureKind, message: String?, cause: Throwable? = null) : Exception(message, cause)
+class UpdateException(
+    val kind: UpdateFailureKind,
+    message: String?,
+    cause: Throwable? = null,
+    val httpStatus: Int? = null,
+) : Exception(message, cause)
+
+object UpdateChannel {
+    const val STABLE = "stable"
+    const val BETA = "beta"
+    const val PREF_KEY = "updateChannel"
+
+    fun normalize(value: String?): String = if (value == BETA) BETA else STABLE
+
+    fun manifestUrl(stableUrl: String, channel: String): String {
+        if (normalize(channel) != BETA) return stableUrl
+        val idx = stableUrl.lastIndexOf("update.json")
+        return if (idx >= 0) stableUrl.substring(0, idx) + "update-beta.json" + stableUrl.substring(idx + "update.json".length)
+        else stableUrl
+    }
+
+    /**
+     * Fetches the manifest for [channel]. On beta, tries update-beta.json first and falls back to [stableUrl]
+     * if the beta manifest returns HTTP 404.
+     */
+    fun fetchManifest(
+        stableUrl: String,
+        channel: String,
+        fetch: (String) -> String = { UpdateDownload.fetchText(it) },
+    ): String {
+        val url = manifestUrl(stableUrl, channel)
+        if (url == stableUrl) return fetch(stableUrl)
+        return try {
+            fetch(url)
+        } catch (error: UpdateException) {
+            if (error.httpStatus == 404) fetch(stableUrl) else throw error
+        }
+    }
+}
+
+object BetaChannelToggle {
+    const val TAPS_REQUIRED = 7
+
+    data class Result(val count: Int, val channel: String, val toggled: Boolean)
+
+    fun tap(currentCount: Int, currentChannel: String): Result {
+        val normalized = UpdateChannel.normalize(currentChannel)
+        val next = currentCount + 1
+        return if (next >= TAPS_REQUIRED) {
+            val switched = if (normalized == UpdateChannel.BETA) UpdateChannel.STABLE else UpdateChannel.BETA
+            Result(count = 0, channel = switched, toggled = true)
+        } else {
+            Result(count = next, channel = normalized, toggled = false)
+        }
+    }
+}
+
+/**
+ * Tracks unfinished app starts per versionCode in filesDir.
+ * If the same versionCode fails to reach its first frame [THRESHOLD] or more times in a row,
+ * the next launch enters rescue mode so the user can still install an update.
+ */
+object RescueMarker {
+    const val FILE_NAME = "startup-marker.txt"
+    const val THRESHOLD = 2
+
+    data class State(val versionCode: Int, val count: Int)
+
+    fun file(filesDir: File): File = File(filesDir, FILE_NAME)
+
+    fun read(filesDir: File): State? {
+        val f = file(filesDir)
+        if (!f.isFile) return null
+        val text = runCatching { f.readText(Charsets.UTF_8).trim() }.getOrNull() ?: return null
+        val parts = text.split(':')
+        if (parts.size != 2) return null
+        val code = parts[0].toIntOrNull() ?: return null
+        val count = parts[1].toIntOrNull() ?: return null
+        if (code <= 0 || count < 0) return null
+        return State(code, count)
+    }
+
+    /**
+     * Called at the very start of Application.onCreate.
+     * Returns true if this launch must enter rescue mode (2+ unfinished starts for [versionCode]).
+     * Otherwise increments and persists the unfinished-start counter for [versionCode] and returns false.
+     */
+    fun onAppStart(filesDir: File, versionCode: Int): Boolean {
+        val prev = read(filesDir)
+        val unfinished = if (prev != null && prev.versionCode == versionCode) prev.count else 0
+        if (unfinished >= THRESHOLD) return true
+        write(filesDir, State(versionCode, unfinished + 1))
+        return false
+    }
+
+    fun write(filesDir: File, state: State) {
+        runCatching {
+            filesDir.mkdirs()
+            val target = file(filesDir)
+            val tmp = File(filesDir, "$FILE_NAME.tmp")
+            tmp.writeText("${state.versionCode}:${state.count}", Charsets.UTF_8)
+            if (!tmp.renameTo(target)) {
+                target.writeText("${state.versionCode}:${state.count}", Charsets.UTF_8)
+                tmp.delete()
+            }
+        }
+    }
+
+    fun clear(filesDir: File) {
+        runCatching {
+            file(filesDir).delete()
+            File(filesDir, "$FILE_NAME.tmp").delete()
+        }
+    }
+}
 
 object UpdatePolicy {
     /** While the app stays open the manifest is re-checked this often (a cold start always checks). */
@@ -117,7 +231,8 @@ object UpdateDownload {
     fun fetchText(url: String, timeoutMs: Int = UpdatePolicy.MANIFEST_TIMEOUT_MS, maxBytes: Int = UpdatePolicy.MAX_MANIFEST_BYTES): String = try {
         val connection = open(url, timeoutMs)
         try {
-            if (connection.responseCode != 200) throw UpdateException(UpdateFailureKind.NETWORK, "HTTP ${connection.responseCode}")
+            val status = connection.responseCode
+            if (status != 200) throw UpdateException(UpdateFailureKind.NETWORK, "HTTP $status", httpStatus = status)
             String(connection.inputStream.use { readLimited(it, maxBytes) }, Charsets.UTF_8)
         } finally {
             connection.disconnect()
@@ -154,7 +269,8 @@ object UpdateDownload {
         try {
             val connection = open(info.apkUrl, timeoutMs)
             try {
-                if (connection.responseCode != 200) throw UpdateException(UpdateFailureKind.NETWORK, "HTTP ${connection.responseCode}")
+                val status = connection.responseCode
+                if (status != 200) throw UpdateException(UpdateFailureKind.NETWORK, "HTTP $status", httpStatus = status)
                 val digest = MessageDigest.getInstance("SHA-256")
                 var done = 0L
                 connection.inputStream.use { input ->

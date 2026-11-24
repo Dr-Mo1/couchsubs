@@ -104,6 +104,10 @@ fun MainScreen(
 ) {
     val context = LocalContext.current
     val settings = Services.settings
+    LaunchedEffect(Unit) {
+        androidx.compose.runtime.withFrameNanos { }
+        com.couchsubs.mobile.reporting.ProblemReporter.start(settings.updateChannel)
+    }
     val xbox = settings.xbox
     val paired = if (xbox) settings.xboxConsole != null && Services.xboxAuth.signedIn else settings.console != null
     val topBar: @Composable () -> Unit = {

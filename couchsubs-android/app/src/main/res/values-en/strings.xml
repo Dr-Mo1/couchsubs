@@ -938,4 +938,8 @@
     <string name="player_character_auto">Automatic</string>
     <string name="player_character_jason">Jason</string>
     <string name="player_character_lucia">Lucia</string>
+    <string name="beta_channel_on">Test channel on</string>
+    <string name="beta_channel_off">Test channel off</string>
+    <string name="rescue_body">This version failed to start. Checking for an update…</string>
+    <string name="rescue_update">Update</string>
 </resources>

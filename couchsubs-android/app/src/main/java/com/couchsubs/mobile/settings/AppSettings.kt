@@ -140,6 +140,15 @@ class AppSettings(context: Context) : AreaStore {
             check(prefs.edit().putString(com.couchsubs.mobile.AppLanguage.KEY, value).commit())
         }
 
+    var updateChannel: String
+        get() = com.couchsubs.mobile.update.UpdateChannel.normalize(
+            prefs.getString(com.couchsubs.mobile.update.UpdateChannel.PREF_KEY, null),
+        )
+        set(value) = prefs.edit().putString(
+            com.couchsubs.mobile.update.UpdateChannel.PREF_KEY,
+            com.couchsubs.mobile.update.UpdateChannel.normalize(value),
+        ).apply()
+
     /** Kuruluma özel; sunucu durdurulup başlatılınca değişmez. */
     val subtitleAccessKey: String
         get() = synchronized(AppSettings::class.java) {

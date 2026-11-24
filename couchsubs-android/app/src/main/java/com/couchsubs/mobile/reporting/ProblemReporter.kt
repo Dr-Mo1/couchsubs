@@ -68,6 +68,23 @@ object ProblemReporter {
         flush()
     }
 
+    fun start(channel: String) {
+        if (!ready || !configured || channel != "beta") return
+        Services.scope.launch(Dispatchers.IO) {
+            runCatching {
+                val recorded = synchronized(errorLock) {
+                    val last = prefs.getInt("startReportVersionCode", 0)
+                    val json = StartReport.buildIfNeeded(channel, last, info.version, info.versionCode, info)
+                        ?: return@synchronized false
+                    reports.save(json)
+                    prefs.edit().putInt("startReportVersionCode", info.versionCode).commit()
+                    true
+                }
+                if (recorded) sendPending()
+            }
+        }
+    }
+
     fun error(where: String, detail: String?) {
         if (!automatic) return
         Services.scope.launch(Dispatchers.IO) {
@@ -146,7 +163,7 @@ object ProblemReporter {
         if (!configured) return@withLock
         for (file in reports.files()) {
             val kind = runCatching { JSONObject(file.readText()).getString("kind") }.getOrNull() ?: continue
-            if (kind != "user" && !automatic) continue
+            if (kind != "user" && kind != "start" && !automatic) continue
             if (!sendReport(file)) break
         }
     }

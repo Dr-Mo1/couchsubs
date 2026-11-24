@@ -87,11 +87,26 @@ class MainActivity : ComponentActivity() {
         // Uygulama hep koyu; sistem açık temadayken de durum çubuğu simgeleri açık renk kalsın.
         enableEdgeToEdge(SystemBarStyle.dark(Color.TRANSPARENT), SystemBarStyle.dark(Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
+        if (com.couchsubs.mobile.CouchSubsApp.rescueMode) {
+            setContent {
+                CouchSubsTheme {
+                    RescueScreen(onRetry = {
+                        com.couchsubs.mobile.CouchSubsApp.exitRescue(application)
+                        recreate()
+                    })
+                }
+            }
+            return
+        }
         val settings = Services.settings
         // Over-the-air update: every cold start (old downloads are deleted first); while the app stays open, every 6 hours below.
         UpdateController.coldStart(applicationContext)
         setContent {
             CouchSubsTheme {
+                LaunchedEffect(Unit) {
+                    androidx.compose.runtime.withFrameNanos { }
+                    com.couchsubs.mobile.update.RescueMarker.clear(filesDir)
+                }
                 val navigation = rememberNavController()
                 val currentEntry by navigation.currentBackStackEntryAsState()
                 val status by LiveState.status.collectAsState()
@@ -230,9 +245,10 @@ class MainActivity : ComponentActivity() {
     /** Öne gelen ekran, gösterilemeyen (ya da arka plandayken gelen) eşleştirme isteğini yeniden gösterir. */
     override fun onResume() {
         super.onResume()
-        TranslationService.syncPairing()
         // Back from the "Install unknown apps" settings page: carry on with the update.
         UpdateController.onResume(this)
+        if (com.couchsubs.mobile.CouchSubsApp.rescueMode) return
+        TranslationService.syncPairing()
         // Profil'de "Arka planda sürdür" değişmiş olabilir.
         BackgroundPip.update(this, BackgroundPip.wanted(this, LiveState.status.value))
     }
@@ -240,6 +256,7 @@ class MainActivity : ComponentActivity() {
     /** Android 11 ve öncesi: ana ekrana dönülürken küçük pencere burada açılır. */
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
+        if (com.couchsubs.mobile.CouchSubsApp.rescueMode) return
         BackgroundPip.onUserLeave(this, BackgroundPip.wanted(this, LiveState.status.value))
     }
 

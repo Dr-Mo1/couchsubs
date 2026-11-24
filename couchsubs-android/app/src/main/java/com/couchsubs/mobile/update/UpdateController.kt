@@ -12,10 +12,11 @@ import android.content.pm.PackageInstaller
 import android.os.Build
 import android.util.Log
 import com.couchsubs.mobile.BuildConfig
-import com.couchsubs.mobile.Services
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -53,8 +54,15 @@ object UpdateController {
     private val checkLock = Mutex()
     @Volatile private var work: Job? = null
 
+    /** Own scope so the updater works in rescue mode with Services uninitialized. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     /** Downloaded APKs live only here; the whole folder is wiped on start. */
     private fun folder(context: Context) = File(context.cacheDir, "update")
+
+    private fun channel(context: Context): String = UpdateChannel.normalize(
+        context.getSharedPreferences("settings", Context.MODE_PRIVATE).getString(UpdateChannel.PREF_KEY, UpdateChannel.STABLE),
+    )
 
     private fun infoOf(state: UpdateState): UpdateInfo? = when (state) {
         UpdateState.Idle -> null
@@ -69,7 +77,7 @@ object UpdateController {
     fun coldStart(context: Context) {
         val app = context.applicationContext
         dismissedCode = 0
-        Services.scope.launch(Dispatchers.IO) {
+        scope.launch(Dispatchers.IO) {
             // A download or install already under way (activity recreated, process alive) must not lose its file.
             if (current.value is UpdateState.Idle || current.value is UpdateState.Available) cleanup(app)
             check(app, manual = false)
@@ -96,7 +104,7 @@ object UpdateController {
         return checkLock.withLock {
             withContext(Dispatchers.IO) {
                 try {
-                    val info = UpdatePolicy.parse(UpdateDownload.fetchText(BuildConfig.UPDATE_URL))
+                    val info = UpdatePolicy.parse(UpdateChannel.fetchManifest(BuildConfig.UPDATE_URL, channel(context)))
                     when {
                         info == null -> {
                             Log.i(TAG, "update.json is missing a field or invalid")
@@ -127,7 +135,7 @@ object UpdateController {
         if (current.value is UpdateState.Downloading || current.value is UpdateState.Installing) return
         val app = context.applicationContext
         work?.cancel()
-        work = Services.scope.launch(Dispatchers.IO) { downloadAndInstall(app, info) }
+        work = scope.launch(Dispatchers.IO) { downloadAndInstall(app, info) }
     }
 
     /** "Later" / "Close" / "Cancel": hides this release until the next cold start; a running download stops and its file is deleted. */
