@@ -216,7 +216,7 @@
     <string name="setup_step">الإعداد · الخطوة %1$d من 3</string>
     <string name="url_privacy" translatable="false">https://couchsubs.enmeraapps.com/gizlilik</string>
     <string name="url_help" translatable="false">https://github.com/yorulmazsinan/couchsubs/issues</string>
-    <string name="url_source" translatable="false">https://github.com/Dr-Mo1/couchsubs</string>
+    <string name="url_source" translatable="false">https://github.com/Dr-Mo1/targamgi</string>
     <string name="url_tvs" translatable="false">https://github.com/yorulmazsinan/couchsubs#hangi-tvlerde-çalışır</string>
     <string name="engine_free_short">مجاني</string>
     <string name="engine_other">أخرى</string>
@@ -417,8 +417,8 @@
     <string name="settings_passcode_field">4 أرقام</string>
     <string name="settings_passcode_note">مطلوب فقط إذا كان للحساب الثانوي رمز دخول على PS5. يُحفظ مشفّرًا على الهاتف.</string>
     <string name="settings_about">عن التطبيق</string>
-    <string name="settings_copyright">CouchSubs · © 2026 Sinan Yorulmaz · AGPL-3.0 · Enmera\nنسخة معدّلة لترجمجي، 2026-11-22. المصدر: github.com/Dr-Mo1/couchsubs</string>
-    <string name="about_body">CouchSubs مجاني ومفتوح المصدر (AGPL-3.0). يستخدم chiaki-ng للتشغيل عن بُعد (AGPL-3.0).\nنسخة معدّلة لترجمجي، 2026-11-22. المصدر: github.com/Dr-Mo1/couchsubs</string>
+    <string name="settings_copyright">CouchSubs · © 2026 Sinan Yorulmaz · AGPL-3.0 · Enmera\nنسخة معدّلة لترجمجي، 2026-11-22. المصدر: github.com/Dr-Mo1/targamgi</string>
+    <string name="about_body">CouchSubs مجاني ومفتوح المصدر (AGPL-3.0). يستخدم chiaki-ng للتشغيل عن بُعد (AGPL-3.0).\nنسخة معدّلة لترجمجي، 2026-11-22. المصدر: github.com/Dr-Mo1/targamgi</string>
     <string name="about_source">الكود المصدري</string>
     <string name="main_packs_off">متوقفة</string>
     <string name="packs_free">مجانية</string>

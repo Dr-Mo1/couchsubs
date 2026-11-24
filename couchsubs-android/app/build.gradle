@@ -62,7 +62,7 @@ android {
         buildConfigField 'String', 'FACEBOOK_APP_ID', "\"${''}\""
         // Over-the-air update manifest (sideloaded APK, no Play Store): a GitHub release asset that Claude publishes with each
         // release. Blank = update check off. Override with -Pcouchsubs.updateUrl=...
-        buildConfigField 'String', 'UPDATE_URL', "\"${findProperty('couchsubs.updateUrl') ?: 'https://github.com/Dr-Mo1/couchsubs/releases/download/targamgi-latest/update.json'}\""
+        buildConfigField 'String', 'UPDATE_URL', "\"${findProperty('couchsubs.updateUrl') ?: 'https://github.com/Dr-Mo1/targamgi/releases/download/targamgi-latest/update.json'}\""
         buildConfigField 'boolean', 'HAS_FIREBASE', "${hasGoogleServices}"
         buildConfigField 'String', 'TV_SAMSUNG_VERSION', "\"${tizenVersion}\""
         manifestPlaceholders = [
