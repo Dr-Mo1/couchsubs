@@ -558,8 +558,7 @@
     <string name="history_empty">No subtitles yet. Lines translated in this and earlier sessions appear here.</string>
     <string name="history_copied">Copied</string>
     <string name="history_copy">Copy</string>
-    <string name="developer_label">Developer</string>
-    <string name="developer_a11y">Developer: Enmera</string>
+    <string name="developer_label">Developed by DrMo</string>
     <string name="history_clear">Clear</string>
     <string name="history_clear_title">Clear the history?</string>
     <string name="history_clear_body">All saved lines are removed from this phone.</string>

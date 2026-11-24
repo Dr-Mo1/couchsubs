@@ -563,8 +563,7 @@
     <string name="history_empty">لا توجد ترجمات بعد. تظهر هنا السطور المترجمة في هذه الجلسة والجلسات السابقة.</string>
     <string name="history_copied">تم النسخ</string>
     <string name="history_copy">نسخ</string>
-    <string name="developer_label">المطوّر</string>
-    <string name="developer_a11y">المطوّر: Enmera</string>
+    <string name="developer_label">تطوير DrMo</string>
     <string name="history_clear">مسح</string>
     <string name="history_clear_title">مسح السجل؟</string>
     <string name="history_clear_body">ستُحذف جميع السطور المحفوظة من هذا الهاتف.</string>
