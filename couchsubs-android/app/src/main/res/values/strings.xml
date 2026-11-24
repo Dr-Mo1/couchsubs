@@ -937,6 +937,15 @@
     <string name="report_hint">ماذا حدث، وماذا كنت تفعل قبل ذلك؟</string>
     <string name="report_name">اسمك (اختياري)</string>
     <string name="report_attach">إرفاق سجل التطبيق</string>
+    <string name="report_attach_media">إرفاق صورة أو فيديو</string>
+    <string name="report_media_too_large">الملف أكبر من 50 ميجابايت</string>
+    <string name="report_media_unsupported">نوع الملف غير مدعوم</string>
+    <string name="report_media_uploading">جارٍ رفع المرفقات… (%1$d من %2$d)</string>
+    <string name="report_media_upload_failed">تعذّر رفع المرفقات. تحقّق من الاتصال وأعد المحاولة.</string>
+    <string name="report_media_remove">إزالة المرفق</string>
+    <string name="report_media_fallback_name">مرفق</string>
+    <string name="report_size_mb">%1$s ميجابايت</string>
+    <string name="report_size_kb">%1$d كيلوبايت</string>
     <string name="report_send">إرسال</string>
     <string name="report_sent">تم إرسال البلاغ. شكرًا لك.</string>
     <string name="report_failed">تعذّر الإرسال. تحقّق من الاتصال وأعد المحاولة.</string>

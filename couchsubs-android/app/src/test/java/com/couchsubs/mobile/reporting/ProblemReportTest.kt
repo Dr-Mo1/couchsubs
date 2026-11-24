@@ -153,4 +153,122 @@ class ProblemReportTest {
         assertEquals("started 1.0.42 (42)", second.getString("message"))
         assertEquals("", second.getString("log"))
     }
+
+    @Test fun mediaObjectPathAndExtensionMatchAllowedMimeTypes() {
+        val cases = mapOf(
+            "image/jpeg" to "jpg",
+            "image/png" to "png",
+            "image/webp" to "webp",
+            "video/mp4" to "mp4",
+            "video/webm" to "webm",
+            "video/3gpp" to "3gp",
+            "video/quicktime" to "mov",
+            "IMAGE/PNG; charset=utf-8" to "png",
+        )
+        for ((mime, ext) in cases) {
+            assertEquals(ext, ReportMedia.extensionFor(mime))
+            assertEquals("install-1/uuid-1.$ext", ReportMedia.objectPath("install-1", mime, "uuid-1"))
+        }
+        assertNull(ReportMedia.extensionFor("image/gif"))
+        assertNull(ReportMedia.extensionFor("application/pdf"))
+        assertNull(ReportMedia.extensionFor(null))
+        assertNull(ReportMedia.objectPath("install-1", "image/gif", "uuid-1"))
+        assertNull(ReportMedia.objectPath(" ", "image/png", "uuid-1"))
+    }
+
+    @Test fun mediaValidationChecksMimeTypeAndFiftyMegabyteLimit() {
+        assertNull(ReportMedia.validate("image/jpeg", 0L))
+        assertNull(ReportMedia.validate("video/mp4", ReportMedia.MAX_BYTES))
+        assertEquals(MediaError.TOO_LARGE, ReportMedia.validate("video/mp4", ReportMedia.MAX_BYTES + 1L))
+        assertEquals(MediaError.TOO_LARGE, ReportMedia.validate("image/png", -1L))
+        assertEquals(MediaError.UNSUPPORTED_TYPE, ReportMedia.validate("image/gif", 1024L))
+        assertEquals(MediaError.UNSUPPORTED_TYPE, ReportMedia.validate(null, 1024L))
+        assertEquals(MediaError.UNSUPPORTED_TYPE, ReportMedia.validate("application/octet-stream", ReportMedia.MAX_BYTES + 1L))
+    }
+
+    @Test fun reportJsonIncludesMediaOnlyWhenProvidedAndCapsAtThree() {
+        val withoutMedia = ReportJson.build("user", "مشكلة", null, "", info)
+        assertFalse(withoutMedia.has("media"))
+
+        val withBlankMedia = ReportJson.build("user", "مشكلة", null, "", info, media = listOf("", "  "))
+        assertFalse(withBlankMedia.has("media"))
+
+        val paths = listOf(
+            "test-install/11111111-1111-1111-1111-111111111111.png",
+            "test-install/22222222-2222-2222-2222-222222222222.mp4",
+            "test-install/33333333-3333-3333-3333-333333333333.jpg",
+            "test-install/44444444-4444-4444-4444-444444444444.webp",
+        )
+        val withMedia = JSONObject(ReportJson.build("user", "مشكلة", null, "", info, media = paths).toString())
+        assertTrue(withMedia.has("media"))
+        val mediaArray = withMedia.getJSONArray("media")
+        assertEquals(3, mediaArray.length())
+        // UUID object paths must not be scrubbed by ReportScrubber.
+        assertEquals(paths[0], mediaArray.getString(0))
+        assertEquals(paths[1], mediaArray.getString(1))
+        assertEquals(paths[2], mediaArray.getString(2))
+    }
+
+    @Test fun uploadAllSkipsAlreadyUploadedFilesOnRetry() {
+        val items = listOf("content://media/1", "content://media/2", "content://media/3")
+        val attemptedFirst = mutableListOf<String>()
+        val progressFirst = mutableListOf<Pair<Int, Int>>()
+
+        // First attempt: item 1 succeeds, item 2 fails.
+        val (ok1, uploaded1) = ReportMedia.uploadAll(
+            items = items,
+            alreadyUploaded = emptyMap(),
+            key = { it },
+            onProgress = { cur, total -> progressFirst.add(cur to total) },
+        ) { uri ->
+            attemptedFirst.add(uri)
+            if (uri == items[0]) "install/1.png" else null
+        }
+        assertFalse(ok1)
+        assertEquals(listOf(items[0], items[1]), attemptedFirst)
+        assertEquals(listOf(1 to 3, 2 to 3), progressFirst)
+        assertEquals(mapOf(items[0] to "install/1.png"), uploaded1)
+
+        // Retry: item 1 is skipped; items 2 and 3 are uploaded.
+        val attemptedRetry = mutableListOf<String>()
+        val progressRetry = mutableListOf<Pair<Int, Int>>()
+        val (ok2, uploaded2) = ReportMedia.uploadAll(
+            items = items,
+            alreadyUploaded = uploaded1,
+            key = { it },
+            onProgress = { cur, total -> progressRetry.add(cur to total) },
+        ) { uri ->
+            attemptedRetry.add(uri)
+            when (uri) {
+                items[1] -> "install/2.mp4"
+                items[2] -> "install/3.jpg"
+                else -> fail("Should not re-upload $uri").let { null }
+            }
+        }
+        assertTrue(ok2)
+        assertEquals(listOf(items[1], items[2]), attemptedRetry)
+        assertEquals(listOf(1 to 2, 2 to 2), progressRetry)
+        assertEquals(
+            mapOf(
+                items[0] to "install/1.png",
+                items[1] to "install/2.mp4",
+                items[2] to "install/3.jpg",
+            ),
+            uploaded2,
+        )
+
+        // Third retry when everything already succeeded (e.g., report POST failed): zero uploads.
+        val attemptedThird = mutableListOf<String>()
+        val (ok3, uploaded3) = ReportMedia.uploadAll(
+            items = items,
+            alreadyUploaded = uploaded2,
+            key = { it },
+        ) { uri ->
+            attemptedThird.add(uri)
+            "unexpected"
+        }
+        assertTrue(ok3)
+        assertTrue(attemptedThird.isEmpty())
+        assertEquals(uploaded2, uploaded3)
+    }
 }

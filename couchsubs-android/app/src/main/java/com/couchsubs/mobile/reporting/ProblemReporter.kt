@@ -3,6 +3,7 @@ package com.couchsubs.mobile.reporting
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.Uri
 import android.os.Build
 import android.os.Process
 import com.couchsubs.mobile.BuildConfig
@@ -106,8 +107,49 @@ object ProblemReporter {
         }
     }
 
+    /** Stream a single user attachment to Supabase Storage without loading it into memory. */
+    suspend fun uploadMedia(context: Context, uri: Uri, mimeType: String, sizeBytes: Long): String? = withContext(Dispatchers.IO) {
+        try {
+            if (!ready || !configured || ReportMedia.validate(mimeType, sizeBytes) != null) return@withContext null
+            val normalizedMime = ReportMedia.normalizeMime(mimeType) ?: return@withContext null
+            val objectPath = ReportMedia.objectPath(info.installId, normalizedMime) ?: return@withContext null
+            val connection = URL("${BuildConfig.REPORTS_URL.trimEnd('/')}/storage/v1/object/report-media/$objectPath").openConnection() as HttpURLConnection
+            try {
+                connection.requestMethod = "POST"
+                connection.connectTimeout = 15000
+                connection.readTimeout = 60000
+                connection.doOutput = true
+                connection.setFixedLengthStreamingMode(sizeBytes)
+                connection.setRequestProperty("apikey", BuildConfig.REPORTS_KEY)
+                connection.setRequestProperty("Content-Type", normalizedMime)
+                if (BuildConfig.REPORTS_KEY.startsWith("eyJ")) connection.setRequestProperty("Authorization", "Bearer ${BuildConfig.REPORTS_KEY}")
+                val input = context.contentResolver.openInputStream(uri) ?: return@withContext null
+                input.use { stream ->
+                    connection.outputStream.use { out ->
+                        val buffer = ByteArray(16 * 1024)
+                        var written = 0L
+                        while (true) {
+                            val count = stream.read(buffer)
+                            if (count < 0) break
+                            out.write(buffer, 0, count)
+                            written += count
+                        }
+                        if (written != sizeBytes) return@withContext null
+                    }
+                }
+                if (connection.responseCode == 200) objectPath else null
+            } finally { connection.disconnect() }
+        } catch (_: Exception) { null }
+    }
+
     /** Save first, then send. A retry reuses the same pending file rather than adding another copy. */
-    suspend fun user(message: String, name: String, attachLog: Boolean, pending: File? = null): Pair<Boolean, File?> = withContext(Dispatchers.IO) {
+    suspend fun user(
+        message: String,
+        name: String,
+        attachLog: Boolean,
+        pending: File? = null,
+        media: List<String> = emptyList(),
+    ): Pair<Boolean, File?> = withContext(Dispatchers.IO) {
         var file = pending
         try {
             if (!configured || message.isBlank()) return@withContext false to file
@@ -119,7 +161,7 @@ object ProblemReporter {
                     file = null
                     old = null
                 }
-                val json = ReportJson.build("user", message, name, if (attachLog) logTail() else "", info)
+                val json = ReportJson.build("user", message, name, if (attachLog) logTail() else "", info, media = media)
                 if (old == null) file = reports.save(json) else {
                     val temp = File(old.path + ".tmp")
                     temp.writeText(json.toString())

@@ -25,13 +25,76 @@ object ReportScrubber {
 data class ReportInfo(val version: String, val versionCode: Int, val device: String, val android: String, val installId: String)
 
 object ReportJson {
-    fun build(kind: String, message: String, name: String?, log: String, info: ReportInfo, messageLimit: Int = 4000): JSONObject =
+    fun build(
+        kind: String,
+        message: String,
+        name: String?,
+        log: String,
+        info: ReportInfo,
+        messageLimit: Int = 4000,
+        media: List<String> = emptyList(),
+    ): JSONObject =
         JSONObject().put("kind", kind).put("message", ReportScrubber.scrub(message).take(messageLimit).ifBlank { "Unknown problem" })
             .put("app_version", ReportScrubber.scrub(info.version)).put("version_code", info.versionCode)
             .put("device", ReportScrubber.scrub(info.device)).put("android", ReportScrubber.scrub(info.android))
             .put("install_id", info.installId).put("log", ReportScrubber.scrub(log).takeLast(200000)).apply {
                 name?.trim()?.takeIf { it.isNotEmpty() }?.let { put("name", ReportScrubber.scrub(it).take(80)) }
+                val paths = media.map { it.trim() }.filter { it.isNotEmpty() }.take(ReportMedia.MAX_COUNT)
+                if (paths.isNotEmpty()) put("media", JSONArray(paths))
             }
+}
+
+enum class MediaError { UNSUPPORTED_TYPE, TOO_LARGE }
+
+object ReportMedia {
+    const val MAX_COUNT = 3
+    const val MAX_BYTES = 50L * 1024L * 1024L
+
+    private val extensions = mapOf(
+        "image/jpeg" to "jpg",
+        "image/png" to "png",
+        "image/webp" to "webp",
+        "video/mp4" to "mp4",
+        "video/webm" to "webm",
+        "video/3gpp" to "3gp",
+        "video/quicktime" to "mov",
+    )
+
+    fun normalizeMime(mimeType: String?): String? =
+        mimeType?.substringBefore(';')?.trim()?.lowercase(java.util.Locale.ROOT)?.takeIf { it.isNotEmpty() }
+
+    fun extensionFor(mimeType: String?): String? =
+        normalizeMime(mimeType)?.let(extensions::get)
+
+    fun validate(mimeType: String?, sizeBytes: Long): MediaError? = when {
+        extensionFor(mimeType) == null -> MediaError.UNSUPPORTED_TYPE
+        sizeBytes < 0L || sizeBytes > MAX_BYTES -> MediaError.TOO_LARGE
+        else -> null
+    }
+
+    fun objectPath(installId: String, mimeType: String, id: String = java.util.UUID.randomUUID().toString()): String? {
+        val ext = extensionFor(mimeType) ?: return null
+        val owner = installId.trim().trim('/')
+        if (owner.isEmpty()) return null
+        return "$owner/$id.$ext"
+    }
+
+    inline fun <T, K> uploadAll(
+        items: List<T>,
+        alreadyUploaded: Map<K, String>,
+        key: (T) -> K,
+        onProgress: (current: Int, total: Int) -> Unit = { _, _ -> },
+        upload: (T) -> String?,
+    ): Pair<Boolean, Map<K, String>> {
+        val result = LinkedHashMap(alreadyUploaded)
+        val pending = items.filter { key(it) !in result }
+        for ((index, item) in pending.withIndex()) {
+            onProgress(index + 1, pending.size)
+            val path = upload(item) ?: return false to result
+            result[key(item)] = path
+        }
+        return true to result
+    }
 }
 
 object StartReport {
