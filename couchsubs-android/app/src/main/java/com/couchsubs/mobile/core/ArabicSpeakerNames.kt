@@ -127,10 +127,39 @@ object ArabicSpeakerNames {
         "Cameron" to "كاميرون",
         "Beth" to "بيث",
         "Greg" to "جريج",
+        "Doug" to "دوغ",
+        "Kingfishers" to "كينغفيشرز",
     ).mapKeys { it.key.lowercase(Locale.ROOT) }
 
     fun display(name: String): String {
         val key = name.replace(Regex("[’']s$", RegexOption.IGNORE_CASE), "").lowercase(Locale.ROOT)
-        return names[key] ?: name
+        return names[key] ?: transliterate(key)
+    }
+
+    /** Unknown labels get an approximate phonetic spelling; the source identity is never changed. */
+    private fun transliterate(name: String): String {
+        if (name.any { it in '\u0600'..'\u06ff' } && name.none { it in 'a'..'z' }) return name
+        val plain = java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "").replace('ı', 'i')
+        val pairs = linkedMapOf("sch" to "ش", "igh" to "اي", "sh" to "ش", "ch" to "تش",
+            "th" to "ث", "ph" to "ف", "kh" to "خ", "gh" to "غ", "ck" to "ك", "qu" to "كو",
+            "oo" to "و", "ee" to "ي", "ou" to "و", "ow" to "او", "ay" to "اي", "ai" to "اي",
+            "ea" to "ي", "ie" to "ي")
+        val letters = listOf("ا", "ب", "ك", "د", "ي", "ف", "ج", "ه", "ي", "ج", "ك", "ل", "م",
+            "ن", "و", "ب", "ك", "ر", "س", "ت", "و", "ف", "و", "كس", "ي", "ز")
+        return plain.split(' ').joinToString(" ") { word ->
+            names[word] ?: buildString {
+                var i = 0
+                while (i < word.length) {
+                    val pair = pairs.entries.firstOrNull { word.startsWith(it.key, i) }
+                    if (pair != null) { append(pair.value); i += pair.key.length }
+                    else {
+                        val char = word[i++]
+                        if (char in 'a'..'z') append(letters[char - 'a'])
+                        else if (char != '\'' && char != '’') append(char)
+                    }
+                }
+            }
+        }
     }
 }

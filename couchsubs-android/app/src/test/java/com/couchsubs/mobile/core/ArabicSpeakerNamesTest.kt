@@ -7,7 +7,7 @@ import java.io.File
 
 class ArabicSpeakerNamesTest {
     @Test fun knownNamesPossessivesUnknownNamesAndAllWindowsMappings() {
-        for ((name, expected) in listOf("Lucia" to "لوسيا", "JASON" to "جيسون", "Brian’S" to "برايان", "Pilot Pete's" to "الطيار بيت", "Unknown's" to "Unknown's", "Vice City" to "Vice City"))
+        for ((name, expected) in listOf("Lucia" to "لوسيا", "JASON" to "جيسون", "Brian’S" to "برايان", "Pilot Pete's" to "الطيار بيت", "Doug" to "دوغ", "Kingfishers" to "كينغفيشرز"))
             assertEquals(expected, ArabicSpeakerNames.display(name))
         val root = File(System.getProperty("targamgi.repoRoot", ".."))
         val source = File(root, "windows/src/CouchSubs.Core/ArabicSpeakerNames.cs").readText()

@@ -94,7 +94,11 @@ fun PipSubtitleView(status: LiveStatus) {
         }
         val line = status.current.trim()
         if (line.isNotEmpty()) {
-            Text(line, color = Color.White, fontSize = 13.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold,
+            if (com.couchsubs.mobile.core.ArabicSubtitle.isArabic(line)) ArabicSubtitleText(line,
+                androidx.compose.ui.text.TextStyle(fontSize = 13.sp, lineHeight = 18.sp),
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.88f)).padding(horizontal = 12.dp, vertical = 8.dp))
+            else Text(line, color = Color.White, fontSize = 13.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center, maxLines = 3, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                     .background(Color.Black.copy(alpha = 0.72f)).padding(horizontal = 8.dp, vertical = 6.dp))

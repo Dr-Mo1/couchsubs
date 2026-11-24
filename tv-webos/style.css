@@ -417,3 +417,14 @@ body.band #subtitle-cover { border-radius: 0; }
    speaker label or untranslated text stays left-to-right; left-aligned boxes start on the text's own side. */
 #subtitle-text, #subtitle-prev-text, #subtitle-prev2-text, #screen .item, #regions .region { unicode-bidi: plaintext; }
 #screen .item.paragraphs, #regions .region { text-align: start; }
+
+/* Separate RTL speaker labels; dialogue keeps its own bidi context and white color. */
+.arabic-turn { display: flex; flex-direction: row; direction: rtl; unicode-bidi: isolate;
+  align-items: baseline; justify-content: center; max-width: 100%; text-align: right; }
+.arabic-speaker-label { flex: 0 1 auto; min-width: 0; max-width: 32%; padding-left: .28em;
+  font-size: 1.15em; font-weight: 800; direction: rtl; unicode-bidi: isolate; white-space: normal; }
+.arabic-dialogue { flex: 0 1 auto; min-width: 0; direction: rtl; unicode-bidi: isolate;
+  font-weight: 600; color: #FFFFFF; white-space: pre-wrap; overflow-wrap: break-word; word-wrap: break-word; }
+.arabic-turn { text-shadow: 0 1px 3px #000, 0 0 2px #000; }
+
+#subtitle-text[data-arabic="true"] { box-sizing: border-box; min-width: 55%; max-width: 100%; padding: 12px 28px; }

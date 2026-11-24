@@ -587,7 +587,62 @@
     return segments;
   }
 
+  // Arabic labels and dialogue are separate elements, with an explicit RTL row.
+  function arabicLabelColor(name) {
+    var fixed = { 'Jason': '#4FC3F7', 'جيسون': '#4FC3F7', 'Lucia': '#FF8A80', 'لوسيا': '#FF8A80',
+      'Brian': '#81C784', 'برايان': '#81C784', 'Doug': '#FFD54F', 'دوغ': '#FFD54F' };
+    if (Object.prototype.hasOwnProperty.call(fixed, name)) return fixed[name];
+    var hash = 2166136261, key = name.trim().toLowerCase();
+    for (var i = 0; i < key.length; i++) { hash ^= key.charCodeAt(i); hash = (hash + (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24)) >>> 0; }
+    return ['#FFD54F','#4FC3F7','#81C784','#FF8A65','#CE93D8','#F06292','#4DD0E1','#AED581','#FFB74D','#90CAF9'][hash % 10];
+  }
+
+  function arabicTurns(text) {
+    var turns = [], lines = text.replace(/[\u2066-\u2069]/g, '').split('\n');
+    var headings = /^(?:الهدف|المهمة|هدف|مهمة|ملاحظة|تنبيه|تحذير|تلميح|الوقت|الرابط|Objective|Objectives|Note|Warning|Tip|Hint|Mission|Task|Time|Status|Info|https?|ftp)$/i;
+    for (var i = 0; i < lines.length; i++) {
+      var match = /^([A-Z\u00c0-\u024f\u0600-\u06ff][A-Za-z\u00c0-\u024f\u0600-\u06ff .’'\-]{0,47})\s*[:：]\s*(.+)$/.exec(lines[i].trim());
+      var name = match ? match[1].trim() : '';
+      if (match && name.split(/\s+/).length <= 3 && !headings.test(name) && match[2].charAt(0) !== '/' && /[A-Za-z\u0600-\u06ff]/.test(match[2])) {
+        var names = { 'Jason':'جيسون', 'Lucia':'لوسيا', 'Brian':'برايان', 'Doug':'دوغ', 'Kingfishers':'كينغفيشرز' };
+        name = Object.prototype.hasOwnProperty.call(names, name) ? names[name] : name;
+        turns.push({ name: name, body: match[2] });
+      } else if (turns.length) turns[turns.length - 1].body += '\n' + lines[i];
+      else turns.push({ name: null, body: lines[i] });
+    }
+    return turns;
+  }
+
+  function paintArabicSpeakers(el, text) {
+    if (!/[\u0600-\u06ff]/.test(text)) { el.style.direction = ''; el.style.unicodeBidi = ''; el.removeAttribute('data-arabic'); return false; }
+    el.textContent = '';
+    el.style.direction = 'rtl';
+    el.setAttribute('data-arabic', 'true');
+    el.style.unicodeBidi = 'isolate';
+    var turns = arabicTurns(text);
+    for (var i = 0; i < turns.length; i++) {
+      var row = document.createElement('div');
+      row.className = 'arabic-turn'; row.dir = 'rtl';
+      if (turns[i].name) {
+        var label = document.createElement('span');
+        label.className = 'arabic-speaker-label'; label.dir = 'rtl';
+        label.style.color = arabicLabelColor(turns[i].name);
+        label.textContent = '\u2068' + turns[i].name + ':\u2069';
+        row.appendChild(label);
+      }
+      var body = document.createElement('span');
+      body.className = 'arabic-dialogue'; body.dir = 'rtl';
+      body.textContent = turns[i].body.replace(/[A-Za-z][A-Za-z0-9'’ .-]*/g, function (latin) {
+        return '\u2068' + latin.trim() + '\u2069' + (/ $/.test(latin) ? ' ' : '');
+      });
+      row.appendChild(body);
+      el.appendChild(row);
+    }
+    return true;
+  }
+
   function paintSpeakers(el, text, map) {
+    if (paintArabicSpeakers(el, text)) return;
     var segments = speakerSegments(text, map);
     if (segments.length === 1 && !segments[0].color) return;
     el.textContent = '';

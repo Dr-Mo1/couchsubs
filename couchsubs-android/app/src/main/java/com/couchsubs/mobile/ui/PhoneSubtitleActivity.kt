@@ -54,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import com.couchsubs.mobile.R
@@ -167,13 +168,20 @@ class PhoneSubtitleActivity : ComponentActivity() {
                         // Uzun çeviri en çok 3 satıra dengeli bölünür; sığmazsa yazı biraz küçülür (bkz. SubtitleWrap).
                         if (stackPrevious && previous.isNotEmpty() && status.current.isNotEmpty() && previous != status.current) {
                             val wrapped = SubtitleWrap.fit(previous)
-                            Text(speakerText(wrapped.text, previous, speakerColors),
+                            if (com.couchsubs.mobile.core.ArabicSubtitle.isArabic(previous)) ArabicSubtitleText(wrapped.text,
+                                style.copy(fontSize = style.fontSize * scale * 0.8f * wrapped.scale, lineHeight = style.lineHeight * scale * 0.8f * wrapped.scale),
+                                Modifier.padding(horizontal = 16.dp, vertical = 6.dp).alpha(0.4f))
+                            else Text(speakerText(wrapped.text, previous, speakerColors),
                                 style = style.copy(textDirection = androidx.compose.ui.text.style.TextDirection.Content, fontSize = style.fontSize * scale * 0.8f * wrapped.scale, lineHeight = style.lineHeight * scale * 0.8f * wrapped.scale),
                                 color = color.copy(alpha = 0.4f), textAlign = TextAlign.Center)
                         }
                         val currentText = status.current.ifEmpty { if (status.running) "" else "Targamgi" }
                         val current = SubtitleWrap.fit(currentText)
-                        Text(speakerText(current.text, currentText, speakerColors),
+                        if (com.couchsubs.mobile.core.ArabicSubtitle.isArabic(currentText)) ArabicSubtitleText(current.text,
+                            style.copy(fontSize = style.fontSize * scale * current.scale, lineHeight = style.lineHeight * scale * current.scale),
+                            Modifier.widthIn(max = 960.dp).background(Color.Black.copy(alpha = 0.88f),
+                                androidx.compose.foundation.shape.RoundedCornerShape(8.dp)).padding(horizontal = 20.dp, vertical = 12.dp))
+                        else Text(speakerText(current.text, currentText, speakerColors),
                             style = style.copy(textDirection = androidx.compose.ui.text.style.TextDirection.Content, fontSize = style.fontSize * scale * current.scale, lineHeight = style.lineHeight * scale * current.scale),
                             color = color, textAlign = TextAlign.Center)
                     }
