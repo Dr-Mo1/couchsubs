@@ -68,6 +68,11 @@
     <string name="psn_title">Secondary PlayStation account</string>
     <string name="psn_body">Create a free additional account for the app to connect to your console while you play with your main account as usual.</string>
     <string name="psn_open">Sign in with Sony</string>
+    <string name="psn_create_account">No second account? Create a free one</string>
+    <string name="psn_create_title">Create a second account</string>
+    <string name="psn_create_step1">1. Use an e-mail address other than your main account\'s.</string>
+    <string name="psn_create_step2">2. Confirm the account from the e-mail Sony sends.</string>
+    <string name="psn_create_step3">3. Come back to Targamgi and tap Sign in with Sony.</string>
     <string name="psn_failed">Sign-in not completed: %1$s</string>
     <string name="psn_loading">Connecting to Sony…</string>
     <string name="psn_loading_hint">Use the browser sign-in option if the page does not load.</string>
@@ -929,4 +934,8 @@
     <string name="report_automatic_hint">When something fails, the app log is sent, without passwords or sign-in codes.</string>
     <string name="report_improve">Help improve the translation</string>
     <string name="report_improve_hint">Only the English and Arabic subtitle text from play sessions is sent, with no personal data.</string>
+    <string name="settings_player_character">Character you play</string>
+    <string name="player_character_auto">Automatic</string>
+    <string name="player_character_jason">Jason</string>
+    <string name="player_character_lucia">Lucia</string>
 </resources>

@@ -2,6 +2,8 @@
 package com.couchsubs.mobile.translation
 
 import com.couchsubs.mobile.core.SubtitleSegmenter
+import com.couchsubs.mobile.core.PlayerCharacterInference
+import com.couchsubs.mobile.core.TranslationDialogue
 import com.couchsubs.mobile.core.TextMatch
 import com.couchsubs.mobile.core.TextTranslator
 import org.json.JSONArray
@@ -665,19 +667,25 @@ object AiRequest {
     }
 
     /** Bağlam satırı: daha önce gösterilmiş İngilizce ve (biliniyorsa) Türkçesi. */
-    data class ContextLine(val source: String, val translation: String? = null, val speaker: String? = null)
+    data class ContextLine(val source: String, val translation: String? = null, val speaker: String? = null,
+        val playerCharacter: String? = null)
 
     /**
      * Kullanıcı iletisi: önceki satırlar (yalnız bağlam) ve çevrilecek cümleler. [names]: konuşan etiketlerinden öğrenilip
      * cümlelerde geçen adlar; model "Price"ı "Fiyat" diye çevirmesin diye adıyla söylenir (#287).
      */
     fun userMessage(sentences: List<String>, context: List<ContextLine>, game: String? = null, names: List<String> = emptyList(),
-        target: String = "tr", slang: List<Pair<String, String>> = emptyList(), speaker: String? = null): String {
+        target: String = "tr", slang: List<Pair<String, String>> = emptyList(), speaker: String? = null,
+        playerCharacter: String? = null): String {
         val language = TranslationLanguage.name(target)
         val parts = mutableListOf<String>()
         if (!game.isNullOrEmpty()) parts.add("Game: $game")
-        // TODO(C17): add the inferred/overridden Player character signal here for Arabic requests.
-        if (target == "ar") dialogueHints(parts, sentences, context, speaker)
+        if (target == "ar") {
+            dialogueHints(parts, sentences, context, speaker)
+            PlayerCharacterInference.normalize(playerCharacter)?.let { player ->
+                parts.add("Player character: $player (a ${if (player == "Jason") "man" else "woman"})")
+            }
+        }
         if (names.isNotEmpty()) parts.add(if (target == "ar")
             "Character names (write them in Arabic letters by how they sound, do not translate their meaning): ${names.joinToString(", ")}"
             else "Character names (keep them exactly as written, do not translate them): ${names.joinToString(", ")}")
@@ -738,9 +746,10 @@ object AiRequest {
         server: LocalAiServer? = null,
         thinkingOff: Boolean = true,
         target: String = "tr", slang: List<Pair<String, String>> = emptyList(), speaker: String? = null,
+        playerCharacter: String? = null,
     ): AiHttpRequest {
         val trimmed = key.trim()
-        val user = userMessage(sentences, context, game, names, target, slang, speaker)
+        val user = userMessage(sentences, context, game, names, target, slang, speaker, playerCharacter)
         val system = systemPrompt(instruction, target)
         return when (provider) {
             AiProvider.GEMINI -> {
@@ -1006,7 +1015,8 @@ class AiTranslator(
             try {
                 val request = AiRequest.build(provider, key, model, sentences, emptyList(), AiRequest.SCREEN_OUTPUT_TOKENS, game,
                     instruction = scope.instruction, server = server, thinkingOff = thinkingOff, target = target,
-                    slang = if (target == "ar") ArabicGlossary.inLines(slang, sentences) else emptyList())
+                    slang = if (target == "ar") ArabicGlossary.inLines(slang, sentences) else emptyList(),
+                    playerCharacter = TranslationDialogue.currentPlayerCharacter)
                 val (status, body) = http.send("POST", request.url, request.headers, request.body, SCREEN_TIMEOUT_MS)
                 if (status !in 200..299) throw AiRequest.error(status, body)
                 val translated = AiRequest.translations(AiRequest.text(provider, body), sentences.size)
@@ -1047,10 +1057,12 @@ class AiTranslator(
             recent.clear()
             recentGame = game
         }
-        val speaker = if (target == "ar") com.couchsubs.mobile.core.TranslationDialogue.currentSpeaker else null
-        val context = if (target == "ar") recent.filter { it.source != text || it.speaker != speaker } else recent.toList()
-        if (recent.lastOrNull()?.source != text || (target == "ar" && recent.lastOrNull()?.speaker != speaker)) {
-            recent.addLast(AiRequest.ContextLine(text, speaker = speaker))
+        val speaker = if (target == "ar") TranslationDialogue.currentSpeaker else null
+        val player = if (target == "ar") TranslationDialogue.currentPlayerCharacter else null
+        val context = if (target == "ar") recent.filter { it.source != text || it.speaker != speaker || it.playerCharacter != player } else recent.toList()
+        if (recent.lastOrNull()?.source != text || (target == "ar" &&
+                (recent.lastOrNull()?.speaker != speaker || recent.lastOrNull()?.playerCharacter != player))) {
+            recent.addLast(AiRequest.ContextLine(text, speaker = speaker, playerCharacter = player))
             if (recent.size > TranslationLanguage.contextLines(target)) recent.removeFirst()
         }
         context
@@ -1060,7 +1072,8 @@ class AiTranslator(
     override fun remember(text: String, translation: String, game: String?) {
         synchronized(recent) {
             if (recentGame != game) return
-            val index = recent.indexOfLast { it.source == text && (target != "ar" || it.speaker == com.couchsubs.mobile.core.TranslationDialogue.currentSpeaker) }
+            val index = recent.indexOfLast { it.source == text && (target != "ar" ||
+                (it.speaker == TranslationDialogue.currentSpeaker && it.playerCharacter == TranslationDialogue.currentPlayerCharacter)) }
             if (index >= 0) recent[index] = recent[index].copy(translation = translation)
         }
     }
@@ -1073,7 +1086,8 @@ class AiTranslator(
      */
     override fun cacheKey(text: String, game: String?): String {
         val base = if (game.isNullOrEmpty()) text else "$game\u001f$text"
-        val key = if (target == "tr") base else "$target\u001f${TranslationLanguage.PROMPT_VERSION}\u001f${TranslationLanguage.fingerprint(ArabicPrompt.TEXT)}\u001f${TranslationLanguage.fingerprint(slang.toString())}\u001f${com.couchsubs.mobile.core.TranslationDialogue.currentSpeaker.orEmpty()}\u001f$base"
+        var key = if (target == "tr") base else "$target\u001f${TranslationLanguage.PROMPT_VERSION}\u001f${TranslationLanguage.fingerprint(ArabicPrompt.TEXT)}\u001f${TranslationLanguage.fingerprint(slang.toString())}\u001f${TranslationDialogue.currentSpeaker.orEmpty()}\u001f$base"
+        if (target == "ar") TranslationDialogue.currentPlayerCharacter?.let { key = "player:$it\u001f$key" }
         return scope.tag?.let { "i:$it\u001f$key" } ?: key
     }
 
@@ -1085,7 +1099,8 @@ class AiTranslator(
         fun send() = AiRequest.build(provider, key, model, sentences, context, game = game, names = names, instruction = scope.instruction,
             server = server, thinkingOff = thinkingOff, target = target,
             slang = if (target == "ar") ArabicGlossary.inLines(slang, sentences) else emptyList(),
-            speaker = com.couchsubs.mobile.core.TranslationDialogue.currentSpeaker).let { http.send("POST", it.url, it.headers, it.body, timeout) }
+            speaker = TranslationDialogue.currentSpeaker, playerCharacter = TranslationDialogue.currentPlayerCharacter)
+            .let { http.send("POST", it.url, it.headers, it.body, timeout) }
         var (status, body) = send()
         if (status == 400 && thinkingOff && server?.disablesThinking == true) {
             thinkingOff = false

@@ -701,6 +701,7 @@ class TranslationService : Service() {
                 } else null
             }
             translationLanguage = settings.translationLanguage
+            playerCharacter = settings.playerCharacter
             skipsTurkish = settings.translationLanguage == "tr"
             showSpeakerNames = { settings.showSpeakerNames }
             // Görev satırı altyazıya girmez; otomatik ekran yazısı açıksa "auto-mission" ek alanı olarak kendi yerinde ve
@@ -1213,6 +1214,7 @@ class TranslationService : Service() {
             val current = pipeline ?: return
             // Bekleme ayarları çeviri sürerken de değişebilir (Ayarlar'daki kaydırıcılar); her karede güncel değer uygulanır.
             current.applyWaits(settings.misreadWaitMs, settings.partialWaitMs)
+            current.playerCharacter = settings.playerCharacter
             val maxReuse = if (settings.fastSubtitleDetection) FAST_MAX_REUSE else DEFAULT_MAX_REUSE
             var reused = pixels.signature == lastSignature && reusedReads < maxReuse
             // "Altyazı zeminini izle" (GTA 6): yalnız koyu lacivert zeminin üstündeki satırlar hatta girer. Aynı okuma yeniden

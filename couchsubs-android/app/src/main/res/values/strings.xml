@@ -66,6 +66,11 @@
     <string name="psn_title">حساب بلايستيشن الثانوي</string>
     <string name="psn_body">أنشئ حسابًا مجانيًا إضافيًا يتصل به التطبيق بالجهاز، وتلعب أنت بحسابك الأساسي كالمعتاد.</string>
     <string name="psn_open">تسجيل الدخول عبر سوني</string>
+    <string name="psn_create_account">ليس لديك حساب ثانٍ؟ أنشئ حسابًا مجانيًا</string>
+    <string name="psn_create_title">إنشاء حساب إضافي</string>
+    <string name="psn_create_step1">1. استخدم بريدًا إلكترونيًا غير بريد حسابك الأساسي.</string>
+    <string name="psn_create_step2">2. فعّل الحساب من رسالة التأكيد في بريدك.</string>
+    <string name="psn_create_step3">3. عُد إلى ترجمجي واضغط «تسجيل الدخول عبر سوني».</string>
     <string name="psn_failed">لم يكتمل تسجيل الدخول: %1$s</string>
     <string name="psn_loading">جارٍ الاتصال بـسوني…</string>
     <string name="psn_loading_hint">إن لم تظهر الصفحة، افتح تسجيل الدخول في المتصفح أدناه.</string>
@@ -939,4 +944,8 @@
     <string name="report_automatic_hint">عند حدوث عطل يُرسَل سجل التطبيق، دون كلمات المرور أو رموز الدخول.</string>
     <string name="report_improve">المساهمة في تحسين الترجمة</string>
     <string name="report_improve_hint">تُرسَل نصوص الترجمة الإنجليزية والعربية من جلسات اللعب فقط، دون أي بيانات شخصية.</string>
+    <string name="settings_player_character">الشخصية التي تلعب بها</string>
+    <string name="player_character_auto">تلقائي</string>
+    <string name="player_character_jason">جيسون</string>
+    <string name="player_character_lucia">لوسيا</string>
 </resources>

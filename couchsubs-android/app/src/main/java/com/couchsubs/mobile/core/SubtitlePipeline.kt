@@ -106,6 +106,7 @@ class SubtitlePipeline(
 
     private val lock = Any()
     private val now: () -> Long = clock ?: monotonicClock
+    private val player = PlayerCharacterInference(now)
     private val stabilizer = SubtitleStabilizer(clock = now)
     /** Konuşma değişirken sabit duran görev/HUD satırları (GTA 6). */
     private val stickyRows = StickyRows()
@@ -191,6 +192,7 @@ class SubtitlePipeline(
     @Volatile var showSpeakerNames: () -> Boolean = { true }
     /** Hedef dil Türkçe: yüksek güvenle Türkçe olan satır ([TurkishText.isSure]) çevirmene gönderilmez (#289). */
     @Volatile var translationLanguage = "tr"
+    @Volatile var playerCharacter = "auto"
     @Volatile var onDialogueArrived: (() -> Unit)? = null
     @Volatile var skipsTurkish = true
     /** Hiçbir pakette bulunmayan kararlı satır (ortak havuz için). */
@@ -471,7 +473,13 @@ class SubtitlePipeline(
     private fun present(translation: String, request: Request) =
         SpeakerPrefix.present(translation, request.source, showSpeakerNames(), translationLanguage)
 
+    private fun observePlayer(source: String) {
+        if (translationLanguage != "ar") return
+        source.lineSequence().forEach { player.observe(SpeakerPrefix.split(it)?.name) }
+    }
+
     private fun showPacked(request: Request, packed: PackMatch): (() -> Unit)? {
+        observePlayer(request.source)
         waiting.clear()
         packHits++
         val source = request.source
@@ -494,6 +502,7 @@ class SubtitlePipeline(
             val pair = pairs[index]
             lineOnScreen = pair.number
             pair.translation?.let {
+                observePlayer(source)
                 sender.sendPresentedSubtitle(it, source, translationLanguage, 15000, box, revisesShown(source))
                 lastShownSource = source
             }
@@ -539,12 +548,17 @@ class SubtitlePipeline(
 
     private fun translate(request: Request) {
         val source = request.source
+        observePlayer(source)
         val input = request.prefix?.body ?: source
         // Ayrılan ad çevirmene gitmez; cümle içinde geçtiğinde korunsun diye ayrıca bildirilir (#287).
         request.prefix?.let { translator.noteSpeaker(it.name) }
         val started = now()
         val sentence = try {
-            TranslationDialogue.withSpeaker(request.prefix?.name) { translator.translate(input) }
+            TranslationDialogue.withSpeaker(request.prefix?.name) {
+                TranslationDialogue.withPlayerCharacter(if (translationLanguage == "ar") player.resolve(playerCharacter) else null) {
+                    translator.translate(input)
+                }
+            }
         } catch (error: Exception) {
             synchronized(lock) {
                 // Yerine uzamış okuması gelen ya da bırakılan satırın çevirisi hata sayılmaz.

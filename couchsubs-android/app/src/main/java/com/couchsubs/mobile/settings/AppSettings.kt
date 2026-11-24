@@ -176,6 +176,10 @@ class AppSettings(context: Context) : AreaStore {
         get() = com.couchsubs.mobile.translation.TranslationLanguage.DEFAULT
         set(value) = prefs.edit().putString("translationLanguage", com.couchsubs.mobile.translation.TranslationLanguage.code(value)).apply()
 
+    var playerCharacter: String
+        get() = prefs.getString("playerCharacter", "auto") ?: "auto"
+        set(value) = prefs.edit().putString("playerCharacter", value).apply()
+
     var engine: EngineChoice
         get() = enumOr(prefs.getString("engine", null), EngineChoice.FREE)
         set(value) = prefs.edit().putString("engine", value.name).apply()

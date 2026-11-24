@@ -717,6 +717,8 @@ private fun TranslationLanguageTile() {
 @Composable
 private fun TranslationContentTile() {
     val settings = Services.settings
+    var playerCharacter by remember { mutableStateOf(settings.playerCharacter) }
+    val players = listOf("auto", "jason", "lucia")
     var autoScreenText by remember { mutableStateOf(settings.autoScreenText) }
     var kindPhone by remember { mutableStateOf(settings.screenTextPhone) }
     var kindMission by remember { mutableStateOf(settings.screenTextMission) }
@@ -725,6 +727,12 @@ private fun TranslationContentTile() {
     var kindOther by remember { mutableStateOf(settings.screenTextOther) }
 
     Tile(Modifier.fillMaxWidth()) {
+        RowItem(stringResource(R.string.settings_player_character))
+        Segmented(listOf(stringResource(R.string.player_character_auto), stringResource(R.string.player_character_jason),
+            stringResource(R.string.player_character_lucia)), players.indexOf(playerCharacter).coerceAtLeast(0)) {
+            playerCharacter = players[it]
+            settings.playerCharacter = playerCharacter
+        }
         RowItem(stringResource(R.string.settings_auto_screen_text), stringResource(R.string.settings_auto_screen_text_short)) {
             Switch(autoScreenText, { autoScreenText = it; settings.autoScreenText = it })
         }

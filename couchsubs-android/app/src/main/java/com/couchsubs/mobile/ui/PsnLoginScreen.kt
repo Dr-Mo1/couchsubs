@@ -46,8 +46,10 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -92,6 +94,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 
 private const val TAG = "CouchSubsPsn"
+private const val PSN_CREATE_ACCOUNT_URL = "https://id.sonyentertainmentnetwork.com/create_account/"
 
 private enum class PsnMode { INTRO, WEB, BROWSER }
 
@@ -107,6 +110,7 @@ fun PsnLoginScreen(onBack: (() -> Unit)? = null, onSkip: (() -> Unit)? = null, o
     var tried by rememberSaveable { mutableStateOf<String?>(null) }
     var problem by remember { mutableStateOf<String?>(null) }
     var why by remember { mutableStateOf(false) }
+    var createAccount by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     // Önceki girişin verisi giriş ekranı görünür görünmez silinir: kullanıcı "Giriş"e basana kadar WebView ısınır ve
@@ -186,6 +190,7 @@ fun PsnLoginScreen(onBack: (() -> Unit)? = null, onSkip: (() -> Unit)? = null, o
                         mode = PsnMode.WEB
                     }
                 }
+                GhostButton(stringResource(R.string.psn_create_account)) { createAccount = true }
             }) {
                 Heading(stringResource(R.string.psn_title), stringResource(R.string.psn_body), stringResource(R.string.setup_step, 1))
                 problem?.let {
@@ -194,6 +199,24 @@ fun PsnLoginScreen(onBack: (() -> Unit)? = null, onSkip: (() -> Unit)? = null, o
                 }
             }
             if (why) InfoDialog(stringResource(R.string.psn_why), stringResource(R.string.psn_why_body)) { why = false }
+            if (createAccount) AlertDialog(
+                onDismissRequest = { createAccount = false }, containerColor = Tokens.Color.surface2,
+                title = { Text(stringResource(R.string.psn_create_title), style = Tokens.Type.headline, color = Tokens.Color.text) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
+                        for (step in listOf(R.string.psn_create_step1, R.string.psn_create_step2, R.string.psn_create_step3))
+                            Text(stringResource(step), style = Tokens.Type.body, color = Tokens.Color.secondary)
+                    }
+                },
+                confirmButton = {
+                    TextButton({ createAccount = false; openInBrowser(context, PSN_CREATE_ACCOUNT_URL) }) {
+                        Text(stringResource(R.string.next_continue), color = Tokens.Color.accentText)
+                    }
+                },
+                dismissButton = {
+                    TextButton({ createAccount = false }) { Text(stringResource(R.string.cancel), color = Tokens.Color.secondary) }
+                },
+            )
         }
         PsnMode.WEB -> PsnWebLogin(
             earlyCleanup = earlyCleanup,
@@ -255,9 +278,9 @@ private fun clearClipIf(context: Context, redirect: String) {
  * cache), so this is the plain ACTION_VIEW intent plus the Custom Tabs "session" extra that CustomTabsIntent.Builder().build()
  * adds: Chrome and other Custom Tabs browsers show it as a tab with the ⋮ menu ("Copy link"); any other browser just opens the page.
  */
-private fun openInBrowser(context: Context) {
+private fun openInBrowser(context: Context, url: String = PsnAccount.authorizeUrl) {
     try {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PsnAccount.authorizeUrl)).addCategory(Intent.CATEGORY_BROWSABLE)
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE)
             .putExtras(Bundle().apply { putBinder("android.support.customtabs.extra.SESSION", null) })
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     } catch (error: ActivityNotFoundException) {
