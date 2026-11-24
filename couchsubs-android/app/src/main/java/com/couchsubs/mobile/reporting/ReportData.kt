@@ -10,7 +10,8 @@ object ReportScrubber {
     private val credentials = Regex("""(?i)(\b(?:access_token|refresh_token|id_token|npsso|password|secret|token|code|key)\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s&#,;"'<>}]+)""")
     private val jsonCredentials = Regex("""(?i)("(?:access_token|refresh_token|id_token|npsso|password|secret|token|code|key)"\s*:\s*)"[^"]*"""")
     private val bearer = Regex("""(?i)\bBearer\s+[^\s"'<>;,]+""")
-    private val email = Regex("""[\p{L}\p{N}._%+\-]+@[\p{L}\p{N}.\-]+\.[\p{L}]{2,}""")
+    // Try once per address candidate, rather than rescanning every suffix of a long log line.
+    private val email = Regex("""(?<![\p{L}\p{N}._%+\-])[\p{L}\p{N}._%+\-]++@[\p{L}\p{N}.\-]+\.[\p{L}]{2,}""")
     private val longToken = Regex("""[A-Za-z0-9+/=_\-]{32,}""")
     fun scrub(text: String): String {
         var result = jsonCredentials.replace(text) { it.groupValues[1] + "\"***\"" }

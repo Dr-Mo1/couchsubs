@@ -8,6 +8,12 @@ import org.junit.Test
 import java.nio.file.Files
 
 class ProblemReportTest {
+    @Test(timeout = 2000) fun longNonEmailLogDoesNotRescanEverySuffix() {
+        val arabic = "ن".repeat(250000)
+        assertEquals(arabic, ReportScrubber.scrub(arabic))
+        assertEquals("***", ReportScrubber.scrub("a".repeat(250000)))
+        assertEquals("***@***", ReportScrubber.scrub("a".repeat(100000) + "@example.com"))
+    }
     private val info = ReportInfo("1.0.41", 41, "Maker Phone", "16 (API 36)", "test-install")
     private fun line(id: Long) = ReviewLine(id, "gta-6", "Hello \"friend\"\nNext line", "أهلًا يا صاحبي", "pack", "2026-11-24T09:00:00Z")
 
