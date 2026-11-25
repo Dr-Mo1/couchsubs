@@ -285,7 +285,7 @@ object Services {
      */
     fun packLibrary(context: Context): GamePackLibrary {
         val bundled: () -> List<Pair<String, () -> ByteArray>> = {
-            val directory = com.couchsubs.mobile.translation.TranslationLanguage.packDirectory(settings.translationLanguage)
+            val directory = com.couchsubs.mobile.translation.TranslationLanguage.packDirectory(settings.translationLanguage, settings.translationStyle)
             if (directory == null) emptyList() else (context.assets.list(directory) ?: emptyArray()).map { name ->
                 name to { context.assets.open("$directory/$name").use { s -> s.readBytes() } } }
         }

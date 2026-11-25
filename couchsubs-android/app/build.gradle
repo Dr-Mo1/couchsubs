@@ -30,6 +30,16 @@ if (gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
     releaseSigning = [storeFile: System.getenv('ANDROID_KEYSTORE_FILE'), storePassword: System.getenv('ANDROID_KEYSTORE_PASSWORD'),
                       keyAlias: System.getenv('ANDROID_KEY_ALIAS') ?: 'couchsubs', keyPassword: System.getenv('ANDROID_KEYSTORE_PASSWORD')]
 }
+// Targamgi translation proxy token: read at build time from the local key file by path only (never committed or logged).
+def translateTokenFile = file((findProperty('targamgi.translateTokenFile') ?: System.getenv('TARGAMGI_TRANSLATE_TOKEN_FILE') ?: 'D:/Games/couchsubs-ar/keys/app-translate-token.local.json').toString())
+def translateAppToken = ''
+if (translateTokenFile.isFile()) {
+    try {
+        translateAppToken = (new groovy.json.JsonSlurper().parse(translateTokenFile)?.token ?: '').toString().trim()
+    } catch (Exception ignored) {
+        translateAppToken = ''
+    }
+}
 
 // Depo kökü: oyun paketleri, model listesi ve chiaki-ng buradan okunur (masaüstüyle ortak).
 def repoRoot = rootProject.projectDir.parentFile
@@ -65,6 +75,7 @@ android {
         buildConfigField 'String', 'UPDATE_URL', "\"${findProperty('couchsubs.updateUrl') ?: 'https://github.com/Dr-Mo1/targamgi/releases/download/targamgi-latest/update.json'}\""
         buildConfigField 'String', 'REPORTS_URL', groovy.json.JsonOutput.toJson((findProperty('couchsubs.reportsUrl') ?: 'https://bmbjlvbldyxkmxoinzdd.supabase.co').toString())
         buildConfigField 'String', 'REPORTS_KEY', groovy.json.JsonOutput.toJson((findProperty('couchsubs.reportsKey') ?: 'sb_publishable_F3Bcwzd7StCILckukgSyJg_2h-bmuMC').toString())
+        buildConfigField 'String', 'TRANSLATE_APP_TOKEN', groovy.json.JsonOutput.toJson(translateAppToken)
         buildConfigField 'boolean', 'HAS_FIREBASE', "${hasGoogleServices}"
         buildConfigField 'String', 'TV_SAMSUNG_VERSION', "\"${tizenVersion}\""
         manifestPlaceholders = [
@@ -172,7 +183,12 @@ android.sourceSets.main.assets.srcDirs += layout.buildDirectory.dir('generated/t
 tasks.register('copyTargamgiAssets', Sync) {
     into layout.buildDirectory.dir('generated/targamgi-assets')
     from(targamgiDataDir) { include 'gta-6-ar.json.gz'; into 'packs-ar' }
-    from(targamgiDataDir) { include 'glossary-ar.txt', 'corrections-ar.txt'; into 'arabic' }
+    from(targamgiDataDir) { include 'gta-6-ar-clean.json.gz'; into 'packs-ar-clean' }
+    from(targamgiDataDir) {
+        include 'glossary-ar.txt', 'corrections-ar.txt', 'arabic-system-prompt-live.txt',
+                'glossary-ar-clean.txt', 'corrections-ar-clean.txt', 'arabic-system-prompt-clean.txt'
+        into 'arabic'
+    }
 }
 tasks.withType(Test).configureEach {
     systemProperty 'targamgi.dataDir', targamgiDataDir.absolutePath

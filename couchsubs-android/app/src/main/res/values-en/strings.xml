@@ -735,6 +735,12 @@
     <string name="targamgi_devices">Devices and connection</string>
     <string name="targamgi_translation">Translation settings</string>
     <string name="targamgi_arabic">Arabic (Egyptian colloquial)</string>
+    <string name="targamgi_arabic_clean">Arabic (clean MSA)</string>
+    <string name="settings_translation_style">Translation style</string>
+    <string name="style_street">Egyptian street</string>
+    <string name="style_street_note">Simple MSA for calm dialogue with Egyptian street Arabic for heated lines and swearing.</string>
+    <string name="style_clean">Clean MSA (like films)</string>
+    <string name="style_clean_note">Pure Modern Standard Arabic like cinema subtitles, with no swearing, crude words, or colloquial Arabic.</string>
     <string name="targamgi_arabic_pack">GTA VI Arabic pack</string>
     <string name="targamgi_return_to_game">Then return to the game</string>
     <!-- Over-the-air update (UpdateController) and the sturdier PSN browser sign-in (C24). -->
@@ -855,6 +861,9 @@
     <string name="language_english">English</string>
     <string name="display_tv_note">Display subtitles on the TV</string>
     <string name="display_phone_note">Finish setup on the phone</string>
+    <string name="engine_server">Targamgi Server (Gemini)</string>
+    <string name="engine_server_short">Targamgi</string>
+    <string name="settings_engine_server_note">Targamgi Server (Gemini): works out of the box with no API key, and falls back to the free engine if unreachable.</string>
     <string name="engine_deepl">DeepL</string>
     <string name="engine_gemini">Gemini</string>
     <string name="engine_openai">OpenAI</string>

@@ -744,6 +744,12 @@
     <string name="targamgi_devices">الأجهزة والاتصال</string>
     <string name="targamgi_translation">إعدادات الترجمة</string>
     <string name="targamgi_arabic">العربية (عامية مصرية)</string>
+    <string name="targamgi_arabic_clean">العربية (فصحى نظيفة)</string>
+    <string name="settings_translation_style">أسلوب الترجمة</string>
+    <string name="style_street">مصري للشوارع</string>
+    <string name="style_street_note">فصحى بسيطة للحوار الهادئ وعامية مصرية للمواقف الحامية والشتائم كما في اللعبة.</string>
+    <string name="style_clean">فصحى نظيفة زي الأفلام</string>
+    <string name="style_clean_note">عربية فصحى بسيطة مثل ترجمة الأفلام، بلا شتائم أو ألفاظ خادشة وبلا عامية.</string>
     <string name="targamgi_arabic_pack">حزمة جي تي إيه 6 العربية</string>
     <string name="targamgi_return_to_game">ثم عُد إلى اللعبة</string>
     <!-- Over-the-air update (UpdateController) and the sturdier PSN browser sign-in (C24). -->
@@ -864,6 +870,9 @@
     <string name="language_english">الإنجليزية</string>
     <string name="display_tv_note">عرض الترجمة على التلفزيون</string>
     <string name="display_phone_note">إكمال الإعداد على الهاتف</string>
+    <string name="engine_server">خادم ترجمجي (جيميني)</string>
+    <string name="engine_server_short">خادم ترجمجي</string>
+    <string name="settings_engine_server_note">خادم ترجمجي (جيميني): يعمل مباشرة دون الحاجة لمفتاح، ويعود للمحرك المجاني تلقائيًا عند انقطاع الاتصال.</string>
     <string name="engine_deepl">ديب إل</string>
     <string name="engine_gemini">جيميني</string>
     <string name="engine_openai">أوبن إيه آي</string>

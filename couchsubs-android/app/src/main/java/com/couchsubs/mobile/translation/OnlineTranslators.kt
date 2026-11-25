@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 package com.couchsubs.mobile.translation
 
+import com.couchsubs.mobile.core.PackKey
 import com.couchsubs.mobile.core.SubtitleSegmenter
 import com.couchsubs.mobile.core.PlayerCharacterInference
 import com.couchsubs.mobile.core.TranslationDialogue
@@ -151,23 +152,25 @@ object KeyCheck {
     }
 
     /** Yapay zekâ hizmeti: örnek satır seçilen modelle çevrilir. Bloklar. */
-    fun ai(provider: AiProvider, key: String, model: AiModel, http: Http = Http.Default, server: LocalAiServer? = null, target: String = "tr"): OnlineKeyState =
-        aiSample(provider, key, model, http, server, target).first
+    fun ai(provider: AiProvider, key: String, model: AiModel, http: Http = Http.Default, server: LocalAiServer? = null, target: String = "tr",
+           arabicPrompt: String = ArabicPrompt.TEXT): OnlineKeyState =
+        aiSample(provider, key, model, http, server, target, arabicPrompt).first
 
     /**
      * Örnek satırın çevirisi ve durum ("Bağlantıyı dene" çeviriyi de gösterir). Yerel modelde anahtar isteğe bağlıdır;
      * sunucu adresi [server]'dan gelir.
      */
-    fun aiSample(provider: AiProvider, key: String, model: AiModel, http: Http = Http.Default, server: LocalAiServer? = null, target: String = "tr"): Pair<OnlineKeyState, String?> {
+    fun aiSample(provider: AiProvider, key: String, model: AiModel, http: Http = Http.Default, server: LocalAiServer? = null, target: String = "tr",
+                 arabicPrompt: String = ArabicPrompt.TEXT): Pair<OnlineKeyState, String?> {
         if (provider != AiProvider.LOCAL && key.isBlank()) return OnlineKeyState.INVALID to null
         if (provider == AiProvider.LOCAL && server == null) return OnlineKeyState.UNREACHABLE to null
         return try {
-            var request = AiRequest.build(provider, key, model, listOf(SAMPLE), emptyList(), server = server, target = target)
+            var request = AiRequest.build(provider, key, model, listOf(SAMPLE), emptyList(), server = server, target = target, arabicPrompt = arabicPrompt)
             val timeout = if (provider == AiProvider.LOCAL) LocalAiServer.TIMEOUT_MS else 15000
             var (status, body) = http.send("POST", request.url, request.headers, request.body, timeout)
             // Düşünmeyi kapatan alanları tanımayan eski Ollama 400 verir; alanlarsız yeniden denenir.
             if (status == 400 && server?.disablesThinking == true) {
-                request = AiRequest.build(provider, key, model, listOf(SAMPLE), emptyList(), server = server, thinkingOff = false, target = target)
+                request = AiRequest.build(provider, key, model, listOf(SAMPLE), emptyList(), server = server, thinkingOff = false, target = target, arabicPrompt = arabicPrompt)
                 val retry = http.send("POST", request.url, request.headers, request.body, timeout)
                 status = retry.first
                 body = retry.second
@@ -612,6 +615,22 @@ class DeepLConnectionWarmer(
     }
 }
 
+/** Targamgi Supabase Edge Function proxy forwarding Gemini generateContent requests with x-app-token. */
+object TargamgiProxy {
+    const val BASE_URL = "https://bmbjlvbldyxkmxoinzdd.supabase.co/functions/v1/translate"
+    /** Same default Gemini model id used by the Windows app for Arabic (ai-models.json). */
+    const val MODEL_ID = "gemini-3.5-flash-lite"
+    const val TIMEOUT_MS = 15_000
+    const val RETRY_AFTER_MS = 15_000L
+    val MODEL = AiModel(MODEL_ID, "Fast and cheap (recommended)")
+
+    fun url(modelId: String = MODEL_ID): String =
+        "$BASE_URL?model=${URLEncoder.encode(modelId, "UTF-8")}"
+
+    fun isAvailable(token: String = com.couchsubs.mobile.BuildConfig.TRANSLATE_APP_TOKEN): Boolean =
+        token.isNotBlank()
+}
+
 /** Hizmete giden istek: adres, başlıklar ve gövde (Windows: AiRequest.Build, aynı biçim). */
 data class AiHttpRequest(val url: String, val headers: Map<String, String>, val body: String)
 
@@ -647,9 +666,9 @@ object AiRequest {
     }
 
     /** Sistem talimatı: kullanıcının ek talimatı varsa sona eklenir (#306); boşsa [SYSTEM_PROMPT] olduğu gibi gider. */
-    fun systemPrompt(instruction: String?, target: String = "tr"): String {
+    fun systemPrompt(instruction: String?, target: String = "tr", arabicPrompt: String = ArabicPrompt.TEXT): String {
         val base = when (target) {
-            "ar" -> ArabicPrompt.TEXT
+            "ar" -> arabicPrompt
             "tr" -> SYSTEM_PROMPT
             else -> "Translate English video game subtitles into ${TranslationLanguage.name(target)}. " +
                 "Preserve meaning, tone, names and line breaks. Reply only with translations."
@@ -747,10 +766,12 @@ object AiRequest {
         thinkingOff: Boolean = true,
         target: String = "tr", slang: List<Pair<String, String>> = emptyList(), speaker: String? = null,
         playerCharacter: String? = null,
+        proxyUrl: String? = null,
+        arabicPrompt: String = ArabicPrompt.TEXT,
     ): AiHttpRequest {
         val trimmed = key.trim()
         val user = userMessage(sentences, context, game, names, target, slang, speaker, playerCharacter)
-        val system = systemPrompt(instruction, target)
+        val system = systemPrompt(instruction, target, arabicPrompt)
         return when (provider) {
             AiProvider.GEMINI -> {
                 val config = JSONObject().put("maxOutputTokens", maxOutputTokens)
@@ -759,10 +780,17 @@ object AiRequest {
                     .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
                     .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", user)))))
                     .put("generationConfig", config)
-                AiHttpRequest(
-                    "https://generativelanguage.googleapis.com/v1beta/models/${URLEncoder.encode(model.id, "UTF-8")}:generateContent",
-                    mapOf("x-goog-api-key" to trimmed, "Content-Type" to "application/json"), body.toString(),
-                )
+                if (proxyUrl != null) {
+                    AiHttpRequest(
+                        "${proxyUrl.trimEnd('/')}?model=${URLEncoder.encode(model.id, "UTF-8")}",
+                        mapOf("x-app-token" to trimmed, "Content-Type" to "application/json"), body.toString(),
+                    )
+                } else {
+                    AiHttpRequest(
+                        "https://generativelanguage.googleapis.com/v1beta/models/${URLEncoder.encode(model.id, "UTF-8")}:generateContent",
+                        mapOf("x-goog-api-key" to trimmed, "Content-Type" to "application/json"), body.toString(),
+                    )
+                }
             }
             AiProvider.OPENAI -> {
                 val body = JSONObject()
@@ -980,10 +1008,16 @@ class AiTranslator(
     private val server: LocalAiServer? = null,
     private val target: String = "tr",
     private val slang: List<Pair<String, String>> = emptyList(),
-) : SentenceTranslator<List<AiRequest.ContextLine>>(fallback, cache, clock, budget ?: RequestBudget.shared(provider, model)) {
+    private val proxyUrl: String? = null,
+    private val arabicPrompt: String = ArabicPrompt.TEXT,
+    private val corrections: Map<String, String> = emptyMap(),
+) : SentenceTranslator<List<AiRequest.ContextLine>>(fallback, cache, clock, budget ?: if (proxyUrl != null) null else RequestBudget.shared(provider, model)) {
     companion object {
         /** Kalıcı önbellek dosyasındaki motor adı (iPhone ile aynı: "gemini:<model>"). */
         fun engineId(provider: AiProvider, model: AiModel) = "${provider.id}:${model.id}"
+
+        /** Cache id for the Targamgi server proxy. */
+        fun proxyEngineId(model: AiModel) = "targamgi:${model.id}"
 
         /** "Ekranı çevir"de bir istekte giden en çok parça; kalabalık ekran birkaç isteğe bölünür (iPhone ile aynı). */
         const val SCREEN_BATCH = 40
@@ -995,7 +1029,22 @@ class AiTranslator(
 
     override val retriesEcho: Boolean get() = true
 
-    override val logName: String get() = provider.id
+    override val logName: String get() = if (proxyUrl != null) "targamgi-gemini" else provider.id
+
+    override val retryAfterMs: Long get() = if (proxyUrl != null) TargamgiProxy.RETRY_AFTER_MS else super.retryAfterMs
+
+    override fun translate(text: String): String {
+        if (target == "ar" && corrections.isNotEmpty()) {
+            val fixed = corrections[PackKey.canon(text)]
+            if (fixed != null) {
+                val game = game()
+                context(text, game)
+                remember(text, fixed, game)
+                return fixed
+            }
+        }
+        return super.translate(text)
+    }
 
     /**
      * "Ekranı çevir": birbirinden bağımsız parçalar (menü satırı, görev yazısı...) tek istekte, aynı sırada çevrilir
@@ -1004,7 +1053,10 @@ class AiTranslator(
      */
     override fun translateAll(texts: List<String>): List<String> {
         val game = game()
-        val results = texts.map { cache.get(cacheKey(it, game)) }.toMutableList()
+        val results = texts.map { text ->
+            (if (target == "ar" && corrections.isNotEmpty()) corrections[PackKey.canon(text)] else null)
+                ?: cache.get(cacheKey(text, game))
+        }.toMutableList()
         val missing = texts.indices.filter { results[it] == null }
         var stopped = paused()
         for (chunk in missing.chunked(SCREEN_BATCH)) {
@@ -1016,7 +1068,8 @@ class AiTranslator(
                 val request = AiRequest.build(provider, key, model, sentences, emptyList(), AiRequest.SCREEN_OUTPUT_TOKENS, game,
                     instruction = scope.instruction, server = server, thinkingOff = thinkingOff, target = target,
                     slang = if (target == "ar") ArabicGlossary.inLines(slang, sentences) else emptyList(),
-                    playerCharacter = TranslationDialogue.currentPlayerCharacter)
+                    playerCharacter = TranslationDialogue.currentPlayerCharacter,
+                    proxyUrl = proxyUrl, arabicPrompt = arabicPrompt)
                 val (status, body) = http.send("POST", request.url, request.headers, request.body, SCREEN_TIMEOUT_MS)
                 if (status !in 200..299) throw AiRequest.error(status, body)
                 val translated = AiRequest.translations(AiRequest.text(provider, body), sentences.size)
@@ -1086,7 +1139,7 @@ class AiTranslator(
      */
     override fun cacheKey(text: String, game: String?): String {
         val base = if (game.isNullOrEmpty()) text else "$game\u001f$text"
-        var key = if (target == "tr") base else "$target\u001f${TranslationLanguage.PROMPT_VERSION}\u001f${TranslationLanguage.fingerprint(ArabicPrompt.TEXT)}\u001f${TranslationLanguage.fingerprint(slang.toString())}\u001f${TranslationDialogue.currentSpeaker.orEmpty()}\u001f$base"
+        var key = if (target == "tr") base else "$target\u001f${TranslationLanguage.PROMPT_VERSION}\u001f${TranslationLanguage.fingerprint(arabicPrompt)}\u001f${TranslationLanguage.fingerprint(slang.toString())}\u001f${TranslationDialogue.currentSpeaker.orEmpty()}\u001f$base"
         if (target == "ar") TranslationDialogue.currentPlayerCharacter?.let { key = "player:$it\u001f$key" }
         return scope.tag?.let { "i:$it\u001f$key" } ?: key
     }
@@ -1095,11 +1148,16 @@ class AiTranslator(
     @Volatile private var thinkingOff = true
 
     override fun request(sentences: List<String>, context: List<AiRequest.ContextLine>, game: String?, names: List<String>): List<String> {
-        val timeout = if (provider == AiProvider.LOCAL) LocalAiServer.TIMEOUT_MS else 5000
+        val timeout = when {
+            proxyUrl != null -> TargamgiProxy.TIMEOUT_MS
+            provider == AiProvider.LOCAL -> LocalAiServer.TIMEOUT_MS
+            else -> 5000
+        }
         fun send() = AiRequest.build(provider, key, model, sentences, context, game = game, names = names, instruction = scope.instruction,
             server = server, thinkingOff = thinkingOff, target = target,
             slang = if (target == "ar") ArabicGlossary.inLines(slang, sentences) else emptyList(),
-            speaker = TranslationDialogue.currentSpeaker, playerCharacter = TranslationDialogue.currentPlayerCharacter)
+            speaker = TranslationDialogue.currentSpeaker, playerCharacter = TranslationDialogue.currentPlayerCharacter,
+            proxyUrl = proxyUrl, arabicPrompt = arabicPrompt)
             .let { http.send("POST", it.url, it.headers, it.body, timeout) }
         var (status, body) = send()
         if (status == 400 && thinkingOff && server?.disablesThinking == true) {

@@ -175,6 +175,8 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
     var section by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(0) }
     androidx.activity.compose.BackHandler(section != 0) { section = 0 }
     var engine by remember { mutableStateOf(settings.engine) }
+    var translationStyle by remember { mutableStateOf(settings.translationStyle) }
+    val serverAvailable = com.couchsubs.mobile.translation.TargamgiProxy.isAvailable()
     // Anahtar kaydedilmeden önce denenir (iPhone gibi): yalnız kabul edilen anahtar gizli depoya yazılır.
     var key by remember(engine) { mutableStateOf("") }
     var saved by remember(engine) { mutableStateOf(!settings.apiKey(engine).isNullOrBlank()) }
@@ -192,8 +194,12 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
     var placement by remember { mutableStateOf(settings.tvPlacement) }
     var bottomPercent by remember { mutableStateOf(settings.tvBottomPercent.toFloat()) }
     var passcode by remember { mutableStateOf(settings.loginPasscode ?: "") }
-    // Tuvaldeki dört seçenek: Ücretsiz, DeepL, Gemini, Diğer (OpenAI / Claude).
-    val segment = when (engine) {
+    val segment = if (serverAvailable) when (engine) {
+        EngineChoice.SERVER -> 0
+        EngineChoice.FREE -> 1
+        EngineChoice.GEMINI -> 2
+        else -> 3
+    } else when (engine) {
         EngineChoice.FREE -> 0
         EngineChoice.DEEPL -> 1
         EngineChoice.GEMINI -> 2
@@ -226,8 +232,12 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
                         { RowItem(stringResource(R.string.targamgi_devices), onClick = { section = 3 }) },
                         { RowItem(stringResource(R.string.profile), onClick = onProfile) },
                     ))
-                    TranslationLanguageTile()
-                    PackSummaryTile(onPacks)
+                    TranslationLanguageTile(translationStyle)
+                    TranslationStyleTile(translationStyle) {
+                        translationStyle = it
+                        settings.translationStyle = it
+                    }
+                    PackSummaryTile(onPacks, style = translationStyle)
             }
             if (section == 2) {
                     GameSection(com.couchsubs.mobile.service.LiveState.status.collectAsState().value)
@@ -287,23 +297,43 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
             if (section == 0) {
                 Tile(Modifier.fillMaxWidth()) {
                     TileLabel(stringResource(R.string.settings_engine))
-                    Segmented(listOf(stringResource(R.string.engine_free_short), stringResource(R.string.engine_deepl), stringResource(R.string.engine_gemini), stringResource(R.string.engine_other)), segment) { index ->
-                        choose(when (index) {
-                            0 -> EngineChoice.FREE
-                            1 -> EngineChoice.DEEPL
-                            2 -> EngineChoice.GEMINI
-                            else -> if (engine == EngineChoice.CLAUDE || engine == EngineChoice.LOCAL) engine else EngineChoice.OPENAI
-                        })
+                    if (serverAvailable) {
+                        Segmented(listOf(stringResource(R.string.engine_server_short), stringResource(R.string.engine_free_short),
+                            stringResource(R.string.engine_gemini), stringResource(R.string.engine_other)), segment) { index ->
+                            choose(when (index) {
+                                0 -> EngineChoice.SERVER
+                                1 -> EngineChoice.FREE
+                                2 -> EngineChoice.GEMINI
+                                else -> if (engine == EngineChoice.DEEPL || engine == EngineChoice.OPENAI || engine == EngineChoice.CLAUDE || engine == EngineChoice.LOCAL) engine else EngineChoice.DEEPL
+                            })
+                        }
+                        if (segment == 3) Segmented(listOf(stringResource(R.string.engine_deepl), stringResource(R.string.engine_openai),
+                            stringResource(R.string.engine_claude), stringResource(R.string.engine_local)),
+                            when (engine) { EngineChoice.OPENAI -> 1; EngineChoice.CLAUDE -> 2; EngineChoice.LOCAL -> 3; else -> 0 }) {
+                            choose(when (it) { 1 -> EngineChoice.OPENAI; 2 -> EngineChoice.CLAUDE; 3 -> EngineChoice.LOCAL; else -> EngineChoice.DEEPL })
+                        }
+                    } else {
+                        Segmented(listOf(stringResource(R.string.engine_free_short), stringResource(R.string.engine_deepl), stringResource(R.string.engine_gemini), stringResource(R.string.engine_other)), segment) { index ->
+                            choose(when (index) {
+                                0 -> EngineChoice.FREE
+                                1 -> EngineChoice.DEEPL
+                                2 -> EngineChoice.GEMINI
+                                else -> if (engine == EngineChoice.CLAUDE || engine == EngineChoice.LOCAL) engine else EngineChoice.OPENAI
+                            })
+                        }
+                        // Diğer: OpenAI, Claude ya da yerel model (aynı ağdaki bilgisayarda Ollama / LM Studio; iPhone ile aynı).
+                        if (segment == 3) Segmented(listOf(stringResource(R.string.engine_openai), stringResource(R.string.engine_claude), stringResource(R.string.engine_local)),
+                            when (engine) { EngineChoice.CLAUDE -> 1; EngineChoice.LOCAL -> 2; else -> 0 }) {
+                            choose(when (it) { 1 -> EngineChoice.CLAUDE; 2 -> EngineChoice.LOCAL; else -> EngineChoice.OPENAI })
+                        }
                     }
-                    // Diğer: OpenAI, Claude ya da yerel model (aynı ağdaki bilgisayarda Ollama / LM Studio; iPhone ile aynı).
-                    if (segment == 3) Segmented(listOf(stringResource(R.string.engine_openai), stringResource(R.string.engine_claude), stringResource(R.string.engine_local)),
-                        when (engine) { EngineChoice.CLAUDE -> 1; EngineChoice.LOCAL -> 2; else -> 0 }) {
-                        choose(when (it) { 1 -> EngineChoice.CLAUDE; 2 -> EngineChoice.LOCAL; else -> EngineChoice.OPENAI })
+                    if (engine == EngineChoice.SERVER) {
+                        Text(stringResource(R.string.settings_engine_server_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
                     }
                     // Model seçimi üç hizmette de var (Mac ve Windows ile aynı liste ve varsayılanlar); yerel modelde ad yazılır.
                     engine.aiProvider?.takeIf { it != AiProvider.LOCAL }?.let { provider -> androidx.compose.runtime.key(provider) { AiModelChoice(settings, provider) } }
                     if (engine == EngineChoice.LOCAL) LocalAiSection(settings)
-                    if (engine != EngineChoice.FREE && engine != EngineChoice.LOCAL) {
+                    if (engine != EngineChoice.SERVER && engine != EngineChoice.FREE && engine != EngineChoice.LOCAL) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             TileLabel(stringResource(R.string.settings_key_for, engineName(context)))
                             Spacer(Modifier.weight(1f))
@@ -745,9 +775,51 @@ fun targetName(settings: AppSettings): String {
 }
 
 @Composable
-private fun TranslationLanguageTile() {
+private fun TranslationLanguageTile(style: com.couchsubs.mobile.translation.TranslationStyle = Services.settings.translationStyle) {
     Tile(Modifier.fillMaxWidth()) {
-        RowItem(stringResource(R.string.translation_language), stringResource(R.string.targamgi_arabic))
+        RowItem(
+            stringResource(R.string.translation_language),
+            stringResource(if (style == com.couchsubs.mobile.translation.TranslationStyle.CLEAN) R.string.targamgi_arabic_clean else R.string.targamgi_arabic),
+        )
+    }
+}
+
+@Composable
+private fun TranslationStyleTile(
+    selected: com.couchsubs.mobile.translation.TranslationStyle,
+    onSelect: (com.couchsubs.mobile.translation.TranslationStyle) -> Unit,
+) {
+    val options = listOf(
+        Triple(com.couchsubs.mobile.translation.TranslationStyle.STREET, R.string.style_street, R.string.style_street_note),
+        Triple(com.couchsubs.mobile.translation.TranslationStyle.CLEAN, R.string.style_clean, R.string.style_clean_note),
+    )
+    Tile(Modifier.fillMaxWidth()) {
+        TileLabel(stringResource(R.string.settings_translation_style))
+        Column(Modifier.fillMaxWidth().selectableGroup()) {
+            options.forEach { (style, titleRes, noteRes) ->
+                val isSelected = selected == style
+                val shape = RoundedCornerShape(Tokens.Radius.inner)
+                Row(
+                    Modifier.fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .clip(shape)
+                        .background(if (isSelected) Tokens.Color.raised else Tokens.Color.surface2)
+                        .border(1.dp, if (isSelected) Tokens.Color.accent else Tokens.Color.border, shape)
+                        .selectable(selected = isSelected, role = Role.RadioButton) { onSelect(style) }
+                        .padding(Tokens.Space.tile),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(titleRes), style = Tokens.Type.body, color = Tokens.Color.text)
+                        Text(stringResource(noteRes), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+                    }
+                    if (isSelected) {
+                        Spacer(Modifier.size(Tokens.Space.gap))
+                        SelectedCheck()
+                    }
+                }
+            }
+        }
     }
 }
 

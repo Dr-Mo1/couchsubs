@@ -43,9 +43,24 @@ enum class SubtitleTarget {
     val showsOnPhone: Boolean get() = this == PHONE || this == BOTH
 }
 
-/** Çeviri motoru: ücretsiz cihaz üstü (ML Kit) ya da kullanıcının anahtarıyla çevrimiçi hizmet. */
+/** Çeviri motoru: Targamgi sunucusu (varsayılan), ücretsiz cihaz üstü (ML Kit) ya da kullanıcının anahtarıyla çevrimiçi hizmet. */
 /** LOCAL: aynı ağdaki bilgisayarda Ollama / LM Studio (Mac ve Windows'taki "Yerel model"). */
-enum class EngineChoice { FREE, DEEPL, GEMINI, OPENAI, CLAUDE, LOCAL }
+enum class EngineChoice { SERVER, FREE, DEEPL, GEMINI, OPENAI, CLAUDE, LOCAL }
+
+/**
+ * One-time migration moving existing Arabic users on the old FREE default to [EngineChoice.SERVER].
+ * Users who chose another engine (with their own key or local server) keep their choice.
+ * Once migrated, switching back to FREE later is respected.
+ */
+object DefaultEngineMigration {
+    data class Step(val engine: EngineChoice?)
+
+    fun apply(migrated: Boolean, stored: EngineChoice?, target: String, serverAvailable: Boolean): Step? {
+        if (migrated || target != "ar" || !serverAvailable) return null
+        val next = if (stored == null || stored == EngineChoice.FREE) EngineChoice.SERVER else null
+        return Step(next)
+    }
+}
 
 /**
  * "Ekran yazılarını otomatik çevir" bir kerelik göçü (Windows AutoScreenTextMigration, Mac/iPhone
@@ -189,8 +204,17 @@ class AppSettings(context: Context) : AreaStore {
         get() = prefs.getString("playerCharacter", "auto") ?: "auto"
         set(value) = prefs.edit().putString("playerCharacter", value).apply()
 
+    var translationStyle: com.couchsubs.mobile.translation.TranslationStyle
+        get() = com.couchsubs.mobile.translation.TranslationStyle.of(prefs.getString("translationStyle", null))
+        set(value) = prefs.edit().putString("translationStyle", value.id).apply()
+
     var engine: EngineChoice
-        get() = enumOr(prefs.getString("engine", null), EngineChoice.FREE)
+        get() {
+            val serverAvailable = com.couchsubs.mobile.translation.TargamgiProxy.isAvailable()
+            val defaultEngine = if (translationLanguage == "ar" && serverAvailable) EngineChoice.SERVER else EngineChoice.FREE
+            val stored = enumOr(prefs.getString("engine", null), defaultEngine)
+            return if (stored == EngineChoice.SERVER && !serverAvailable) EngineChoice.FREE else stored
+        }
         set(value) = prefs.edit().putString("engine", value.name).apply()
 
     /**
@@ -310,6 +334,21 @@ class AppSettings(context: Context) : AreaStore {
     init {
         migrateAutoScreenText()
         migrateScreenTextExtras()
+        migrateDefaultEngine()
+    }
+
+    /** Existing Arabic users on the old FREE default move to the Targamgi server engine once. */
+    private fun migrateDefaultEngine() {
+        val stored = prefs.getString("engine", null)?.let { name -> runCatching { enumValueOf<EngineChoice>(name) }.getOrNull() }
+        val step = DefaultEngineMigration.apply(
+            migrated = prefs.getBoolean("serverEngineMigrated", false),
+            stored = stored,
+            target = translationLanguage,
+            serverAvailable = com.couchsubs.mobile.translation.TargamgiProxy.isAvailable(),
+        ) ?: return
+        val edit = prefs.edit().putBoolean("serverEngineMigrated", true)
+        step.engine?.let { edit.putString("engine", it.name) }
+        edit.apply()
     }
 
     /** Hazır alanlar ve GTA 6 telefonu bir kerelik göçü ([ScreenTextExtrasMigration]). */

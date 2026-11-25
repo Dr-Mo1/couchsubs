@@ -614,9 +614,11 @@ class TranslationService : Service() {
         val glossary = if (settings.translationLanguage == "tr") Glossary.load(this) else Glossary.Empty
         glossaryInUse = glossary
         val free = MlKitTranslator(cache(MlKitTranslator.ENGINE_ID), glossary, if (settings.translationLanguage == "tr") "tr" else "ar").also { freeTranslator = it }
-        arabicSlang = runCatching { assets.open("arabic/glossary-ar.txt").bufferedReader().use {
-            com.couchsubs.mobile.translation.ArabicGlossary.parse(it.readText()) } }.getOrDefault(emptyList())
-        val translator = engineTranslator(free)
+        val styleData = com.couchsubs.mobile.translation.ArabicStyleAssets.load(this, settings.translationStyle)
+        arabicSlang = styleData.glossary
+        arabicPrompt = styleData.prompt
+        arabicCorrections = styleData.corrections
+        val translator = engineTranslator(wrapFree(free))
         val subtitleServer = SubtitleServer(instanceId = installationId(this), key = settings.subtitleAccessKey, obsOverlay = assets.open("obs-overlay.html").bufferedReader().use { it.readText() },
             secondScreenPage = assets.open("second-screen.html").bufferedReader().use { it.readText() }).also { server = it }
         subtitleServer.pairing.setSession(true)
@@ -742,8 +744,8 @@ class TranslationService : Service() {
         // ortak havuza önerilmez (arayüz yazıları havuzu kirletmesin). Mac ve iPhone ile aynı.
         val areaReader = SubtitleReader().also { regionReader = it }
         // Ön okuma, bulut kotasını tüketmemeli veya paketin son eşleşmesini (oyun tanıma) değiştirmemeli.
-        val areaTranslator = engineTranslator(free.separate())
-        val earlyTranslator = if (settings.engine == EngineChoice.FREE && packTitles == null) engineTranslator(free.separate()) else null
+        val areaTranslator = engineTranslator(wrapFree(free.separate()))
+        val earlyTranslator = if (settings.engine == EngineChoice.FREE && packTitles == null) engineTranslator(wrapFree(free.separate())) else null
         regionWatcher = com.couchsubs.mobile.core.RegionWatcher({ crop -> areaReader.read(crop.pixels as RegionPixels) },
             areaTranslator, subtitleServer,
             prefetchWork = regionPrefetch,
@@ -1138,7 +1140,7 @@ class TranslationService : Service() {
             if (!refresh) failScreen(generation, getString(R.string.error_translation))
             return
         }
-        val memoryKey = "${settings.target}|${settings.engine}|${settings.localAiServer?.engineId}"
+        val memoryKey = "${settings.target}|${settings.engine}|${settings.translationStyle.id}|${settings.localAiServer?.engineId}"
         if (memoryKey != screenMemoryKey) {
             screenMemoryKey = memoryKey
             screenMemory = PhoneChatMemory()
@@ -1164,7 +1166,7 @@ class TranslationService : Service() {
                 if (!refresh) screenRecheck = false
                 screenFingerprint = fingerprint
                 // Yapay zekâda ekranın bütün yazıları tek istekte gider (bkz. AiTranslator.translateAll).
-                val translator = engineTranslator(free.separate())
+                val translator = engineTranslator(wrapFree(free.separate()))
                 // Yazıların içindeki kumanda simgeleri okunan kareden kesilir (ButtonIcons). Çeviriler özgün yazının
                 // stilinde kendi yerlerine çizilir; GTA 6 telefonunun yazıları yanında mesaj kartında (ScreenPhoneCard).
                 val phone = com.couchsubs.mobile.core.ScreenPhoneCard.phone(
@@ -1255,35 +1257,61 @@ class TranslationService : Service() {
         }
     }
 
+    /** Wrap the FREE Arabic engine with the profanity filter only in clean style. */
+    private fun wrapFree(raw: TextTranslator): TextTranslator =
+        if (settings.translationLanguage == "ar" && settings.translationStyle == com.couchsubs.mobile.translation.TranslationStyle.CLEAN)
+            com.couchsubs.mobile.translation.CleanArabicTranslator(raw)
+        else raw
+
     /** Çevrimiçi motor seçilip anahtarı girildiyse o, hatada yerel motor; yoksa null. */
     /** Seçili motor; deneme modunda motor çeviremezse örnek satırların hazır çevirisi ([DemoTranslator]). */
     private fun engineTranslator(free: TextTranslator): TextTranslator =
         run {
             val target = settings.translationLanguage
-            val fallback = if (target == "ar") settings.apiKey(EngineChoice.DEEPL)?.takeIf { it.isNotBlank() }?.let {
-                DeepLTranslator(it, free, cache = cache(DeepLTranslator.ENGINE_ID), target = "ar") } ?: free
-                else if (target == "tr") free else object : TextTranslator {
-                    override val translationLanguage: String get() = target
-                    override fun translate(text: String): String = throw java.io.IOException("Select an online AI engine for $target")
-                }
+            val fallback = if (target == "ar") {
+                if (settings.engine == EngineChoice.SERVER) free
+                else settings.apiKey(EngineChoice.DEEPL)?.takeIf { it.isNotBlank() }?.let {
+                    DeepLTranslator(it, free, cache = cache(DeepLTranslator.ENGINE_ID), target = "ar") } ?: free
+            } else if (target == "tr") free else object : TextTranslator {
+                override val translationLanguage: String get() = target
+                override fun translate(text: String): String = throw java.io.IOException("Select an online AI engine for $target")
+            }
             val engine = onlineTranslator(fallback) ?: fallback
             if (target == "ar") com.couchsubs.mobile.translation.PackFirstTranslator(engine) { text ->
-                if (settings.packsEnabled) packs?.let { PackLookup.match(it, text) } else null
+                arabicCorrections[com.couchsubs.mobile.core.PackKey.canon(text)]?.let { com.couchsubs.mobile.core.PackMatch(it) }
+                    ?: if (settings.packsEnabled) packs?.let { PackLookup.match(it, text) } else null
             } else if (demo && target == "tr") DemoTranslator(engine) else engine
         }
 
     private fun onlineTranslator(free: TextTranslator): TextTranslator? {
         val engine = settings.engine
+        if (engine == EngineChoice.SERVER) {
+            val token = BuildConfig.TRANSLATE_APP_TOKEN.trim()
+            if (token.isEmpty()) return null
+            val model = com.couchsubs.mobile.translation.TargamgiProxy.MODEL
+            return AiTranslator(
+                AiProvider.GEMINI, token, model, free,
+                cache = cache(AiTranslator.proxyEngineId(model)),
+                playedGame = { PlayedGame.sense.current?.name },
+                instruction = { settings.aiInstruction },
+                target = settings.translationLanguage,
+                slang = arabicSlang,
+                proxyUrl = com.couchsubs.mobile.translation.TargamgiProxy.BASE_URL,
+                arabicPrompt = arabicPrompt,
+                corrections = arabicCorrections,
+            )
+        }
         if (engine == EngineChoice.LOCAL) {
             // Yerel model: anahtar isteğe bağlıdır; adres ya da model geçersizse ücretsiz çeviri kullanılır.
             val server = settings.localAiServer ?: return null
             val model = AiModel(server.model, server.model)
             return AiTranslator(AiProvider.LOCAL, settings.apiKey(engine).orEmpty(), model, free, cache = cache(server.engineId),
-                playedGame = { PlayedGame.sense.current?.name }, instruction = { settings.aiInstruction }, server = server, target = settings.translationLanguage, slang = arabicSlang)
+                playedGame = { PlayedGame.sense.current?.name }, instruction = { settings.aiInstruction }, server = server,
+                target = settings.translationLanguage, slang = arabicSlang, arabicPrompt = arabicPrompt, corrections = arabicCorrections)
         }
         val key = settings.apiKey(engine)?.takeIf { it.isNotBlank() } ?: return null
         return when (engine) {
-            EngineChoice.FREE -> null
+            EngineChoice.FREE, EngineChoice.SERVER -> null
             EngineChoice.DEEPL -> if (settings.translationLanguage == "ar") free else if (settings.translationLanguage == "tr")
                 DeepLTranslator(key, free, cache = cache(DeepLTranslator.ENGINE_ID), glossary = glossaryInUse,
                     playedGame = { packs?.scopeTitle }, target = "tr") else null
@@ -1297,7 +1325,8 @@ class TranslationService : Service() {
                 val model = AiModel.selected(aiModels()[provider.id].orEmpty(), settings.aiModel(provider)) ?: return null
                 AiTranslator(provider, key, model, free, cache = cache(AiTranslator.engineId(provider, model)),
                     // Kararlı oyun (GameSense.current), son eşleşen paket değil: tek satır adı başka oyuna geçirmez (#27).
-                    playedGame = { PlayedGame.sense.current?.name }, instruction = { settings.aiInstruction }, target = settings.translationLanguage, slang = arabicSlang)
+                    playedGame = { PlayedGame.sense.current?.name }, instruction = { settings.aiInstruction },
+                    target = settings.translationLanguage, slang = arabicSlang, arabicPrompt = arabicPrompt, corrections = arabicCorrections)
             }
         }
     }
@@ -1309,6 +1338,8 @@ class TranslationService : Service() {
 
     @Volatile private var glossaryInUse = Glossary.Empty
     @Volatile private var arabicSlang: List<Pair<String, String>> = emptyList()
+    @Volatile private var arabicPrompt: String = com.couchsubs.mobile.translation.ArabicPrompt.TEXT
+    @Volatile private var arabicCorrections: Map<String, String> = emptyMap()
 
     /** Xbox hatasının ekrandaki anlatımı. */
     private fun describeXbox(kind: XboxError): String = getString(when (kind) {
@@ -1377,6 +1408,7 @@ class TranslationService : Service() {
 
     /** Ana ekrandaki "Çeviri · DeepL" karosu ve satırlardaki motor hapı için. */
     private fun engineLabel(): String = when (settings.engine) {
+        EngineChoice.SERVER -> getString(R.string.engine_server)
         EngineChoice.FREE -> getString(R.string.engine_free_short)
         EngineChoice.DEEPL -> "DeepL"
         EngineChoice.GEMINI -> "Gemini"

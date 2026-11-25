@@ -166,6 +166,7 @@ fun metricsText(context: Context, pair: com.couchsubs.mobile.core.ShownPair): St
 }
 
 fun engineName(context: Context): String = when (Services.settings.engine) {
+    com.couchsubs.mobile.settings.EngineChoice.SERVER -> context.getString(R.string.engine_server)
     com.couchsubs.mobile.settings.EngineChoice.FREE -> context.getString(R.string.engine_free_short)
     com.couchsubs.mobile.settings.EngineChoice.DEEPL -> context.getString(R.string.engine_deepl)
     com.couchsubs.mobile.settings.EngineChoice.GEMINI -> context.getString(R.string.engine_gemini)
@@ -502,13 +503,19 @@ private fun TranslationStartDisc(modifier: Modifier = Modifier, onStart: () -> U
 
 /** Yalnız kurulu paketin gerçek boyutu; taslaktaki örnek sayı kullanılmaz. */
 @Composable
-internal fun PackSummaryTile(onPacks: (() -> Unit)? = null) {
+internal fun PackSummaryTile(
+    onPacks: (() -> Unit)? = null,
+    style: com.couchsubs.mobile.translation.TranslationStyle = Services.settings.translationStyle,
+) {
     val context = LocalContext.current
     val language = Services.settings.translationLanguage
     val version by Services.packsVersion.collectAsState()
-    var pack by remember(language) { mutableStateOf<com.couchsubs.mobile.core.GamePackLibrary.Info?>(null) }
-    LaunchedEffect(version, language) {
-        pack = withContext(Dispatchers.IO) { Services.packLibrary(context).infos.firstOrNull { it.id == "gta-6-ar" } }
+    var pack by remember(language, style) { mutableStateOf<com.couchsubs.mobile.core.GamePackLibrary.Info?>(null) }
+    LaunchedEffect(version, language, style) {
+        pack = withContext(Dispatchers.IO) {
+            val infos = Services.packLibrary(context).infos
+            infos.firstOrNull { it.id == "gta-6-ar" || it.id == "gta-6-ar-clean" } ?: infos.firstOrNull()
+        }
     }
     if (language == "ar") pack?.let { installed ->
         Tile(Modifier.fillMaxWidth(), onClick = onPacks) {
