@@ -24,7 +24,7 @@
     <string name="phase_reconnecting">Connection lost, reconnecting…</string>
     <string name="reconnect">Reconnect</string>
     <string name="phase_in_use">PS5 is in another Remote Play session. Close the other device.</string>
-    <string name="phase_not_found_host">PS5 not found at %1$s. Make sure it is on and on the same network. Reconnecting…</string>
+    <string name="phase_not_found_host">PS5 not found at %1$s or anywhere on the network. Make sure it is on (not in rest mode), on the same Wi-Fi as this phone, and that Remote Play is enabled in its settings. Searching and retrying…</string>
     <string name="phase_network">Lost the connection to the PS5. Reconnecting… If this keeps happening, connect the PS5 to the router with a cable.</string>
     <string name="phase_remote_play_disabled">Remote Play is turned off on the PS5 (code %1$s). On the PS5, go to Settings › System › Remote Play and turn on Enable Remote Play.</string>
     <string name="phase_rejected_code">The PS5 rejected the connection (code %1$s). Another Remote Play app (PS Remote Play) may be open, or the PS5 may be in another session. Close PS Remote Play, restart the PS5, then try again.</string>
@@ -33,7 +33,7 @@
     <string name="phase_console_closed">The PS5 ended Remote Play. This usually happens when the user is switched on the PS5 during the game. Reconnecting…</string>
     <string name="phase_console_rp_crashed">Remote Play on the PS5 has crashed. Turn the PS5 off completely (not rest mode) and back on, then connect again.</string>
     <string name="phase_no_picture">Check that your PS5 is on and Remote Play is enabled, then start translation again.</string>
-    <string name="phase_not_found">Connect the phone and PS5 to the same network.</string>
+    <string name="phase_not_found">Make sure the PS5 is on (not in rest mode), on the same Wi-Fi as this phone, and that Remote Play is enabled in its settings.</string>
     <string name="phase_asleep">PS5 did not wake from rest mode.</string>
     <string name="phase_passcode">The PS5 asks for this account\'s login passcode. Enter it in Settings, or turn off this account\'s login passcode on the PS5.</string>
     <string name="phase_passcode_incorrect">The PS5 didn\'t accept the login passcode in Settings. Correct it, or turn off this account\'s login passcode on the PS5.</string>

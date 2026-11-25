@@ -629,16 +629,28 @@ class StreamSession(
         }
     }
 
+    /**
+     * The saved address did not answer: scan the whole local network for the registered PS5 (by its name) and save the new
+     * address. The scan is at most once per [RELOCATE_INTERVAL_MS], and a phone with no local address yet (Wi-Fi still
+     * connecting) does not use that turn up.
+     */
     private fun relocate(): ConsoleInfo? {
         val now = System.currentTimeMillis()
         if (now < nextRelocate) return null
+        if (ConsoleDiscovery.localIPv4() == null) {
+            Log.w(TAG, "PS5 ağda aranamadı: telefon özel bir ağa (Wi-Fi) bağlı değil; bu cihaz: ${DeviceDiagnostics.line()}")
+            return null
+        }
         nextRelocate = now + RELOCATE_INTERVAL_MS
-        val moved = ConsoleDiscovery.pickMoved(ConsoleDiscovery.discover(null, 3000), console.name)
-        if (moved == null || moved.host == console.host) return null
-        Log.i(TAG, "PS5 yeni adreste: ${console.host} -> ${moved.host}")
-        console = console.withHost(moved.host)
-        onConsoleMoved(console)
-        return moved
+        val found = ConsoleDiscovery.discover(null, 3000)
+        Log.i(TAG, "PS5 ağ taraması: ${found.size} cihaz" + found.joinToString(prefix = " (", postfix = ")") { "${it.name} ${it.host}" }.takeIf { found.isNotEmpty() }.orEmpty())
+        val located = ConsoleDiscovery.relocation(found, console.name, console.host) ?: return null
+        if (located.moved) {
+            Log.i(TAG, "PS5 yeni adreste: ${console.host} -> ${located.info.host}")
+            console = console.withHost(located.info.host)
+            onConsoleMoved(console)
+        }
+        return located.info
     }
 
     private fun waitForWake(current: Int, deadline: Long) {

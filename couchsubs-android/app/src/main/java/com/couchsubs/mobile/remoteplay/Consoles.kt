@@ -171,6 +171,17 @@ object ConsoleDiscovery {
     fun pickMoved(found: List<ConsoleInfo>, name: String): ConsoleInfo? =
         found.filter { it.name == name }.singleOrNull()
 
+    /** The registered PS5 found by a whole-network scan, and whether it now answers at another address than the saved one. */
+    data class Relocation(val info: ConsoleInfo, val moved: Boolean)
+
+    /**
+     * Result of a whole-network scan for the registered PS5 ([name]); null when it was not found (or two PS5s carry the
+     * name). Found at the SAVED address too (it only answered the scan, e.g. it was still waking): returned with
+     * [Relocation.moved] false, so the caller keeps its awake/rest state instead of connecting blind.
+     */
+    fun relocation(found: List<ConsoleInfo>, name: String, savedHost: String): Relocation? =
+        pickMoved(found, name)?.let { Relocation(it, it.host != savedHost) }
+
     /** Aramaya yanıt veren PS5 kayıtlı PS5 mi (ad eşleşmesi; kayıtta ad yoksa her yanıt kabul edilir). */
     fun isRegistered(info: ConsoleInfo, name: String): Boolean = name.isEmpty() || info.name == name
 
