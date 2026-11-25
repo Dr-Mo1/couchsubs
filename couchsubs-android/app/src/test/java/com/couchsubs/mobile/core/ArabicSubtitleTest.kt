@@ -25,12 +25,22 @@ class ArabicSubtitleTest {
         assertEquals("دوغ: هنا.", SpeakerPrefix.present("هنا.", "Doug: Here.", true, "ar"))
         assertEquals("هنا.", SpeakerPrefix.present("دوغ: هنا.", "Doug: Here.", false, "ar"))
     }
-    @Test fun colorsAndIsolationAreStableAcrossAliases() {
-        for ((name, color) in listOf("Jason" to "#4FC3F7", "Lucia" to "#FF8A80", "Brian" to "#81C784", "Doug" to "#FFD54F")) {
-            assertEquals(color, ArabicSubtitle.color(name))
-            assertEquals(color, ArabicSubtitle.color(ArabicSpeakerNames.display(name)))
-        }
-        assertEquals(ArabicSubtitle.color("Kingfishers"), ArabicSubtitle.color("كينغفيشرز"))
+    @Test fun isolationIsStable() {
         assertEquals("\u2068Doug:\u2069", ArabicSubtitle.isolate("Doug:"))
+    }
+    /** A2 item 3 (tester report 12): the name is its own line above the dialogue, one amber for every character. */
+    @Test fun speakerNameIsItsOwnAmberLineAboveTheDialogue() {
+        assertEquals("#FFB627", ArabicSubtitle.SPEAKER_COLOR)
+        // An Arabic label, an Egyptian label and an English label (shown in Arabic letters) all work the same way.
+        for ((text, name) in listOf("كال: تحرك الآن." to "كال:", "ظابط: قف مكانك." to "ظابط:", "Cal: Move now." to "كال:")) {
+            val rows = ArabicSubtitle.rows(text)
+            assertEquals(text, 2, rows.size)
+            assertEquals(ArabicSubtitle.Row(name, speaker = true), rows[0])
+            assertEquals(false, rows[1].speaker)
+            assertEquals(false, rows[1].centered)
+        }
+        // Two speakers: each name on its own line above its own dialogue; a line without a speaker stays centred, no name row.
+        assertEquals(listOf("دوغ:", "هنا.", "لوسيا:", "أين؟"), ArabicSubtitle.rows("Doug: هنا.\nلوسيا: أين؟").map { it.text })
+        assertEquals(listOf(ArabicSubtitle.Row("لا أحد هنا.", speaker = false, centered = true)), ArabicSubtitle.rows("لا أحد هنا."))
     }
 }

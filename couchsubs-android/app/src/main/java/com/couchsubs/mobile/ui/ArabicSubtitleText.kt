@@ -26,17 +26,13 @@ fun ArabicSubtitleText(text: String, style: TextStyle, modifier: Modifier = Modi
         shadow = Shadow(Color.Black, blurRadius = 5f))
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         Column(modifier.width(IntrinsicSize.Max), horizontalAlignment = Alignment.CenterHorizontally) {
-            ArabicSubtitle.turns(text).forEach { turn ->
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.Start) {
-                    if (turn.name != null) Text(ArabicSubtitle.isolate(turn.name + ":"),
-                        style = bodyStyle.copy(fontSize = style.fontSize * 1.15f, fontWeight = FontWeight.ExtraBold),
-                        color = Color(android.graphics.Color.parseColor(ArabicSubtitle.color(turn.name))),
-                        modifier = Modifier.widthIn(max = 180.dp).padding(end = 8.dp), textAlign = TextAlign.Start)
-                    Text(ArabicBidi.isolateLatin(turn.body), style = bodyStyle, color = Color.White,
-                        textAlign = if (turn.name == null) TextAlign.Center else TextAlign.Start,
-                        modifier = Modifier.weight(1f))
-                }
+            // The speaker name is its own bold amber line above the dialogue, with the same shadow as the dialogue.
+            ArabicSubtitle.rows(text).forEach { row ->
+                if (row.speaker) Text(ArabicSubtitle.isolate(row.text), modifier = Modifier.fillMaxWidth(),
+                    style = bodyStyle.copy(fontSize = style.fontSize * 1.15f, fontWeight = FontWeight.ExtraBold),
+                    color = Color(android.graphics.Color.parseColor(ArabicSubtitle.SPEAKER_COLOR)), textAlign = TextAlign.Start)
+                else Text(ArabicBidi.isolateLatin(row.text), modifier = Modifier.fillMaxWidth(), style = bodyStyle, color = Color.White,
+                    textAlign = if (row.centered) TextAlign.Center else TextAlign.Start)
             }
         }
     }

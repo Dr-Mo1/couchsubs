@@ -21,12 +21,14 @@ object ArabicSubtitle {
         }
         return result
     }
-    fun color(name: String): String = when (ArabicSpeakerNames.display(name)) {
-        "جيسون" -> "#4FC3F7"
-        "لوسيا" -> "#FF8A80"
-        "برايان" -> "#81C784"
-        "دوغ" -> "#FFD54F"
-        else -> SpeakerColors.color(ArabicSpeakerNames.display(name))
+    /** Every speaker name is drawn in this amber (report 12): one colour for all characters, the dialogue keeps its own. */
+    const val SPEAKER_COLOR = "#FFB627"
+
+    /** One drawn line: the speaker name on its own line above the dialogue, or the dialogue. [centered]: no speaker in this turn. */
+    data class Row(val text: String, val speaker: Boolean, val centered: Boolean = false)
+
+    fun rows(text: String): List<Row> = turns(text).flatMap { turn ->
+        listOfNotNull(turn.name?.let { Row("$it:", speaker = true) }, Row(turn.body, speaker = false, centered = turn.name == null))
     }
     fun isolate(text: String) = "\u2068$text\u2069"
 }

@@ -55,11 +55,11 @@
 #line, #previous { unicode-bidi: plaintext; }
 bdi { unicode-bidi: isolate; }
 
-/* Separate RTL speaker labels; dialogue keeps its own bidi context and white color. */
-.arabic-turn { display: flex; flex-direction: row; direction: rtl; unicode-bidi: isolate;
-  align-items: baseline; justify-content: flex-start; width: 100%; max-width: 100%; text-align: right; }
-.arabic-speaker-label { flex: 0 1 auto; min-width: 0; max-width: 32%; padding-left: .28em;
-  font-size: 1.15em; font-weight: 800; direction: rtl; unicode-bidi: isolate; white-space: normal; }
+/* The speaker name is its own bold amber line above the dialogue (same text-shadow); the dialogue keeps its own bidi context and white color. */
+.arabic-turn { display: flex; flex-direction: column; direction: rtl; unicode-bidi: isolate;
+  align-items: stretch; width: 100%; max-width: 100%; text-align: right; }
+.arabic-speaker-label { flex: 0 0 auto; min-width: 0; max-width: 100%;
+  font-size: 1.15em; font-weight: 800; color: #FFB627; direction: rtl; unicode-bidi: isolate; white-space: normal; }
 .arabic-dialogue { flex: 1 1 auto; min-width: 0; direction: rtl; unicode-bidi: isolate;
   font-weight: 600; color: #FFFFFF; white-space: pre-wrap; overflow-wrap: break-word; word-wrap: break-word; }
 .arabic-turn { text-shadow: 0 1px 3px #000, 0 0 2px #000; }
@@ -120,15 +120,6 @@ bdi { unicode-bidi: isolate; }
 
   // Satır başındaki "Ad:" konuşanın renginde; renk o satırın sonuna kadar sürer.
   // Arabic labels and dialogue are separate elements, with an explicit RTL row.
-  function arabicLabelColor(name) {
-    var fixed = { 'Jason': '#4FC3F7', 'جيسون': '#4FC3F7', 'Lucia': '#FF8A80', 'لوسيا': '#FF8A80',
-      'Brian': '#81C784', 'برايان': '#81C784', 'Doug': '#FFD54F', 'دوغ': '#FFD54F' };
-    if (Object.prototype.hasOwnProperty.call(fixed, name)) return fixed[name];
-    var hash = 2166136261, key = name.trim().toLowerCase();
-    for (var i = 0; i < key.length; i++) { hash ^= key.charCodeAt(i); hash = (hash + (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24)) >>> 0; }
-    return ['#FFD54F','#4FC3F7','#81C784','#FF8A65','#CE93D8','#F06292','#4DD0E1','#AED581','#FFB74D','#90CAF9'][hash % 10];
-  }
-
   function arabicTurns(text) {
     var turns = [], lines = text.replace(/[\u2066-\u2069]/g, '').split('\n');
     var headings = /^(?:الهدف|المهمة|هدف|مهمة|ملاحظة|تنبيه|تحذير|تلميح|الوقت|الرابط|Objective|Objectives|Note|Warning|Tip|Hint|Mission|Task|Time|Status|Info|https?|ftp)$/i;
@@ -158,7 +149,6 @@ bdi { unicode-bidi: isolate; }
       if (turns[i].name) {
         var label = document.createElement('span');
         label.className = 'arabic-speaker-label'; label.dir = 'rtl';
-        label.style.color = arabicLabelColor(turns[i].name);
         label.textContent = '\u2068' + turns[i].name + ':\u2069';
         row.appendChild(label);
       }
