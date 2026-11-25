@@ -218,7 +218,8 @@ class Reading(lines: List<TextLine>) {
             val placed = centered[other].box!!.placedIn(area)
             other != index && placed.bottom <= box.top + height * 0.25 && box.top - placed.bottom <= height * 3
         }.map { centered[it] }.maxByOrNull { it.box!!.bottom } ?: return null
-        return if (letters(lowest.text) <= StickyRows.JOINED_SHARE * letters(above.text)) above else null
+        // A bare caption ("Strength") above a short, still-typing line is not the dialogue the line belongs to.
+        return if (letters(lowest.text) <= StickyRows.JOINED_SHARE * letters(above.text) && !isCaption(above.text, lowest.text)) above else null
     }
 
     private fun letters(text: String) = text.count { it.isLetter() }
@@ -232,6 +233,7 @@ class Reading(lines: List<TextLine>) {
      * (GitHub #715).
      */
     private fun belongs(box: TextBox, text: String, block: List<TextLine>, area: TextBox): Boolean {
+        if (block.size == 1 && isCaption(block[0].text, text)) return false
         val last = block.last().box!!.placedIn(area)
         val own = box.bottom - box.top
         val previous = last.bottom - last.top
@@ -245,6 +247,17 @@ class Reading(lines: List<TextLine>) {
         val overlap = minOf(box.right, last.right) - maxOf(box.left, last.left)
         val narrower = minOf(box.right - box.left, last.right - last.left)
         return overlap > 0 && overlap >= narrower * 0.5
+    }
+
+    /**
+     * A one-word title with no punctuation ("Strength") right above a new capitalised sentence ("You need", which may
+     * still be typing) is a UI caption, not the first row of the subtitle: it was glued onto the half line and translated
+     * with it. A real wrapped subtitle never ends its first row on a bare capitalised word and starts the next with a capital.
+     */
+    private fun isCaption(upper: String, next: String): Boolean {
+        val title = upper.trim()
+        return title.length >= 4 && title.all { it.isLetter() } && title.first().isUpperCase() && title.drop(1).all { it.isLowerCase() } &&
+            next.trim().firstOrNull { it.isLetter() }?.isUpperCase() == true && wordCount(next) >= 2
     }
 
     /** Alt alta kısa ve noktalamasız satırlar ("MAP", "HELP", "SOCIAL CLUB") menüdür, konuşma değil. */

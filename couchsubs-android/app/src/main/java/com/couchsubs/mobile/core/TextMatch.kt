@@ -58,6 +58,8 @@ object TextMatch {
         val flat = rows.joinToString(" ")
         // Gönderilende olmayan olumsuzluk ya da sayı taşıyan okuma, karakterce ne kadar benzese de başka bir cümledir.
         if (addsMeaning(reread, flat)) return false
+        // Letter-by-letter growth is a new reading even when the characters are close: the shown translation is of the shorter text.
+        if (extends(reread, flat)) return false
         val x = cleanWords(reread)
         val y = cleanWords(flat)
         // Uzayan metin (daktilo efekti ya da aynı sözlerle başlayan yeni satır) karakterce benzese de yenidir.
@@ -184,8 +186,25 @@ object TextMatch {
         when (it) { '0' -> 'o'; '1' -> 'i'; '3' -> 'e'; '4' -> 'a'; '5' -> 's'; '7' -> 't'; '8' -> 'b'; else -> it }
     }.joinToString("")
 
+    /** Case, spaces and punctuation ignored: "Time to re..." becomes "timetore". */
+    fun canonical(s: String): String = normalize(s).replace(" ", "")
+
+    /** The old text needs at least this many canonical characters before "the new reading extends it" means anything. */
+    const val EXTENSION_MINIMUM = 3
+
+    /**
+     * [new] is [old] with more text after it, letter by letter (typewriter text: "Time to re" then "Time to recover"). The
+     * comparison is canonical, so it also holds inside the last word, which the word-based [isGrowth] cannot see.
+     */
+    fun extends(new: String, old: String): Boolean {
+        val x = canonical(new)
+        val y = canonical(old)
+        return y.length >= EXTENSION_MINIMUM && x.length > y.length && x.startsWith(y)
+    }
+
     /** [new], [old]'un sonuna sözcük eklenmiş hali mi (daktilo efekti; satırın başı okunmamışsa başına eklenmiş hali). */
     fun isGrowth(new: String, old: String): Boolean {
+        if (extends(new, old)) return true
         val x = normalize(new).split(' ').filter { it.isNotEmpty() }
         val y = normalize(old).split(' ').filter { it.isNotEmpty() }
         if (y.isEmpty() || x.size <= y.size) return false

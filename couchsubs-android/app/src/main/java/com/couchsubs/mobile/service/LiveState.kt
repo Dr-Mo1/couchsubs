@@ -107,9 +107,13 @@ object LiveState {
     fun update(change: (LiveStatus) -> LiveStatus) = state.update(change)
 
     fun shown(pair: ShownPair, packTitle: String?) = state.update {
+        // A longer or corrected reading of the line still on screen takes its row; it does not add one (typewriter text).
+        val replacing = pair.replaces && it.recent.isNotEmpty()
         // Paketten gelen son satırın oyunu, oturum boyunca "… paketi kullanılıyor" olarak kalır.
-        it.copy(recent = (listOf(pair) + it.recent).take(RECENT), packInUse = packTitle ?: it.packInUse,
-            shownLines = it.shownLines + 1, packLines = it.packLines + if (pair.origin == "paket") 1 else 0,
+        it.copy(recent = (listOf(pair) + if (replacing) it.recent.drop(1) else it.recent).take(RECENT),
+            packInUse = packTitle ?: it.packInUse,
+            shownLines = it.shownLines + if (replacing) 0 else 1,
+            packLines = it.packLines + if (pair.origin == "paket" && !replacing) 1 else 0,
             subtitleOffTip = false)
     }
 }

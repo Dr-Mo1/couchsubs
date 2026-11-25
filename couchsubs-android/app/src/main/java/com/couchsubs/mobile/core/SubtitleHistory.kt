@@ -61,13 +61,19 @@ class SubtitleHistory(limit: Int = DEFAULT_LIMIT) {
 
     val entries: List<Entry> get() = synchronized(items) { items.toList() }
 
-    /** Yeni çeviriyi başa ekler. Aynı satırın yeniden okuması (benzer kaynak metin) yeni kayıt açmaz, son kaydı günceller. */
+    /**
+     * Yeni çeviriyi başa ekler. Aynı satırın yeniden okuması (benzer kaynak metin), uzamış okuması (daktilo efekti: "Time to
+     * re" → "Time to recover", yarım satır kayıtta kalmaz) ya da aynı çevirinin kısa süre içinde yeniden gelmesi yeni kayıt
+     * açmaz, son kaydı günceller.
+     */
     fun add(source: String, translation: String, origin: String = ENGINE, date: Long = System.currentTimeMillis()) = synchronized(items) {
         val text = clip(translation.trim())
         val from = clip(source)
         if (text.isEmpty()) return@synchronized
         val last = items.firstOrNull()
-        if (last != null && TextMatch.isSimilar(TextMatch.normalize(last.source), TextMatch.normalize(from))) {
+        if (last != null && (TextMatch.isSimilar(TextMatch.normalize(last.source), TextMatch.normalize(from)) ||
+                TextMatch.extends(from, last.source) ||
+                (date - last.date < SubtitlePipeline.DUPLICATE_WITHIN_MS && TextMatch.canonical(last.translation).let { it.isNotEmpty() && it == TextMatch.canonical(text) }))) {
             items[0] = Entry(last.id, date, from, text, origin)
             return@synchronized
         }

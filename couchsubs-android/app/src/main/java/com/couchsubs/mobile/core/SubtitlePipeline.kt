@@ -35,6 +35,8 @@ data class ShownPair(
     val ocrMs: Int? = null,
     val translationMs: Int? = null,
     val totalMs: Int? = null,
+    /** Took the place of the line still on screen (a longer or corrected reading): history and lists replace, never add. */
+    val replaces: Boolean = false,
 )
 
 /**
@@ -76,6 +78,11 @@ class SubtitlePipeline(
         const val MAX_WAIT_MS = 2000
         /** Çevrilen satırın daha iyi olmayan yeniden okuması bu süre içinde yeni satır sayılmaz. */
         const val REREAD_WITHIN_MS = 4000
+        /**
+         * The line on screen is not sent again inside this window (OCR flicker, a reading the stabilizer takes for a new
+         * line): same canonical translation or same canonical source, nothing different shown in between. A clear starts over.
+         */
+        const val DUPLICATE_WITHIN_MS = 8000
 
         /** Satır ekrandan kalktıktan sonra gelen çevirinin TV'de kalacağı süre (TV uygulamasıyla aynı kural). */
         fun readingTime(text: String) = minOf(8000, 2000 + text.length * 60)
@@ -103,6 +110,9 @@ class SubtitlePipeline(
 
     /** Son çevrilen (motora ya da pakete giden) okuma, puanı ve zamanı. */
     private data class Sent(val source: String, val score: Int, val at: Long)
+
+    /** What is on screen now, canonical (translation, source), and when it was last confirmed; null after a clear. */
+    private class Displayed(val translation: String, val source: String, var at: Long)
 
     private val lock = Any()
     private val now: () -> Long = clock ?: monotonicClock
@@ -155,6 +165,7 @@ class SubtitlePipeline(
     private val waiting = mutableListOf<Request>()
     /** Son gösterilen satırın kaynağı: yeni satır onun düzelmiş okumasıysa TV yerine koyar. */
     private var lastShownSource: String? = null
+    private var displayed: Displayed? = null
     private var lineOnScreen: Int? = null
     private val pairs = mutableListOf<Pair3>()
     private var session = 0
@@ -262,6 +273,13 @@ class SubtitlePipeline(
                     if (findPack(source) != null) {
                         // Pakette bulundu: bekleyen okuma çevrilmez, bu okuma her zamanki yoldan gider.
                         held = null
+                    } else if (TextMatch.extends(source, waiting.source)) {
+                        // The held line is still growing (typewriter text): the longer reading takes its place and the
+                        // fragment is never translated. The hold keeps its start, so growing adds no wait.
+                        held = waiting.copy(source = source, box = box ?: waiting.box, wait = wait, score = Rereads.score(source))
+                        action = StabilizerAction.None
+                        lineLeft()
+                        if (time - waiting.since >= wait) fromHold = flushHeld()
                     } else if (TextMatch.addsMeaning(source, waiting.source) &&
                         TextMatch.isSimilar(TextMatch.normalize(source), TextMatch.normalize(waiting.source))) {
                         // Olumsuzluk/sayı düzeltmesi bekleyenin yerini alır; yanlış ilk okuma çevrilmez.
@@ -310,6 +328,7 @@ class SubtitlePipeline(
                 StabilizerKind.CLEAR -> {
                     lastClearAt = now()
                     lineLeft()
+                    displayed = null
                     sender.clear()
                     null
                 }
@@ -367,8 +386,11 @@ class SubtitlePipeline(
         lineLeft()
         if (packed) return enqueue(source, box)
         val wait = waitFor(source)
-        if (wait <= 0) return enqueue(source, box)
-        held = Held(source, box, time, wait, Rereads.score(source), frameAt, frameOcrMs)
+        // The reading was already seen unchanged for some frames before the stabilizer handed it over: that time counts
+        // towards the wait, so a line is never made to wait twice for the same stretch (no fixed wait added on top).
+        val since = minOf(time, stabilizer.stableSince)
+        if (wait <= 0 || time - since >= wait) return enqueue(source, box)
+        held = Held(source, box, since, wait, Rereads.score(source), frameAt, frameOcrMs)
         return null
     }
 
@@ -463,6 +485,29 @@ class SubtitlePipeline(
     /** Satır az önce gösterilenin uzamış ya da düzelmiş okuması mı (TV yerine koyar, üstüne yığmaz). */
     private fun revisesShown(source: String) = lastShownSource?.let { TextMatch.isRevision(source, it) } ?: false
 
+    /**
+     * The one place a translation goes to the screen. The line already on screen is not sent again (same canonical
+     * translation or source inside [DUPLICATE_WITHIN_MS], nothing different shown in between, no clear in between):
+     * returns null then. Otherwise returns whether it took the place of a line still on screen (a longer or corrected
+     * reading), so history and lists replace the earlier row instead of adding one.
+     */
+    private fun show(translated: String, source: String, durationMs: Int, box: TextBox?): Boolean? {
+        val time = now()
+        val translation = TextMatch.canonical(translated)
+        val line = TextMatch.canonical(source)
+        val current = displayed
+        val replaces = revisesShown(source)
+        lastShownSource = source
+        if (current != null && time - current.at < DUPLICATE_WITHIN_MS &&
+            ((translation.isNotEmpty() && translation == current.translation) || (line.isNotEmpty() && line == current.source))) {
+            current.at = time
+            return null
+        }
+        sender.sendPresentedSubtitle(translated, source, translationLanguage, durationMs, box, replaces)
+        displayed = Displayed(translation, line, time)
+        return replaces && current != null
+    }
+
     /** Paket önce adlı satırla, bulunmazsa adsız cümleyle aranır (paket anahtarları çoğu zaman adsızdır). */
     private fun packMatch(request: Request): PackMatch? {
         val lookup = packLookup ?: return null
@@ -488,11 +533,10 @@ class SubtitlePipeline(
         remember(request.number, source, if (shouldSend) translated else null)
         if (!shouldSend) return null
         lastShown = request.number
-        sender.sendPresentedSubtitle(translated, source, translationLanguage, 15000, request.box, revisesShown(source))
-        lastShownSource = source
+        val replaces = show(translated, source, 15000, request.box) ?: return null
         val shown = onPairShown
         val total = totalMs(request)
-        return { shown?.invoke(ShownPair(source, translated, "paket", packed.packId, request.ocrMs, null, total)) }
+        return { shown?.invoke(ShownPair(source, translated, "paket", packed.packId, request.ocrMs, null, total, replaces)) }
     }
 
     private fun restore(source: String, box: TextBox?): (() -> Unit)? {
@@ -503,8 +547,7 @@ class SubtitlePipeline(
             lineOnScreen = pair.number
             pair.translation?.let {
                 observePlayer(source)
-                sender.sendPresentedSubtitle(it, source, translationLanguage, 15000, box, revisesShown(source))
-                lastShownSource = source
+                show(it, source, 15000, box)
             }
             return null
         }
@@ -578,6 +621,7 @@ class SubtitlePipeline(
         val translated = present(sentence, request)
         val translationMs = maxOf(0, (now() - started).toInt())
         var total: Int? = null
+        var replaces = false
         synchronized(lock) {
             if (request.session != session || request.abandoned) return
             val shouldSend = stabilizer.shouldSend(input, sentence)
@@ -588,11 +632,10 @@ class SubtitlePipeline(
             // Satır ekrandan çoktan kalktıysa çevirisi sonraki sahnenin üstüne düşmesin.
             if (!onScreen && left != null && now() - left > LATE_RESULT_MS) return
             lastShown = request.number
-            sender.sendPresentedSubtitle(translated, source, translationLanguage, if (onScreen) 15000 else readingTime(translated), request.box, revisesShown(source))
-            lastShownSource = source
+            replaces = show(translated, source, if (onScreen) 15000 else readingTime(translated), request.box) ?: return
             total = totalMs(request)
         }
-        onPairShown?.invoke(ShownPair(source, translated, "motor", null, request.ocrMs, translationMs, total))
+        onPairShown?.invoke(ShownPair(source, translated, "motor", null, request.ocrMs, translationMs, total, replaces))
     }
 
     private fun remember(number: Int, source: String, translation: String?) {
@@ -610,6 +653,7 @@ class SubtitlePipeline(
         lastClearAt = Long.MIN_VALUE
         waiting.clear()
         lastShownSource = null
+        displayed = null
         pairs.clear()
         stickyRows.reset()
         subtitleBand.reset()

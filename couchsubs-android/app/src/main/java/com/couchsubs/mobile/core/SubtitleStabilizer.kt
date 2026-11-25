@@ -63,6 +63,8 @@ class SubtitleStabilizer(
     private var candidate = ""
     private var candidateCount = 0
     private var candidateSince = 0L
+    /** When the reading now being handed over was first seen unchanged; the pipeline counts it towards its hold. */
+    val stableSince: Long get() = candidateSince
     /** Ekrandaki (gönderilmiş) satır: sadeleştirilmiş satırlar alt alta, ve ilk okunduğu hali. */
     private var sent = ""
     private var sentRaw = ""
