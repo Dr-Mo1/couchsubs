@@ -125,7 +125,7 @@ fun PairScreen(onBack: (() -> Unit)? = null, onSkip: (() -> Unit)? = null, onDon
         Text(
             stringResource(R.string.pair_body),
             style = Tokens.Type.body.copy(
-                fontSize = Tokens.Type.body.fontSize + 5.sp,
+                fontSize = (Tokens.Type.body.fontSize.value + 5f).sp,
                 lineHeight = 28.sp,
                 fontWeight = FontWeight.Bold,
             ),
