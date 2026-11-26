@@ -159,7 +159,7 @@ android {
         buildConfig true
     }
     sourceSets.main.assets.srcDirs += layout.buildDirectory.dir('generated/couchsubs-assets')
-    // Targamgi: the Turkish game packs (~28 MB) are no longer bundled; the Arabic pack comes from generated/targamgi-assets.
+    // Targamgi: Turkish and Arabic game packs/data are not bundled in the APK (Arabic data is fetched via pack-gate into filesDir/secure-data).
     // Telefondan TV kurulumu ve güncellemesi: imzasız Samsung paketi (her derlemede kaynaktan, yani hep en yenisi);
     // kurulurken TV'ye özel sertifikayla imzalanır.
     sourceSets.main.assets.srcDirs += layout.buildDirectory.dir('generated/couchsubs-tv')
@@ -175,26 +175,13 @@ tasks.register('copyCouchSubsAssets', Copy) {
     into layout.buildDirectory.dir('generated/couchsubs-assets')
     from("$repoRoot/core/Sources/CouchSubsCore/Resources") { include 'ai-models.json', 'glossary-en-tr.json', 'obs-overlay.html' }
 }
+// Arabic packs, glossaries, corrections and prompts are NOT bundled in the APK (1.0.48b: downloaded via pack-gate
+// into filesDir/secure-data). Unit tests still read targamgi.dataDir directly.
 def targamgiDataDir = file(findProperty('targamgi.dataDir') ?: 'D:/Games/couchsubs-ar/build/android-data')
-if (!new File(targamgiDataDir, 'gta-6-ar.json.gz').isFile()) {
-    logger.warn('Targamgi: Arabic data/pack missing; building without the Arabic pack: ' + targamgiDataDir)
-}
-android.sourceSets.main.assets.srcDirs += layout.buildDirectory.dir('generated/targamgi-assets')
-tasks.register('copyTargamgiAssets', Sync) {
-    into layout.buildDirectory.dir('generated/targamgi-assets')
-    from(targamgiDataDir) { include 'gta-6-ar.json.gz'; into 'packs-ar' }
-    from(targamgiDataDir) { include 'gta-6-ar-clean.json.gz'; into 'packs-ar-clean' }
-    from(targamgiDataDir) {
-        include 'glossary-ar.txt', 'corrections-ar.txt', 'arabic-system-prompt-live.txt',
-                'glossary-ar-clean.txt', 'corrections-ar-clean.txt', 'arabic-system-prompt-clean.txt'
-        into 'arabic'
-    }
-}
 tasks.withType(Test).configureEach {
     systemProperty 'targamgi.dataDir', targamgiDataDir.absolutePath
     systemProperty 'targamgi.repoRoot', repoRoot.absolutePath
 }
-preBuild.dependsOn 'copyTargamgiAssets'
 
 // Samsung TV paketi (.wgt): scripts/package-tizen.sh'nin yaptığının aynısı (ortak dosyalar tv-webos'tan, Tizen'e
 // özgüler tv-tizen'den; index.html'e Samsung'un webapis.js'i eklenir, panel simgesi panel-icon.png olur).

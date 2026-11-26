@@ -163,3 +163,51 @@ fun UpdateCheckRow() {
         },
     )
 }
+
+/**
+ * 1.0.48 part B: visible "Update app" button on the HOME screen, reusing the exact same UpdateController action.
+ * Turns amber ("New update available") when a newer version is found, and shows a short message when up to date.
+ */
+@Composable
+fun HomeUpdateButton() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val updateState by UpdateController.state.collectAsState()
+    val updateAvailable by UpdateController.updateAvailable.collectAsState()
+    var checking by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<CheckResult?>(null) }
+    val hasUpdate = updateAvailable || updateState !is UpdateState.Idle
+    val onClick: () -> Unit = {
+        if (!checking) {
+            checking = true
+            result = null
+            scope.launch {
+                result = UpdateController.check(context.applicationContext, manual = true)
+                checking = false
+            }
+        }
+    }
+    Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(Tokens.Space.inline)) {
+        if (hasUpdate) {
+            PrimaryButton(
+                text = stringResource(if (checking) R.string.update_checking else R.string.home_update_available),
+                enabled = !checking,
+                onClick = onClick,
+            )
+        } else {
+            SecondaryButton(
+                text = stringResource(if (checking) R.string.update_checking else R.string.home_update_button),
+                enabled = !checking,
+                onClick = onClick,
+            )
+        }
+        val note = when (result) {
+            CheckResult.UP_TO_DATE -> stringResource(R.string.home_update_up_to_date)
+            CheckResult.FAILED -> stringResource(R.string.update_check_failed)
+            else -> null
+        }
+        if (note != null) {
+            Text(note, style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        }
+    }
+}

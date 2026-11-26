@@ -59,6 +59,7 @@ object ProblemReporter {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             try {
+                runCatching { com.couchsubs.mobile.account.ActivityLog.error(error, synchronous = true) }
                 if (automatic) reports.save(ReportJson.build("crash", error.stackTraceToString(), null, logTail(), info, 8000))
             } catch (_: Throwable) {
                 // Reporting must never prevent the platform crash handler from running.

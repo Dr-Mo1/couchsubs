@@ -3,9 +3,13 @@ package com.couchsubs.mobile
 
 import android.app.Application
 import android.content.Context
+import com.couchsubs.mobile.account.AccountRules
+import com.couchsubs.mobile.account.ActivityLog
 import com.couchsubs.mobile.account.Backend
 import com.couchsubs.mobile.account.MeasurementPolicy
 import com.couchsubs.mobile.account.Meta
+import com.couchsubs.mobile.account.SecureData
+import com.couchsubs.mobile.account.SecureDataRules
 import com.couchsubs.mobile.account.SubTvAccount
 import com.couchsubs.mobile.core.GamePackLibrary
 import com.couchsubs.mobile.core.Log
@@ -16,6 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -157,13 +162,36 @@ object Services {
         Backend.init(app)
         Meta.init(app)
         applyMeasurement()
-        // 1.0.48 SubTV: the anonymous account and its free trial. Status at app start, then every 30 minutes while a translation session runs.
+        // 1.0.48 SubTV: the anonymous account, activity events, and off-APK Arabic data via pack-gate.
         SubTvAccount.init(app)
+        ActivityLog.init(app)
+        SecureData.init(app, onUpdated = { localPacksChanged() })
         scope.launch {
             SubTvAccount.refreshStatus()
+            SecureData.sync(force = true)
             while (true) {
                 kotlinx.coroutines.delay(SubTvAccount.STATUS_INTERVAL_MS)
                 if (com.couchsubs.mobile.service.LiveState.status.value.running) SubTvAccount.refreshStatus()
+            }
+        }
+        // Re-check pack-gate every 12 h while the app stays open.
+        scope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(SecureDataRules.SYNC_INTERVAL_MS)
+                SecureData.sync(force = false)
+            }
+        }
+        // 1.0.48 part B: no subscription = no translation at all (stop any running session immediately),
+        // and sync secure-data as soon as an inactive account becomes active (e.g. after redeeming a code).
+        scope.launch {
+            combine(SubTvAccount.status, SubTvAccount.gateBlock) { s, g -> s to g }.collect { (s, g) ->
+                if (AccountRules.blocksTranslation(s, g)) {
+                    if (com.couchsubs.mobile.service.LiveState.status.value.running) {
+                        com.couchsubs.mobile.service.TranslationService.stop(app)
+                    }
+                } else if (s != null && !SecureData.isReadyAll()) {
+                    SecureData.sync(force = false)
+                }
             }
         }
         packStore = PackStore(File(app.filesDir, "packs-remote"), packServer, bundledHashes = { bundledPackHashes(app) })
@@ -193,17 +221,11 @@ object Services {
         }
     }
 
-    @Volatile private var bundledHashes: Map<String, String>? = null
-
-    /** Uygulamayla gelen paketlerin SHA-256'sı (kimlik → özet); bir kez hesaplanır, sürüm içinde değişmez. */
-    private fun bundledPackHashes(context: Context): Map<String, String> = bundledHashes ?: try {
-        (context.assets.list("packs") ?: emptyArray()).filter { GamePackLibrary.isPackFile(it) }.associate { name ->
-            GamePackLibrary.baseName(name) to PackStore.sha256(context.assets.open("packs/$name").use { it.readBytes() })
-        }
-    } catch (error: java.io.IOException) {
-        Log.w(TAG, "uygulamayla gelen paketler okunamadı", error)
-        emptyMap()
-    }.also { bundledHashes = it }
+    /**
+     * 1.0.48 part B: no game packs are bundled in APK assets (Arabic packs live in filesDir/secure-data via pack-gate).
+     * Kept for the legacy Turkish PackStore interface, which is unused in Arabic mode.
+     */
+    private fun bundledPackHashes(context: Context): Map<String, String> = emptyMap()
 
     /** Profil › Kullanım verisi değişince ya da karşılama geçilince (iPhone'daki gibi). */
     fun applyMeasurement() {
@@ -290,14 +312,18 @@ object Services {
             remote.filter { pack -> local.none { it.id == pack.id } }.map { CatalogEntry(it.id, it.title, it.entries, false) }
 
     /**
-     * Okuma hattının paket kitaplığı: uygulamayla gelen paketler, üstüne sunucudan inmiş yeni ya da güncel sürümler
-     * (aynı kimlikte indirilen kazanır).
+     * Okuma hattının paket kitaplığı: Arapça paketler APK yerine filesDir/secure-data klasöründen okunur (pack-gate).
      */
     fun packLibrary(context: Context): GamePackLibrary {
         val bundled: () -> List<Pair<String, () -> ByteArray>> = {
-            val directory = com.couchsubs.mobile.translation.TranslationLanguage.packDirectory(settings.translationLanguage, settings.translationStyle)
-            if (directory == null) emptyList() else (context.assets.list(directory) ?: emptyArray()).map { name ->
-                name to { context.assets.open("$directory/$name").use { s -> s.readBytes() } } }
+            if (settings.translationLanguage == "ar") {
+                val file = SecureData.packFile(context, settings.translationStyle)
+                if (file.isFile) listOf(file.name to { file.readBytes() }) else emptyList()
+            } else {
+                val directory = com.couchsubs.mobile.translation.TranslationLanguage.packDirectory(settings.translationLanguage, settings.translationStyle)
+                if (directory == null) emptyList() else (context.assets.list(directory) ?: emptyArray()).map { name ->
+                    name to { context.assets.open("$directory/$name").use { s -> s.readBytes() } } }
+            }
         }
         return GamePackLibrary(bundled, if (settings.translationLanguage == "tr") packStore.directory else null,
             if (settings.translationLanguage == "tr") importedPacksDirectory else null).also { it.setDisabled(settings.disabledPacks) }

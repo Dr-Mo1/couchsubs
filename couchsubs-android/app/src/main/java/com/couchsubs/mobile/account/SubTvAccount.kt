@@ -110,14 +110,17 @@ object AccountRules {
         gate == GateError.ACCESS_ENDED || (status != null && kind(status) == AccessKind.ENDED)
 
     /**
-     * The full screen to show. An old app version blocks everything. The subscribe screen blocks only while the server engine
-     * is chosen: the free and own-key engines never go through the account.
+     * The full screen to show. An old app version blocks everything. When access has ended (1.0.48 part B: no
+     * subscription = no translation at all), the subscribe screen covers the app regardless of the selected engine.
      */
-    fun screen(status: AccountStatus?, gate: GateError?, appVersion: String, serverEngine: Boolean): AccountScreen = when {
+    fun screen(status: AccountStatus?, gate: GateError?, appVersion: String, serverEngine: Boolean = true): AccountScreen = when {
         status != null && updateRequired(status.minAppVersion, appVersion) -> AccountScreen.UPDATE_REQUIRED
-        serverEngine && blocksTranslation(status, gate) -> AccountScreen.SUBSCRIBE
+        blocksTranslation(status, gate) -> AccountScreen.SUBSCRIBE
         else -> AccountScreen.NONE
     }
+
+    /** True when translation (including local packs and corrections) is allowed to run. */
+    fun canTranslate(status: AccountStatus?, gate: GateError?): Boolean = !blocksTranslation(status, gate)
 
     /** Whole days of the trial left (rounded up, never below 0): from `plan_until`, else the start plus the trial length. */
     fun trialDaysLeft(status: AccountStatus, nowMs: Long): Int {

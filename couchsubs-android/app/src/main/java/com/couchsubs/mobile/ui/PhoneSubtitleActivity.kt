@@ -99,6 +99,7 @@ class PhoneSubtitleActivity : ComponentActivity() {
         // Uygulama hep koyu; sistem açık temadayken de durum çubuğu simgeleri açık renk kalsın.
         enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
+        com.couchsubs.mobile.account.ActivityLog.screen("phone_subtitle")
         val settings = Services.settings
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val color = if (settings.textColor == SubtitleTextColor.YELLOW) Tokens.Color.accentText else Tokens.Color.text
@@ -134,7 +135,11 @@ class PhoneSubtitleActivity : ComponentActivity() {
                     Row(Modifier.fillMaxWidth().align(Alignment.TopCenter), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
                         val connected = status.running && status.streaming
-                        StatusLabel(stringResource(if (connected) R.string.subtitle_connected else R.string.subtitle_waiting), ok = connected, live = connected)
+                        StatusLabel(
+                            if (connected) stringResource(R.string.subtitle_connected)
+                            else status.phase.ifEmpty { stringResource(R.string.subtitle_waiting) },
+                            ok = connected, live = connected,
+                        )
                         status.packInUse?.let { Pill(stringResource(R.string.running_pack, it), pro = true) }
                         // Bağlantı gidince bu ekrandan da yeniden bağlanılır (iPhone altyazı ekranı ve ana ekranla aynı
                         // kural: ReconnectOffer).
@@ -240,6 +245,7 @@ class PhoneSubtitleActivity : ComponentActivity() {
                 }
                 // TV'nin eşleştirme isteği tam ekran altyazıdayken de görünür (onay penceresi ve üstte onay satırı).
                 TvPairingPrompt(status.pairing)
+                AccountHost()
             }
         }
     }

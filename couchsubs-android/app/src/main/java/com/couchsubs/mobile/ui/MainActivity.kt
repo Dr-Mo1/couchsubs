@@ -29,6 +29,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.couchsubs.mobile.Services
+import com.couchsubs.mobile.account.AccountRules
+import com.couchsubs.mobile.account.ActivityLog
+import com.couchsubs.mobile.account.SubTvAccount
 import com.couchsubs.mobile.account.Telemetry
 import com.couchsubs.mobile.service.LiveState
 import com.couchsubs.mobile.service.TranslationService
@@ -128,7 +131,11 @@ class MainActivity : ComponentActivity() {
                 }
                 DisposableEffect(navigation) {
                     val listener = androidx.navigation.NavController.OnDestinationChangedListener { _, destination, _ ->
-                        destination.route?.let { Telemetry.screen(it.substringBefore('/')) }
+                        destination.route?.let {
+                            val name = it.substringBefore('/')
+                            Telemetry.screen(name)
+                            ActivityLog.screen(name)
+                        }
                     }
                     navigation.addOnDestinationChangedListener(listener)
                     onDispose { navigation.removeOnDestinationChangedListener(listener) }
@@ -237,6 +244,7 @@ class MainActivity : ComponentActivity() {
                 // The account screens (subscribe, update required) cover the app below the update dialog; not in the small window.
                 if (inPip) PipSubtitleView(status) else {
                     AccountHost()
+                    PrivacyNoticeHost()
                     UpdateHost()
                 }
             }
@@ -333,6 +341,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startTranslation() {
+        if (!AccountRules.canTranslate(SubTvAccount.status.value, SubTvAccount.gateBlock.value)) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)

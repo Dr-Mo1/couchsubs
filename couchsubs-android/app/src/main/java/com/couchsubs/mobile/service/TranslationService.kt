@@ -17,8 +17,14 @@ import com.couchsubs.mobile.core.Log
 import com.couchsubs.mobile.BuildConfig
 import com.couchsubs.mobile.R
 import com.couchsubs.mobile.Services
+import com.couchsubs.mobile.account.AccountRules
+import com.couchsubs.mobile.account.ActivityLog
+import com.couchsubs.mobile.account.ActivityRules
 import com.couchsubs.mobile.account.Backend
+import com.couchsubs.mobile.account.SecureData
+import com.couchsubs.mobile.account.SecureDataSyncResult
 import com.couchsubs.mobile.account.SessionHealth
+import com.couchsubs.mobile.account.SubTvAccount
 import com.couchsubs.mobile.account.Telemetry
 import com.couchsubs.mobile.core.CropRegion
 import com.couchsubs.mobile.core.PhoneChatMemory
@@ -547,9 +553,21 @@ class TranslationService : Service() {
         else startForeground(NOTIFICATION_ID, notification)
     }
 
+    private fun isAccessAllowed(): Boolean =
+        AccountRules.canTranslate(SubTvAccount.status.value, SubTvAccount.gateBlock.value)
+
+    private fun stopForInactiveAccess() {
+        LiveState.update { it.copy(running = false, error = getString(R.string.account_access_ended)) }
+        stopSelf()
+    }
+
     private fun begin() {
         // Çeviri dışında açılan bekleme sunucusu aynı kapıyı tutar; oturumun sunucusundan önce kapanır.
         stopStandby()
+        if (!isAccessAllowed()) {
+            stopForInactiveAccess()
+            return
+        }
         demo = demoRequested
         demoRequested = false
         val xbox = settings.xbox && !demo
@@ -595,6 +613,7 @@ class TranslationService : Service() {
                 // Exception değil Throwable: bu iş parçacığında yakalanmayan hata (ör. OutOfMemoryError) bütün uygulamayı
                 // kapatır, PS5 bağlantısı da kopar. Kurulum sürerken durdurulduysa (zamanlayıcı kapanmış olur) yalnız
                 // kurulanlar kapatılır.
+                ActivityLog.error(error)
                 if (destroyed) releaseParts()
                 else {
                     Log.e(TAG, "setup", error)
@@ -606,6 +625,52 @@ class TranslationService : Service() {
     }
 
     private fun setup(console: RegisteredConsole?, accountId: ByteArray?, replacement: FrameSourceFactory?) {
+        // 1.0.48 part B: no subscription = no translation at all. Refresh status if not loaded yet.
+        if (SubTvAccount.status.value == null) kotlinx.coroutines.runBlocking { SubTvAccount.refreshStatus() }
+        if (!isAccessAllowed()) {
+            stopForInactiveAccess()
+            return
+        }
+        // 1.0.48 part B: Arabic data lives off the APK in filesDir/secure-data/. Never run translation without it.
+        if (settings.translationLanguage == "ar") {
+            val style = settings.translationStyle
+            while (!destroyed && !SecureData.isReady(style)) {
+                if (!isAccessAllowed()) {
+                    stopForInactiveAccess()
+                    return
+                }
+                LiveState.update { it.copy(phase = getString(R.string.phase_preparing_dictionary)) }
+                val sync = SecureData.syncBlocking(force = true)
+                if (sync is SecureDataSyncResult.AccessInactive) {
+                    SubTvAccount.onGateError(
+                        com.couchsubs.mobile.translation.GateException(com.couchsubs.mobile.translation.GateError.ACCESS_ENDED, "access_inactive"),
+                    )
+                    stopForInactiveAccess()
+                    return
+                }
+                if (SecureData.isReady(style)) break
+                var waited = 0L
+                while (!destroyed && waited < 5_000L) {
+                    try {
+                        Thread.sleep(250L)
+                    } catch (_: InterruptedException) {
+                        break
+                    }
+                    waited += 250L
+                }
+            }
+            if (destroyed) {
+                releaseParts()
+                return
+            }
+            if (!isAccessAllowed()) {
+                stopForInactiveAccess()
+                return
+            }
+            LiveState.update { it.copy(phase = getString(R.string.phase_preparing)) }
+        }
+        translationLoggedStarted = true
+        ActivityLog.translateStart(settings.translationStyle.id, playedGame)
         val xboxConsole = if (settings.xbox && !demo) settings.xboxConsole else null
         // Paketler ücretsiz: uygulamayla gelenler ve sunucudan inmiş güncel sürümler. Ayardan kapatılırsa aranmaz.
         val library = Services.packLibrary(this)
@@ -697,7 +762,10 @@ class TranslationService : Service() {
             applyWaits(settings.misreadWaitMs, settings.partialWaitMs)
             echo = com.couchsubs.mobile.core.SubtitleEcho.shared
             packLookup = { text ->
-                if (packTitles != null && settings.packsEnabled) {
+                if (!isAccessAllowed()) {
+                    stopForInactiveAccess()
+                    null
+                } else if (packTitles != null && settings.packsEnabled) {
                     library.setDisabled(settings.disabledPacks)
                     PackLookup.match(library, text)
                 } else null
@@ -737,8 +805,10 @@ class TranslationService : Service() {
             }
             onTranslationResult = { error ->
                 // A refusal from our server (trial ended, daily cap, maintenance) is not an engine fault: say why, do not report it.
-                if (error != null && error !is com.couchsubs.mobile.translation.GateException)
+                if (error != null && error !is com.couchsubs.mobile.translation.GateException) {
                     com.couchsubs.mobile.reporting.ProblemReporter.error("translation.engine", error.toString())
+                    ActivityLog.error(error)
+                }
                 LiveState.update { it.copy(error = error?.let { cause -> gateMessage(cause) ?: getString(R.string.error_translation) }) }
             }
         }
@@ -770,7 +840,10 @@ class TranslationService : Service() {
                 autoAreas = detector.areas
             }
             packLookup = { text ->
-                if (packTitles != null && settings.packsEnabled) {
+                if (!isAccessAllowed()) {
+                    stopForInactiveAccess()
+                    null
+                } else if (packTitles != null && settings.packsEnabled) {
                     library.setDisabled(settings.disabledPacks)
                     PackLookup.match(library, text)
                 } else null
@@ -847,6 +920,15 @@ class TranslationService : Service() {
             val gaveUp = synchronized(reconnectOffer) {
                 reconnectOffer.update(state == SessionState.Streaming, now)
                 session?.hasGivenUp == true
+            }
+            if (!demo && !settings.xbox) {
+                if (!wasStreaming && streaming) {
+                    ActivityLog.ps5Connect()
+                } else if (state is SessionState.Disconnected) {
+                    val code = ActivityRules.safePs5ErrorCode(state.kind, state.detail)
+                    if (wasStreaming) ActivityLog.ps5Disconnect(code)
+                    if (state.kind != DisconnectKind.STOPPED) ActivityLog.ps5Error(code)
+                }
             }
             if (!demo && state is SessionState.Disconnected && state.kind != DisconnectKind.STOPPED) {
                 com.couchsubs.mobile.reporting.ProblemReporter.error(
@@ -930,6 +1012,12 @@ class TranslationService : Service() {
             session?.let { s -> LiveState.update { it.withFrames(s.framesReceived, System.currentTimeMillis()) } }
         }, 2, 2, TimeUnit.SECONDS)
         background.scheduleWithFixedDelay({ writeHealth() }, SessionHealth.INTERVAL_MS, SessionHealth.INTERVAL_MS, TimeUnit.MILLISECONDS)
+        background.scheduleWithFixedDelay(
+            { ActivityLog.heartbeat(settings.translationStyle.id, playedGame) },
+            ActivityRules.HEARTBEAT_INTERVAL_MS,
+            ActivityRules.HEARTBEAT_INTERVAL_MS,
+            TimeUnit.MILLISECONDS,
+        )
     }
 
     // --- Uzun oturum tanısı ---
@@ -995,6 +1083,10 @@ class TranslationService : Service() {
      * başka sohbet) yenisi çevrilir, değişmediyse sonuçlar kalkar (Mac/iPhone ve Windows ile aynı).
      */
     private fun toggleScreen() {
+        if (!isAccessAllowed()) {
+            stopForInactiveAccess()
+            return
+        }
         val server = server ?: return
         val state = LiveState.status.value.screenState
         if (state == LiveStatus.ScreenState.WORKING) {
@@ -1130,6 +1222,10 @@ class TranslationService : Service() {
      * olursa eski kart kalır.
      */
     private fun startScreen(frame: com.couchsubs.mobile.remoteplay.VideoFrame, refresh: Boolean = false) {
+        if (!isAccessAllowed()) {
+            stopForInactiveAccess()
+            return
+        }
         val pixels = SubtitleReader.copyRegion(frame, CropRegion(0.0, 1.0, 0.0, 1.0))
         val generation = screenGeneration.get()
         if (pixels == null) {
@@ -1196,6 +1292,7 @@ class TranslationService : Service() {
                 return@Runnable
             } catch (error: Exception) {
                 Log.w(TAG, "screen", error)
+                if (error !is com.couchsubs.mobile.translation.GateException) ActivityLog.error(error)
                 // İzlemenin yenilemesi başarısızsa eski kart kalır; aynı görüntü yeniden denenmez.
                 if (refresh) followPhone(pixels, generation)
                 else failScreen(generation, getString(R.string.screen_failed, gateMessage(error) ?: getString(R.string.error_translation)))
@@ -1221,8 +1318,14 @@ class TranslationService : Service() {
         server?.sendSubtitle(message, 6000)
     }
 
+    @Volatile private var lastOcrErrorLogAt = 0L
+
     private fun read(pixels: RegionPixels, area: CropRegion, capturedAt: Long) {
         try {
+            if (!isAccessAllowed()) {
+                stopForInactiveAccess()
+                return
+            }
             // Bölge değişmediyse (aynı altyazı duruyor) yeniden okunmaz; son okuma hattı yine besler (kararlılık ve
             // silme saate bağlıdır, Windows'taki ReadScheduler gibi). Aynı okuma en çok 20 kare (hızlı okumada 2) kullanılır.
             val current = pipeline ?: return
@@ -1263,6 +1366,11 @@ class TranslationService : Service() {
             }
         } catch (error: Exception) {
             Log.w(TAG, "OCR", error)
+            val now = System.currentTimeMillis()
+            if (now - lastOcrErrorLogAt >= 30_000L) {
+                lastOcrErrorLogAt = now
+                ActivityLog.error(error)
+            }
         } finally {
             readStartedAt = 0L
             reading.set(false)
@@ -1289,10 +1397,11 @@ class TranslationService : Service() {
                 override fun translate(text: String): String = throw java.io.IOException("Select an online AI engine for $target")
             }
             val engine = onlineTranslator(fallback) ?: fallback
-            if (target == "ar") com.couchsubs.mobile.translation.PackFirstTranslator(engine) { text ->
+            val wrapped = if (target == "ar") com.couchsubs.mobile.translation.PackFirstTranslator(engine) { text ->
                 arabicCorrections[com.couchsubs.mobile.core.PackKey.canon(text)]?.let { com.couchsubs.mobile.core.PackMatch(it) }
                     ?: if (settings.packsEnabled) packs?.let { PackLookup.match(it, text) } else null
             } else if (demo && target == "tr") DemoTranslator(engine) else engine
+            com.couchsubs.mobile.translation.AccessGatedTranslator(wrapped, ::isAccessAllowed) { stopForInactiveAccess() }
         }
 
     private fun onlineTranslator(free: TextTranslator): TextTranslator? {
@@ -1432,6 +1541,7 @@ class TranslationService : Service() {
 
     private val packsUsed = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private var startedAt = 0L
+    @Volatile private var translationLoggedStarted = false
 
     /** Ana ekrandaki "Çeviri · DeepL" karosu ve satırlardaki motor hapı için. */
     private fun engineLabel(): String = when (settings.engine) {
@@ -1509,6 +1619,11 @@ class TranslationService : Service() {
         Services.dubberIfCreated?.server = null
         settings.translating = false
         if (startedAt > 0) settings.lastSessionMs = System.currentTimeMillis() - startedAt
+        if (startedAt > 0 && translationLoggedStarted) {
+            val seconds = ((System.currentTimeMillis() - startedAt) / 1000L).coerceAtLeast(0L)
+            ActivityLog.translateStop(seconds, LiveState.status.value.shownLines, settings.translationStyle.id, playedGame)
+            ActivityLog.flushAsync()
+        }
         if (startedAt > 0) Telemetry.event(Telemetry.SESSION_STOP, "seconds" to (System.currentTimeMillis() - startedAt) / 1000,
             "pack_lines" to (pipeline?.packHits ?: 0), "lines" to LiveState.status.value.recent.size)
         releaseParts()

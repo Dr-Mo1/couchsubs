@@ -1002,4 +1002,13 @@
     <string name="update_required_title">Please update the app</string>
     <string name="update_required_body">This version is too old to keep working. Update it first.</string>
     <!-- 1.0.48 SubTV: account, free trial and subscription (end) -->
+    <!-- 1.0.48 part B: secure-data, privacy notice and home update button (begin) -->
+    <string name="phase_preparing_dictionary">Preparing dictionary…</string>
+    <string name="privacy_notice_title">Privacy notice</string>
+    <string name="privacy_notice_body">The app logs your in-app usage (opens and closes, translation duration, errors, device model) to improve the service. We do not log your subtitles, PlayStation account, or location.</string>
+    <string name="privacy_notice_ok">OK</string>
+    <string name="home_update_button">Update app</string>
+    <string name="home_update_available">New update available</string>
+    <string name="home_update_up_to_date">You\'re on the latest version</string>
+    <!-- 1.0.48 part B: secure-data, privacy notice and home update button (end) -->
 </resources>

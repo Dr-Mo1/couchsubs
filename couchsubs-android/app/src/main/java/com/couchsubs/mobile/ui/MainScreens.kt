@@ -143,6 +143,7 @@ fun MainScreen(
                     }
                     PackSummaryTile(onPacks)
                     AccountStatusCard()
+                    HomeUpdateButton()
                     if (paired) TranslationStartDisc(onStart = onStart)
                     status.recent.firstOrNull()?.let { line ->
                         Tile(Modifier.fillMaxWidth()) {
@@ -513,6 +514,7 @@ internal fun PackSummaryTile(
     val context = LocalContext.current
     val language = Services.settings.translationLanguage
     val version by Services.packsVersion.collectAsState()
+    val secureState by com.couchsubs.mobile.account.SecureData.state.collectAsState()
     var pack by remember(language, style) { mutableStateOf<com.couchsubs.mobile.core.GamePackLibrary.Info?>(null) }
     LaunchedEffect(version, language, style) {
         pack = withContext(Dispatchers.IO) {
@@ -520,9 +522,16 @@ internal fun PackSummaryTile(
             infos.firstOrNull { it.id == "gta-6-ar" || it.id == "gta-6-ar-clean" } ?: infos.firstOrNull()
         }
     }
-    if (language == "ar") pack?.let { installed ->
-        Tile(Modifier.fillMaxWidth(), onClick = onPacks) {
-            Text(stringResource(R.string.pack_summary, installed.entries), style = Tokens.Type.body, color = Tokens.Color.text)
+    if (language == "ar") {
+        val installed = pack
+        if (installed != null) {
+            Tile(Modifier.fillMaxWidth(), onClick = onPacks) {
+                Text(stringResource(R.string.pack_summary, installed.entries), style = Tokens.Type.body, color = Tokens.Color.text)
+            }
+        } else if (secureState == com.couchsubs.mobile.account.SecureData.SyncState.SYNCING) {
+            Tile(Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.phase_preparing_dictionary), style = Tokens.Type.body, color = Tokens.Color.secondary)
+            }
         }
     }
 }

@@ -49,6 +49,10 @@ object UpdateController {
     private val current = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val state: StateFlow<UpdateState> = current
 
+    /** True once a check has found a newer version (stays true even if the user dismissed the popup with "Later"). */
+    private val availableFlow = MutableStateFlow(false)
+    val updateAvailable: StateFlow<Boolean> = availableFlow
+
     /** Highest versionCode the user dismissed with "Later" since this cold start (see UpdatePolicy.shouldShow). */
     @Volatile private var dismissedCode = 0
     private val checkLock = Mutex()
@@ -108,14 +112,21 @@ object UpdateController {
                     when {
                         info == null -> {
                             Log.i(TAG, "update.json is missing a field or invalid")
+                            com.couchsubs.mobile.account.ActivityLog.updateCheck(manual, "failed")
                             CheckResult.FAILED
                         }
-                        !UpdatePolicy.isNewer(info, BuildConfig.VERSION_CODE) -> CheckResult.UP_TO_DATE
+                        !UpdatePolicy.isNewer(info, BuildConfig.VERSION_CODE) -> {
+                            availableFlow.value = false
+                            com.couchsubs.mobile.account.ActivityLog.updateCheck(manual, "up_to_date")
+                            CheckResult.UP_TO_DATE
+                        }
                         else -> {
+                            availableFlow.value = true
                             if (UpdatePolicy.shouldShow(info, BuildConfig.VERSION_CODE, dismissedCode)) {
                                 // A download, install or error already on screen is not replaced.
                                 current.update { if (it is UpdateState.Idle || it is UpdateState.Available) UpdateState.Available(info) else it }
                             }
+                            com.couchsubs.mobile.account.ActivityLog.updateCheck(manual, "available")
                             CheckResult.AVAILABLE
                         }
                     }
@@ -123,6 +134,7 @@ object UpdateController {
                     throw error
                 } catch (error: Exception) {
                     Log.i(TAG, "update check failed: ${error.message}")
+                    com.couchsubs.mobile.account.ActivityLog.updateCheck(manual, "failed")
                     CheckResult.FAILED
                 }
             }

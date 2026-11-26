@@ -20,13 +20,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -37,19 +38,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.window.DialogProperties
 import com.couchsubs.mobile.BuildConfig
 import com.couchsubs.mobile.R
-import com.couchsubs.mobile.Services
 import com.couchsubs.mobile.account.AccessKind
 import com.couchsubs.mobile.account.AccountRules
 import com.couchsubs.mobile.account.AccountScreen
 import com.couchsubs.mobile.account.AccountStatus
+import com.couchsubs.mobile.account.ActivityLog
 import com.couchsubs.mobile.account.RedeemProblem
 import com.couchsubs.mobile.account.RedeemReply
 import com.couchsubs.mobile.account.SubTvAccount
-import com.couchsubs.mobile.settings.EngineChoice
 import com.couchsubs.mobile.update.UpdateController
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** The status line of the card and of the settings tile. */
@@ -184,6 +184,7 @@ fun SubscribeScreen() {
     val refreshing by SubTvAccount.refreshing.collectAsState()
     val scope = rememberCoroutineScope()
     var note by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { ActivityLog.subscribeScreen() }
     ScreenScaffold(
         top = { TopBar() },
         bottom = {
@@ -226,24 +227,38 @@ fun UpdateRequiredScreen() {
     }
 }
 
-/** Shown above every screen (MainActivity), under the update dialog; nothing is drawn while access is fine. */
+/** Shown above every screen (MainActivity / PhoneSubtitleActivity), under the update dialog; nothing is drawn while access is fine. */
 @Composable
 fun AccountHost() {
     val status by SubTvAccount.status.collectAsState()
     val gate by SubTvAccount.gateBlock.collectAsState()
-    val settings = Services.settings
-    // The engine is a plain setting, not observable: read again every second so the screen follows a switch in Settings.
-    val serverEngine by produceState(settings.engine == EngineChoice.SERVER) {
-        while (true) {
-            value = settings.engine == EngineChoice.SERVER
-            delay(1000)
-        }
-    }
-    when (AccountRules.screen(status, gate, BuildConfig.VERSION_NAME, serverEngine)) {
+    when (AccountRules.screen(status, gate, BuildConfig.VERSION_NAME)) {
         AccountScreen.NONE -> Unit
         AccountScreen.UPDATE_REQUIRED -> Blocking { UpdateRequiredScreen() }
         AccountScreen.SUBSCRIBE -> Blocking { SubscribeScreen() }
     }
+}
+
+/**
+ * 1.0.48 part B: one-time privacy notice dialog on first launch with ONE OK button.
+ * Activity events are sent only after the user taps OK.
+ */
+@Composable
+fun PrivacyNoticeHost() {
+    val accepted by ActivityLog.privacyAccepted.collectAsState()
+    if (accepted) return
+    AlertDialog(
+        onDismissRequest = {},
+        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+        containerColor = Tokens.Color.surface2,
+        title = { Text(stringResource(R.string.privacy_notice_title), style = Tokens.Type.headline, color = Tokens.Color.text) },
+        text = { Text(stringResource(R.string.privacy_notice_body), style = Tokens.Type.body, color = Tokens.Color.secondary) },
+        confirmButton = {
+            TextButton(onClick = { ActivityLog.acceptPrivacyNotice() }) {
+                Text(stringResource(R.string.privacy_notice_ok), style = Tokens.Type.headline, color = Tokens.Color.accentText)
+            }
+        },
+    )
 }
 
 /** A full screen that takes every touch and turns Back into leaving the app (there is nothing behind it to use). */

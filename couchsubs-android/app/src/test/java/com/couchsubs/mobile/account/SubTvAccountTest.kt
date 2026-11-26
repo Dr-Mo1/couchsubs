@@ -235,12 +235,13 @@ class SubTvAccountTest {
     // ---- error code -> UI state ----
 
     @Test
-    fun subscribeScreenOnlyWhenAccessEndedAndTheServerEngineIsChosen() {
+    fun subscribeScreenShowsWhenAccessEndedRegardlessOfEngine() {
         val ended = status(active = false)
         assertEquals(AccountScreen.SUBSCRIBE, AccountRules.screen(ended, null, "1.0.48", serverEngine = true))
-        assertEquals(AccountScreen.NONE, AccountRules.screen(ended, null, "1.0.48", serverEngine = false))
+        assertEquals(AccountScreen.SUBSCRIBE, AccountRules.screen(ended, null, "1.0.48", serverEngine = false))
         // The server just said "trial_expired" before any status was read.
         assertEquals(AccountScreen.SUBSCRIBE, AccountRules.screen(null, GateError.ACCESS_ENDED, "1.0.48", serverEngine = true))
+        assertEquals(AccountScreen.SUBSCRIBE, AccountRules.screen(null, GateError.ACCESS_ENDED, "1.0.48", serverEngine = false))
         // A fresh trial that has not started, a daily cap, maintenance, an account problem and "no status yet" never block.
         assertEquals(AccountScreen.NONE, AccountRules.screen(status(active = false, started = null), null, "1.0.48", serverEngine = true))
         for (error in listOf(GateError.CAP_REACHED, GateError.MAINTENANCE, GateError.ACCOUNT_PROBLEM, null))

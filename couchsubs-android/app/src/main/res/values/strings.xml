@@ -1012,4 +1012,13 @@
     <string name="update_required_title">لازم تحدّث التطبيق</string>
     <string name="update_required_body">النسخة دي قديمة ومش هتكمّل شغل. حدّثها الأول.</string>
     <!-- 1.0.48 SubTV: account, free trial and subscription (end) -->
+    <!-- 1.0.48 part B: secure-data, privacy notice and home update button (begin) -->
+    <string name="phase_preparing_dictionary">بنجهّز القاموس…</string>
+    <string name="privacy_notice_title">ملاحظة عن الخصوصية</string>
+    <string name="privacy_notice_body">التطبيق بيسجّل استخدامك جوه التطبيق (فتح وقفل، مدة الترجمة، الأخطاء، نوع الجهاز) عشان نحسّن الخدمة. مش بنسجّل كلامك ولا حسابك على البلايستيشن ولا مكانك.</string>
+    <string name="privacy_notice_ok">موافق</string>
+    <string name="home_update_button">تحديث التطبيق</string>
+    <string name="home_update_available">فيه تحديث جديد</string>
+    <string name="home_update_up_to_date">إنت على آخر نسخة</string>
+    <!-- 1.0.48 part B: secure-data, privacy notice and home update button (end) -->
 </resources>

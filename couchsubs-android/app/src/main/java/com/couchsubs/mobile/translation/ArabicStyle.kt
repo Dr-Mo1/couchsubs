@@ -2,7 +2,9 @@
 package com.couchsubs.mobile.translation
 
 import android.content.Context
+import com.couchsubs.mobile.account.SecureData
 import com.couchsubs.mobile.core.PackKey
+import java.io.File
 
 /** Arabic translation style: default street Egyptian mix or clean cinema MSA. */
 enum class TranslationStyle(val id: String) {
@@ -46,7 +48,7 @@ object ArabicCorrections {
     }
 }
 
-/** Style-specific Arabic data loaded from APK assets (or safe fallbacks when clean files are absent). */
+/** Style-specific Arabic data loaded from filesDir/secure-data (downloaded via pack-gate). */
 data class ArabicStyleData(
     val style: TranslationStyle,
     val prompt: String,
@@ -82,7 +84,11 @@ object ArabicStyleAssets {
         )
     }
 
-    fun load(context: Context, style: TranslationStyle): ArabicStyleData = load(style) { path ->
-        runCatching { context.assets.open(path).bufferedReader(Charsets.UTF_8).use { it.readText() } }.getOrNull()
+    fun load(directory: File, style: TranslationStyle): ArabicStyleData = load(style) { path ->
+        val file = File(directory, path.substringAfterLast('/'))
+        if (file.isFile) runCatching { file.readText(Charsets.UTF_8) }.getOrNull() else null
     }
+
+    fun load(context: Context, style: TranslationStyle): ArabicStyleData =
+        load(SecureData.directory(context), style)
 }
