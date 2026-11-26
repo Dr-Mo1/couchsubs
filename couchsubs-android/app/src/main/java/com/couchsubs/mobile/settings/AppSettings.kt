@@ -43,6 +43,30 @@ enum class SubtitleTarget {
     val showsOnPhone: Boolean get() = this == PHONE || this == BOTH
 }
 
+/**
+ * The two user-facing options for «مكان الترجمة» (1.0.48 part C):
+ * - [PHONE_ONLY]: subtitles appear only in the phone app («على الهاتف فقط»).
+ * - [TV_AND_PHONE]: send every subtitle to the TV app and keep showing it on the phone («على التلفزيون والهاتف»).
+ */
+enum class SubtitlePlace(val target: SubtitleTarget) {
+    PHONE_ONLY(SubtitleTarget.PHONE),
+    TV_AND_PHONE(SubtitleTarget.BOTH);
+
+    val showsOnTv: Boolean get() = target.showsOnTv
+    val showsOnPhone: Boolean get() = target.showsOnPhone
+
+    companion object {
+        fun of(target: SubtitleTarget): SubtitlePlace =
+            if (target.showsOnTv) TV_AND_PHONE else PHONE_ONLY
+
+        fun needsTvSetup(place: SubtitlePlace, hasTvSetup: Boolean): Boolean =
+            place == TV_AND_PHONE && !hasTvSetup
+
+        fun hasTvConfigured(installedTv: InstalledTv?, tvName: String?, connectedTvs: Int = 0): Boolean =
+            installedTv != null || !tvName.isNullOrBlank() || connectedTvs > 0
+    }
+}
+
 /** Çeviri motoru: Targamgi sunucusu (varsayılan), ücretsiz cihaz üstü (ML Kit) ya da kullanıcının anahtarıyla çevrimiçi hizmet. */
 /** LOCAL: aynı ağdaki bilgisayarda Ollama / LM Studio (Mac ve Windows'taki "Yerel model"). */
 enum class EngineChoice { SERVER, FREE, DEEPL, GEMINI, OPENAI, CLAUDE, LOCAL }
@@ -193,8 +217,15 @@ class AppSettings(context: Context) : AreaStore {
         set(value) = prefs.edit().putBoolean("psnWebFailed", value).apply()
 
     var target: SubtitleTarget
-        get() = enumOr(prefs.getString("target", null), SubtitleTarget.TV)
+        get() {
+            val stored = enumOr(prefs.getString("target", null), SubtitleTarget.PHONE)
+            return if (stored == SubtitleTarget.TV) SubtitleTarget.BOTH else stored
+        }
         set(value) = prefs.edit().putString("target", value.name).apply()
+
+    var subtitlePlace: SubtitlePlace
+        get() = SubtitlePlace.of(target)
+        set(value) { target = value.target }
 
     var translationLanguage: String
         get() = com.couchsubs.mobile.translation.TranslationLanguage.DEFAULT

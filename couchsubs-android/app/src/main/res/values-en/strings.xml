@@ -102,7 +102,7 @@
     <string name="psn_problem_other">Something went wrong while loading the page.</string>
     <string name="pair_title">Link your PS5</string>
     <string name="pair_hide_status">To hide the \"Remote Play connected\" message on the screen: on the PS5, go to Settings › System › Remote Play and turn on Hide Remote Play Connection Status Pop-Up. Do it for both your main account and the second account.</string>
-    <string name="pair_body">On the console: Settings → System → Remote Play → Link Device</string>
+    <string name="pair_body">On the PlayStation: Settings → System → Remote Play → Link Device</string>
     <string name="pair_searching">Looking for PS5…</string>
     <string name="pair_address">PS5 address (e.g. 192.168.1.20)</string>
     <string name="pair_code">Pairing code</string>
@@ -1011,4 +1011,15 @@
     <string name="home_update_available">New update available</string>
     <string name="home_update_up_to_date">You\'re on the latest version</string>
     <!-- 1.0.48 part B: secure-data, privacy notice and home update button (end) -->
+    <!-- 1.0.48 part C: subtitle place (phone only / TV + phone) (begin) -->
+    <string name="subtitle_place_title">Subtitle location</string>
+    <string name="subtitle_place_phone_only">On phone only</string>
+    <string name="subtitle_place_phone_only_note">Subtitles appear in the phone app only.</string>
+    <string name="subtitle_place_tv_and_phone">On TV and phone</string>
+    <string name="subtitle_place_tv_and_phone_note">Send subtitles to the TV app and also show them on this phone.</string>
+    <string name="subtitle_place_tv_setup_needed">No TV is set up yet. Complete TV setup to show subtitles on your TV.</string>
+    <string name="subtitle_place_tv_setup_button">Set up TV</string>
+    <string name="subtitle_place_tv_configured">Configured TV: %1$s</string>
+    <string name="subtitle_place_tv_change">Change TV</string>
+    <!-- 1.0.48 part C: subtitle place (phone only / TV + phone) (end) -->
 </resources>

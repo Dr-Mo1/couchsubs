@@ -443,7 +443,8 @@ fun ScreenScaffold(
         Column(
             Modifier.fillMaxSize().let { if (scroll) it.verticalScroll(state) else it }
                 .windowInsetsPadding(sides)
-                .padding(start = Tokens.Space.screen, end = Tokens.Space.screen, top = topHeight, bottom = bottomHeight),
+                .padding(start = Tokens.Space.screen, end = Tokens.Space.screen, top = topHeight,
+                    bottom = if (bottom != null) bottomHeight + Tokens.Space.gap else bottomHeight),
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.gap),
             content = content,
         )

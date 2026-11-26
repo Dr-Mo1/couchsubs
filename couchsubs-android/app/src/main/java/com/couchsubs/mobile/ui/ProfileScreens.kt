@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,6 +27,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -54,6 +56,7 @@ import com.couchsubs.mobile.remoteplay.LoginPasscode
 import com.couchsubs.mobile.service.TranslationService
 import com.couchsubs.mobile.settings.AppSettings
 import com.couchsubs.mobile.settings.EngineChoice
+import com.couchsubs.mobile.settings.SubtitlePlace
 import com.couchsubs.mobile.settings.SubtitleTarget
 import com.couchsubs.mobile.translation.AiModel
 import com.couchsubs.mobile.translation.AiRequest
@@ -233,6 +236,11 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
                         { RowItem(stringResource(R.string.profile), onClick = onProfile) },
                     ))
                     AccountSettingsTile()
+                    SubtitlePlaceTile(
+                        settings = settings,
+                        connectedTvs = com.couchsubs.mobile.service.LiveState.status.collectAsState().value.connectedTvs,
+                        onSetupTv = onTarget,
+                    )
                     TranslationLanguageTile(translationStyle)
                     TranslationStyleTile(translationStyle) {
                         translationStyle = it
@@ -251,7 +259,8 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
             if (section == 3) {
                 // Erişim anahtarı yenilenince ikinci ekran adresi ve QR kodu da yenilenir.
                 var keyVersion by remember { mutableStateOf(0) }
-                RowList(listOf({ RowItem(stringResource(R.string.settings_target), targetName(settings), onClick = onTarget) }))
+                val liveStatus by com.couchsubs.mobile.service.LiveState.status.collectAsState()
+                SubtitlePlaceTile(settings = settings, connectedTvs = liveStatus.connectedTvs, onSetupTv = onTarget)
                 TvAppUpdateCard { onTvInstall() }
                 SecondScreenTile(version = keyVersion)
                 Tile(Modifier.fillMaxWidth()) {
@@ -766,12 +775,80 @@ private fun WaitSlider(title: String, note: String, ms: Int, onChange: (Int) -> 
 
 @Composable
 fun targetName(settings: AppSettings): String {
-    val tv = settings.tvName ?: stringResource(R.string.main_target_tv)
-    return when (settings.target) {
-        SubtitleTarget.TV -> tv
-        SubtitleTarget.PHONE -> stringResource(R.string.main_target_phone)
-        SubtitleTarget.BOTH -> stringResource(R.string.main_target_both, tv)
-        SubtitleTarget.OBS -> stringResource(R.string.target_obs)
+    val tv = settings.tvName
+    return when (SubtitlePlace.of(settings.target)) {
+        SubtitlePlace.PHONE_ONLY -> stringResource(R.string.subtitle_place_phone_only)
+        SubtitlePlace.TV_AND_PHONE -> if (tv != null) stringResource(R.string.main_target_both, tv)
+        else stringResource(R.string.subtitle_place_tv_and_phone)
+    }
+}
+
+/**
+ * «مكان الترجمة» setting with two explicit options (phone only vs. TV + phone), shared by the home screen and Settings.
+ * Selecting TV + phone when no TV is configured immediately routes into the existing TV setup flow.
+ */
+@Composable
+fun SubtitlePlaceTile(
+    settings: AppSettings = Services.settings,
+    connectedTvs: Int = 0,
+    onSetupTv: () -> Unit,
+) {
+    var place by remember { mutableStateOf(settings.subtitlePlace) }
+    DisposableEffect(settings) {
+        place = settings.subtitlePlace
+        val listener = settings.onTargetChanged { place = settings.subtitlePlace }
+        onDispose { settings.removeListener(listener) }
+    }
+    val hasTv = SubtitlePlace.hasTvConfigured(settings.installedTv, settings.tvName, connectedTvs)
+    val options = listOf(
+        Triple(SubtitlePlace.PHONE_ONLY, R.string.subtitle_place_phone_only, R.string.subtitle_place_phone_only_note),
+        Triple(SubtitlePlace.TV_AND_PHONE, R.string.subtitle_place_tv_and_phone, R.string.subtitle_place_tv_and_phone_note),
+    )
+    Tile(Modifier.fillMaxWidth()) {
+        TileLabel(stringResource(R.string.subtitle_place_title))
+        Column(Modifier.fillMaxWidth().selectableGroup()) {
+            options.forEach { (option, titleRes, noteRes) ->
+                val isSelected = place == option
+                val shape = RoundedCornerShape(Tokens.Radius.inner)
+                Row(
+                    Modifier.fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .clip(shape)
+                        .background(if (isSelected) Tokens.Color.raised else Tokens.Color.surface2)
+                        .border(1.dp, if (isSelected) Tokens.Color.accent else Tokens.Color.border, shape)
+                        .selectable(selected = isSelected, role = Role.RadioButton) {
+                            place = option
+                            settings.subtitlePlace = option
+                            if (SubtitlePlace.needsTvSetup(option, hasTv)) onSetupTv()
+                        }
+                        .padding(Tokens.Space.tile),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(titleRes), style = Tokens.Type.body, color = Tokens.Color.text)
+                        Text(stringResource(noteRes), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+                    }
+                    if (isSelected) {
+                        Spacer(Modifier.size(Tokens.Space.gap))
+                        SelectedCheck()
+                    }
+                }
+            }
+        }
+        if (place == SubtitlePlace.TV_AND_PHONE) {
+            if (!hasTv) {
+                NoteTile(stringResource(R.string.subtitle_place_tv_setup_needed), Tokens.Color.accentText)
+                SecondaryButton(stringResource(R.string.subtitle_place_tv_setup_button), onClick = onSetupTv)
+            } else {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
+                    val tvLabel = settings.tvName ?: stringResource(R.string.main_target_tv)
+                    Text(stringResource(R.string.subtitle_place_tv_configured, tvLabel),
+                        style = Tokens.Type.caption, color = Tokens.Color.secondary, modifier = Modifier.weight(1f))
+                    GhostButton(stringResource(R.string.subtitle_place_tv_change), onClick = onSetupTv)
+                }
+            }
+        }
     }
 }
 

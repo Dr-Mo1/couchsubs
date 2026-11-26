@@ -28,8 +28,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.couchsubs.mobile.R
 import com.couchsubs.mobile.Services
 import com.couchsubs.mobile.remoteplay.ConsoleDiscovery
@@ -119,7 +121,16 @@ fun PairScreen(onBack: (() -> Unit)? = null, onSkip: (() -> Unit)? = null, onDon
             }
         }
     }) {
-        Heading(stringResource(R.string.pair_title), stringResource(R.string.pair_body), stringResource(R.string.setup_step, 2))
+        Heading(stringResource(R.string.pair_title), step = stringResource(R.string.setup_step, 2))
+        Text(
+            stringResource(R.string.pair_body),
+            style = Tokens.Type.body.copy(
+                fontSize = Tokens.Type.body.fontSize + 5.sp,
+                lineHeight = 28.sp,
+                fontWeight = FontWeight.Bold,
+            ),
+            color = Tokens.Color.accentText,
+        )
         when (val list = consoles) {
             null -> Tile(Modifier.fillMaxWidth()) { Text(stringResource(R.string.pair_searching), style = Tokens.Type.body, color = Tokens.Color.secondary) }
             else -> list.forEach { console ->
@@ -200,10 +211,10 @@ fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: ((TvBrand) -> Unit)?
         if (tv.host.isNotBlank()) chosen = com.couchsubs.mobile.tv.TvChoice.select(chosen, tv).also { settings.installedTv = it }
         chosenName = tv.name
         settings.tvName = tv.name
-        if (!target.showsOnTv) target = SubtitleTarget.TV
+        if (!target.showsOnTv) target = SubtitleTarget.BOTH
         open = DisplayChoice.of(tv.brand)
     }
-    // Kart başlığına dokunma: kartı açar (açıksa kapatır); TV kartı hedefi TV yapar, telefon kartı "Bu telefonda".
+    // Kart başlığına dokunma: kartı açar (açıksa kapatır); TV kartı hedefi TV+telefon yapar, telefon kartı "على الهاتف فقط".
     fun show(choice: DisplayChoice) {
         open = choice
         if (choice == DisplayChoice.PHONE) {
@@ -214,12 +225,12 @@ fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: ((TvBrand) -> Unit)?
                 onDone()
             }
         }
-        else if (choice.brand != null && !target.showsOnTv) target = SubtitleTarget.TV
+        else if (choice.brand != null && !target.showsOnTv) target = SubtitleTarget.BOTH
     }
     fun toggle(choice: DisplayChoice) = if (open == choice) open = null else show(choice)
     ScreenScaffold(top = { TopBar(onBack = onBack) }, bottom = {
         if (!firstRun || showTv) PrimaryButton(stringResource(R.string.next_continue)) {
-            settings.target = target
+            settings.target = if (target.showsOnTv) SubtitleTarget.BOTH else SubtitleTarget.PHONE
             // Seçim yapılmadıysa ağda görülen ilk TV (açık kart bir markaysa o markanınki) kullanılır (eski davranış).
             if (chosen == null && target.showsOnTv) tvs?.firstOrNull { open?.brand == null || it.brand == open?.brand }?.let { choose(it) }
             settings.onboarded = true
@@ -230,17 +241,17 @@ fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: ((TvBrand) -> Unit)?
         val phoneIp = remember { phoneAddress(context) }
         if (firstRun) {
             TwoColumns(
-                { StatusTile(CouchIcons.Tv, stringResource(R.string.target_tv), stringResource(R.string.display_tv_note), it,
-                    onClick = { showTv = true; target = SubtitleTarget.TV }) },
-                { StatusTile(CouchIcons.Smartphone, stringResource(R.string.target_phone), stringResource(R.string.display_phone_note), it,
+                { StatusTile(CouchIcons.Tv, stringResource(R.string.subtitle_place_tv_and_phone), stringResource(R.string.display_tv_note), it,
+                    onClick = { showTv = true; target = SubtitleTarget.BOTH }) },
+                { StatusTile(CouchIcons.Smartphone, stringResource(R.string.subtitle_place_phone_only), stringResource(R.string.display_phone_note), it,
                     onClick = { show(DisplayChoice.PHONE) }) },
             )
         }
-        if (!firstRun || showTv) DisplayChoice.entries.filter { !firstRun || it != DisplayChoice.PHONE }.forEach { choice ->
+        if (!firstRun || showTv) DisplayChoice.entries.filter { it != DisplayChoice.PHONE }.forEach { choice ->
             if (choice == DisplayChoice.ANDROID_TV) TileLabel(stringResource(R.string.chooser_group_tv))
             if (choice == DisplayChoice.BROWSER) TileLabel(stringResource(R.string.chooser_group_other))
             val brand = choice.brand
-            val isChosen = if (brand != null) target.showsOnTv && chosen?.brand == brand else choice == DisplayChoice.PHONE && target == SubtitleTarget.PHONE
+            val isChosen = if (brand != null) target.showsOnTv && chosen?.brand == brand else false
             DisplayCard(choice, open == choice, isChosen, onClick = { toggle(choice) }) {
                 when {
                     brand != null -> {
@@ -254,35 +265,11 @@ fun TargetScreen(onBack: (() -> Unit)? = null, onTvInstall: ((TvBrand) -> Unit)?
                 }
             }
         }
-        // Mac ve Windows'taki "İkisi de": altyazı hem TV'de hem bu telefonda görünür.
-        if (!firstRun) Tile(Modifier.fillMaxWidth(), style = if (target == SubtitleTarget.BOTH) TileStyle.ACTIVE else TileStyle.NORMAL, onClick = { target = SubtitleTarget.BOTH }) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
-                TileIcon(CouchIcons.Tv)
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.target_both), style = Tokens.Type.headline, color = Tokens.Color.text)
-                    Text(stringResource(R.string.target_both_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
-                }
-                if (target == SubtitleTarget.BOTH) SelectedCheck()
-            }
-        }
         manualFor?.let { initial ->
             ManualTvDialog(initial, onDismiss = { manualFor = null }, onSupported = { open(context, context.getString(R.string.url_tvs)) }) { tv ->
                 manualFor = null
                 choose(tv)
             }
-        }
-        // Mac ve Windows'taki "Yalnız OBS (yayın)": TV aranmaz, bu telefonda altyazı ekranı açılmaz; altyazı yalnız aynı Wi-Fi'daki
-        // bilgisayarda OBS'in tarayıcı kaynağına gider (iPhone ile aynı). Seçiliyken adres ve kopyala düğmesi görünür.
-        if (!firstRun) Tile(Modifier.fillMaxWidth(), style = if (target == SubtitleTarget.OBS) TileStyle.ACTIVE else TileStyle.NORMAL, onClick = { target = SubtitleTarget.OBS }) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
-                TileIcon(CouchIcons.Tv)
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.target_obs), style = Tokens.Type.headline, color = Tokens.Color.text)
-                    Text(stringResource(R.string.target_obs_note), style = Tokens.Type.caption, color = Tokens.Color.secondary)
-                }
-                if (target == SubtitleTarget.OBS) SelectedCheck()
-            }
-            if (target == SubtitleTarget.OBS) ObsOnlyAddress()
         }
         // TV kurulumu bitti: her çeviride TV uygulaması kendiliğinden açılmaya çalışılır; açılmazsa TV'den açılır.
         if (onBack == null && target.showsOnTv && settings.installedTv != null)

@@ -63,6 +63,7 @@ import com.couchsubs.mobile.packs.PackUpdateOutcome
 import com.couchsubs.mobile.packs.PackUpdateSummary
 import com.couchsubs.mobile.service.FramePreview
 import com.couchsubs.mobile.service.LiveStatus
+import com.couchsubs.mobile.settings.SubtitlePlace
 import com.couchsubs.mobile.tv.InstalledTv
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -135,16 +136,26 @@ fun MainScreen(
                     }
                     AnimatedNote(status.error)
                     AccountBanners()
+                    var place by remember { mutableStateOf(settings.subtitlePlace) }
+                    DisposableEffect(settings) {
+                        place = settings.subtitlePlace
+                        val listener = settings.onTargetChanged { place = settings.subtitlePlace }
+                        onDispose { settings.removeListener(listener) }
+                    }
                     // Eşleme ile canlı bağlantı farklı durumlardır; hazır olmayan cihaz yeşil gösterilmez.
                     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
                         StatusChip(stringResource(if (xbox) R.string.platform_xbox else R.string.platform_ps), paired, Modifier.weight(1f), onPairing)
-                        StatusChip(targetName(settings), !settings.target.showsOnTv || status.connectedTvs > 0,
-                            Modifier.weight(1f), onTarget)
+                        if (place.showsOnTv) {
+                            StatusChip(settings.tvName ?: stringResource(R.string.main_target_tv), status.connectedTvs > 0,
+                                Modifier.weight(1f), onTarget)
+                        }
                     }
+                    SubtitlePlaceTile(settings = settings, connectedTvs = status.connectedTvs, onSetupTv = onTarget)
                     PackSummaryTile(onPacks)
                     AccountStatusCard()
                     HomeUpdateButton()
                     if (paired) TranslationStartDisc(onStart = onStart)
+                    if (!paired) Spacer(Modifier.height(Tokens.Space.screen))
                     status.recent.firstOrNull()?.let { line ->
                         Tile(Modifier.fillMaxWidth()) {
                             TileLabel(stringResource(R.string.running_now))

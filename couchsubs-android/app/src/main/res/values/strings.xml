@@ -100,7 +100,7 @@
     <string name="psn_problem_other">حدث خطأ أثناء تحميل الصفحة.</string>
     <string name="pair_title">ربط جهاز بلايستيشن 5</string>
     <string name="pair_hide_status">لإخفاء إشعار اتصال التشغيل عن بُعد: فعّل إخفاء حالة الاتصال من إعدادات التشغيل عن بُعد على بلايستيشن 5 للحسابين الأساسي والثانوي.</string>
-    <string name="pair_body">على الجهاز: الإعدادات ← النظام ← التشغيل عن بُعد ← ربط جهاز</string>
+    <string name="pair_body">على جهاز البلايستيشن: الإعدادات ← النظام ← التشغيل عن بُعد ← ربط جهاز</string>
     <string name="pair_searching">جارٍ البحث عن بلايستيشن 5…</string>
     <string name="pair_address">عنوان بلايستيشن 5، مثل 192.168.1.20</string>
     <string name="pair_code">رمز الربط</string>
@@ -1021,4 +1021,15 @@
     <string name="home_update_available">يتوفر تحديث جديد</string>
     <string name="home_update_up_to_date">أنت تستخدم أحدث إصدار</string>
     <!-- 1.0.48 part B: secure-data, privacy notice and home update button (end) -->
+    <!-- 1.0.48 part C: subtitle place (phone only / TV + phone) (begin) -->
+    <string name="subtitle_place_title">مكان الترجمة</string>
+    <string name="subtitle_place_phone_only">على الهاتف فقط</string>
+    <string name="subtitle_place_phone_only_note">تظهر الترجمة على الهاتف في التطبيق فقط.</string>
+    <string name="subtitle_place_tv_and_phone">على التلفزيون والهاتف</string>
+    <string name="subtitle_place_tv_and_phone_note">تُرسل الترجمة إلى تطبيق التلفزيون وتظهر على الهاتف أيضًا.</string>
+    <string name="subtitle_place_tv_setup_needed">لم يُعدّ تلفزيون بعد. أكمِل إعداد التلفزيون لعرض الترجمة عليه.</string>
+    <string name="subtitle_place_tv_setup_button">إعداد التلفزيون</string>
+    <string name="subtitle_place_tv_configured">التلفزيون المُعدّ: %1$s</string>
+    <string name="subtitle_place_tv_change">تغيير التلفزيون</string>
+    <!-- 1.0.48 part C: subtitle place (phone only / TV + phone) (end) -->
 </resources>
