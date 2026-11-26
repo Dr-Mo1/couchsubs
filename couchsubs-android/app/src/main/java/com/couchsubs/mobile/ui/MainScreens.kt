@@ -134,6 +134,7 @@ fun MainScreen(
                         Heading(stringResource(R.string.main_unpaired), stringResource(R.string.main_unpaired_body))
                     }
                     AnimatedNote(status.error)
+                    AccountBanners()
                     // Eşleme ile canlı bağlantı farklı durumlardır; hazır olmayan cihaz yeşil gösterilmez.
                     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
                         StatusChip(stringResource(if (xbox) R.string.platform_xbox else R.string.platform_ps), paired, Modifier.weight(1f), onPairing)
@@ -141,6 +142,7 @@ fun MainScreen(
                             Modifier.weight(1f), onTarget)
                     }
                     PackSummaryTile(onPacks)
+                    AccountStatusCard()
                     if (paired) TranslationStartDisc(onStart = onStart)
                     status.recent.firstOrNull()?.let { line ->
                         Tile(Modifier.fillMaxWidth()) {
@@ -241,6 +243,7 @@ private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, on
             com.couchsubs.mobile.remoteplay.ReconnectOffer.shows(status.notLiveSince, status.gaveUp, now))
             SecondaryButton(stringResource(R.string.reconnect)) { com.couchsubs.mobile.service.TranslationService.reconnect() }
         AnimatedNote(status.error)
+        AccountBanners()
         // TV'ye çevirirken telefon kilitlenebilir: pil kısıtlaması açıksa çeviri ekran kapanınca durabilir.
         if (!status.demo && Services.settings.target.showsOnTv) BackgroundLimitNote()
         // TV uygulaması bağlı değil: CouchSubs TV'de nerede bulunur (markaya göre), otomatik açma neden olmadı ve

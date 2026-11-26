@@ -176,7 +176,7 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
     androidx.activity.compose.BackHandler(section != 0) { section = 0 }
     var engine by remember { mutableStateOf(settings.engine) }
     var translationStyle by remember { mutableStateOf(settings.translationStyle) }
-    val serverAvailable = com.couchsubs.mobile.translation.TargamgiProxy.isAvailable()
+    val serverAvailable = com.couchsubs.mobile.translation.TargamgiGate.isAvailable()
     // Anahtar kaydedilmeden önce denenir (iPhone gibi): yalnız kabul edilen anahtar gizli depoya yazılır.
     var key by remember(engine) { mutableStateOf("") }
     var saved by remember(engine) { mutableStateOf(!settings.apiKey(engine).isNullOrBlank()) }
@@ -232,6 +232,7 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
                         { RowItem(stringResource(R.string.targamgi_devices), onClick = { section = 3 }) },
                         { RowItem(stringResource(R.string.profile), onClick = onProfile) },
                     ))
+                    AccountSettingsTile()
                     TranslationLanguageTile(translationStyle)
                     TranslationStyleTile(translationStyle) {
                         translationStyle = it

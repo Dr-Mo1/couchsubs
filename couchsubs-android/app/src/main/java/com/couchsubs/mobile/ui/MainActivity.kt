@@ -234,7 +234,11 @@ class MainActivity : ComponentActivity() {
                 // TV'nin eşleştirme isteği: onay penceresi ve her ekranın üstünde onay satırı (iPhone ile aynı).
                 TvPairingPrompt(status.pairing)
                 // Küçük pencerede (Resim içinde resim) yalnız oyun görüntüsü ve canlı altyazı; gezinme yığını altta durur.
-                if (inPip) PipSubtitleView(status) else UpdateHost()
+                // The account screens (subscribe, update required) cover the app below the update dialog; not in the small window.
+                if (inPip) PipSubtitleView(status) else {
+                    AccountHost()
+                    UpdateHost()
+                }
             }
         }
     }

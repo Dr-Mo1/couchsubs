@@ -3,7 +3,7 @@
 <!-- Default UI text in Arabic (Modern Standard Arabic). English is in values-en/strings.xml; add new strings to both. -->
 <resources>
     <string name="channel_translation">ترجمة الحوار</string>
-    <string name="notification_title">ترجمجي يترجم</string>
+    <string name="notification_title">SubTV يترجم</string>
     <string name="notification_text">جارٍ قراءة الحوار وترجمته إلى العربية، ويستمر ذلك أثناء قفل الشاشة</string>
     <string name="stop">إيقاف الترجمة</string>
     <string name="start">ابدأ الترجمة</string>
@@ -70,7 +70,7 @@
     <string name="psn_create_title">إنشاء حساب إضافي</string>
     <string name="psn_create_step1">1. استخدم بريدًا إلكترونيًا غير بريد حسابك الأساسي.</string>
     <string name="psn_create_step2">2. فعّل الحساب من رسالة التأكيد في بريدك.</string>
-    <string name="psn_create_step3">3. عُد إلى ترجمجي واضغط «تسجيل الدخول عبر سوني».</string>
+    <string name="psn_create_step3">3. عُد إلى SubTV واضغط «تسجيل الدخول عبر سوني».</string>
     <string name="psn_failed">لم يكتمل تسجيل الدخول: %1$s</string>
     <string name="psn_loading">جارٍ الاتصال بـسوني…</string>
     <string name="psn_loading_hint">إن لم تظهر الصفحة، افتح تسجيل الدخول في المتصفح أدناه.</string>
@@ -417,7 +417,7 @@
     <string name="settings_passcode_field">4 أرقام</string>
     <string name="settings_passcode_note">مطلوب فقط إذا كان للحساب الثانوي رمز دخول على بلايستيشن 5. يُحفظ مشفّرًا على الهاتف.</string>
     <string name="settings_about">عن التطبيق</string>
-    <string name="settings_copyright">ترجمجي من تطوير DrMo.</string>
+    <string name="settings_copyright">SubTV من تطوير DrMo.</string>
     <string name="about_body">تفاصيل البرامج مفتوحة المصدر متاحة في صفحة التراخيص.</string>
     <string name="about_source">الكود المصدري</string>
     <string name="main_packs_off">متوقفة</string>
@@ -425,7 +425,7 @@
     <string name="packs_free_count">مجانية · %1$d ألعاب</string>
     <string name="main_paired">مرتبط</string>
     <string name="packs_switch_note">عند الإيقاف، يترجم المحرك جميع السطور.</string>
-    <string name="profile_no_account">لا يتطلب ترجمجي حسابًا خاصًا به. تُحفظ إعداداتك على الهاتف، والتطبيق وحزم الألعاب مجانية.</string>
+    <string name="profile_no_account">حسابك بيتعمل لوحده من غير تسجيل. إعداداتك محفوظة على الموبايل، وحزم الألعاب مجانية.</string>
     <string name="notify_disconnect">التنبيه عند انقطاع الاتصال</string>
     <string name="settings_background_pip">المتابعة في نافذة عائمة</string>
     <string name="settings_background_pip_short">تظل صورة اللعبة والترجمة في نافذة صغيرة عند مغادرة التطبيق.</string>
@@ -641,7 +641,7 @@
     <string name="xbox_login_button">تسجيل الدخول عبر مايكروسوفت</string>
     <string name="xbox_login_code">رمزك (اضغط للنسخ):</string>
     <string name="xbox_login_how">أدخل الرمز في صفحة microsoft.com/link بمتصفح الهاتف.</string>
-    <string name="xbox_login_steps">افتح microsoft.com/link والصق الرمز، ثم سجّل الدخول بحساب مايكروسوفت واسمح بالوصول قبل العودة إلى ترجمجي.</string>
+    <string name="xbox_login_steps">افتح microsoft.com/link والصق الرمز، ثم سجّل الدخول بحساب مايكروسوفت واسمح بالوصول قبل العودة إلى SubTV.</string>
     <string name="xbox_login_copy">نسخ الرمز</string>
     <string name="xbox_login_no_browser">تعذّر فتح المتصفح. افتح العنوان %1$s على جهاز آخر وأدخل الرمز هناك.</string>
     <string name="xbox_login_open">فتح صفحة مايكروسوفت</string>
@@ -669,7 +669,7 @@
     <string name="dubbing_voice_male_3">رجل 3 (واضح)</string>
     <string name="channel_connection">الاتصال</string>
     <string name="connection_lost_title">انقطع الاتصال بـبلايستيشن 5</string>
-    <string name="connection_lost_body">توقفت الترجمة. افتح ترجمجي لإعادة الاتصال.</string>
+    <string name="connection_lost_body">توقفت الترجمة. افتح SubTV لإعادة الاتصال.</string>
     <string name="psn_sign_out">تسجيل الخروج من حساب بلايستيشن</string>
     <string name="psn_sign_out_title">تسجيل الخروج</string>
     <string name="psn_sign_out_body">سيُحذف ربط حساب بلايستيشن والجهاز من الهاتف. ستحتاج إلى تسجيل الدخول والربط مجددًا.</string>
@@ -714,7 +714,7 @@
     <string name="tv_open_debug_not_approved">تعذّر الفتح تلقائيًا: لم يوافق التلفزيون على تصحيح الأخطاء من هذا الجهاز. أعد تثبيت تطبيق التلفزيون ووافق على الطلب على شاشة التلفزيون.</string>
     <string name="tv_open_not_opened">تعذّر الفتح تلقائيًا: استلم التلفزيون أمر الفتح لكنه لم يفتح تطبيق الترجمة على التلفزيون. افتحه من التلفزيون بالريموت.</string>
     <string name="tv_open_try">محاولة الفتح تلقائيًا</string>
-    <string name="tv_open_wizard_note">يحاول ترجمجي فتح تطبيق التلفزيون عند بدء الترجمة. إن لم يفتح، افتح تطبيق الترجمة على التلفزيون بالريموت.</string>
+    <string name="tv_open_wizard_note">يحاول SubTV فتح تطبيق التلفزيون عند بدء الترجمة. إن لم يفتح، افتح تطبيق الترجمة على التلفزيون بالريموت.</string>
     <string name="engine_local">نموذج محلي</string>
     <string name="local_ai_address">عنوان الخادم</string>
     <string name="local_ai_model">اسم النموذج</string>
@@ -735,7 +735,7 @@
     <string name="local_ai_ollama_down">تعذّر الاتصال بأولاما على %1$s؛ شغّله ونزّل النموذج %2$s.</string>
     <string name="local_ai_lmstudio_down">تعذّر الاتصال بـإل إم ستوديو على %1$s. حمّل النموذج وشغّل الخادم المحلي.</string>
     <string name="local_ai_other_down">تعذّر الاتصال بالخادم %1$s، أو انتهت مهلة الاستجابة. تحقّق من العنوان وتشغيل الخادم.</string>
-    <string name="app_name">ترجمجي</string>
+    <string name="app_name">SubTV</string>
     <string name="translation_language">لغة الترجمة</string>
     <string name="translation_language_code">لغة الترجمة</string>
     <string name="translation_language_apply">تطبيق وإيقاف الترجمة</string>
@@ -755,7 +755,7 @@
     <!-- Over-the-air update (UpdateController) and the sturdier PSN browser sign-in (C24). -->
     <string name="psn_step_1">سجّل الدخول بالحساب الثانوي.</string>
     <string name="psn_step_2">بعد تسجيل الدخول، انسخ رابط صفحة إعادة التوجيه من قائمة المتصفح.</string>
-    <string name="psn_step_3">عُد إلى ترجمجي؛ يُكمل التطبيق تسجيل الدخول تلقائيًا.</string>
+    <string name="psn_step_3">عُد إلى SubTV؛ يُكمل التطبيق تسجيل الدخول تلقائيًا.</string>
     <string name="psn_browser_open">فتح المتصفح</string>
     <string name="psn_browser_paste">إن لم يلتقط التطبيق الرابط تلقائيًا، الصقه هنا.</string>
     <string name="psn_use_inapp">المحاولة داخل التطبيق</string>
@@ -770,7 +770,7 @@
     <string name="update_failed_corrupt">حُذف الملف لعدم تطابق الحجم أو بصمة التحقق؛ أعد المحاولة.</string>
     <string name="update_failed_install">تعذّر تثبيت التحديث.</string>
     <string name="update_retry">إعادة المحاولة</string>
-    <string name="update_permission">لتثبيت التحديث، اسمح لترجمجي بتثبيت التطبيقات من الإعدادات ثم عُد إلى التطبيق.</string>
+    <string name="update_permission">لتثبيت التحديث، اسمح لتطبيق SubTV بتثبيت التطبيقات من الإعدادات ثم عُد إلى التطبيق.</string>
     <string name="update_open_settings">فتح الإعدادات</string>
     <string name="update_installing">أكّد التثبيت في نافذة النظام التي ظهرت.</string>
     <string name="update_check">التحقق من التحديثات</string>
@@ -829,7 +829,7 @@
     <string name="guide_lg_step4">اضغط زر التثبيت أدناه، واختر التلفزيون، واكتب الرمز كما يظهر بالأحرف الكبيرة، ثم اضغط «تثبيت وفتح».</string>
     <string name="guide_lg_step5">يُفتح التطبيق على التلفزيون. ابدأ الترجمة من الشاشة الرئيسية ووافق بالريموت على طلب الاتصال الذي يظهر على التلفزيون.</string>
     <string name="guide_lg_tip1">لم يستجب التلفزيون: شغّله، وتأكد أنه على شبكة الهاتف نفسها وأن «حالة وضع المطوّر» مفعّل.</string>
-    <string name="guide_lg_tip2">أعد تفعيل وضع المطوّر والتثبيت إذا انتهت الجلسة؛ يمدّدها ترجمجي يوميًا عند الاتصال بالتلفزيون.</string>
+    <string name="guide_lg_tip2">أعد تفعيل وضع المطوّر والتثبيت إذا انتهت الجلسة؛ يمدّدها SubTV يوميًا عند الاتصال بالتلفزيون.</string>
     <string name="guide_lg_tip3">أعد فتح خادم المفاتيح واكتب الرمز بالأحرف الكبيرة كما يظهر على التلفزيون.</string>
     <string name="guide_lg_tip4">افتح تطبيق الترجمة من قائمة تطبيقات التلفزيون بعد إعادة التشغيل.</string>
     <string name="guide_samsung_req1">تلفزيون سامسونج ذكي (تايزن) من 2016؛ موديلات 2016–2018 تجريبية.</string>
@@ -870,20 +870,20 @@
     <string name="language_english">الإنجليزية</string>
     <string name="display_tv_note">عرض الترجمة على التلفزيون</string>
     <string name="display_phone_note">إكمال الإعداد على الهاتف</string>
-    <string name="engine_server">خادم ترجمجي (جيميني)</string>
-    <string name="engine_server_short">خادم ترجمجي</string>
-    <string name="settings_engine_server_note">خادم ترجمجي (جيميني): يعمل مباشرة دون الحاجة لمفتاح، ويعود للمحرك المجاني تلقائيًا عند انقطاع الاتصال.</string>
+    <string name="engine_server">خادم SubTV (جيميني)</string>
+    <string name="engine_server_short">خادم SubTV</string>
+    <string name="settings_engine_server_note">خادم SubTV (جيميني): يعمل مباشرة دون الحاجة لمفتاح، ويعود للمحرك المجاني تلقائيًا عند انقطاع الاتصال.</string>
     <string name="engine_deepl">ديب إل</string>
     <string name="engine_gemini">جيميني</string>
     <string name="engine_openai">أوبن إيه آي</string>
     <string name="engine_claude">كلود</string>
     <string name="pack_summary">حزمة جي تي إيه 6 العربية · %1$d سطرًا</string>
     <string name="open_source_licenses">تراخيص البرامج مفتوحة المصدر</string>
-    <string name="licenses_intro">ترجمجي من تطوير DrMo، ويستخدم البرامج مفتوحة المصدر التالية:</string>
+    <string name="licenses_intro">SubTV من تطوير DrMo، ويستخدم البرامج مفتوحة المصدر التالية:</string>
     <string name="license_couchsubs">كاوتش سبس — © 2026 سنان يورولماز — رخصة جنو أفيرو العامة، الإصدار 3</string>
     <string name="license_chiaki">شياكي إن جي — © مساهمو شياكي وشياكي إن جي — رخصة جنو أفيرو العامة، الإصدار 3</string>
     <string name="licenses_notice">هذه نسخة معدّلة بتاريخ 2026-11-23، وتُقدَّم دون أي ضمان، ويحق لك إعادة توزيعها وفق شروط الرخصة. الشيفرة المصدرية ونص الرخصة: github.com/Dr-Mo1/targamgi</string>
-    <string name="launcher_label" translatable="false">ترجمجي</string>
+    <string name="launcher_label" translatable="false">SubTV</string>
     <string name="game_title_1">جي تي إيه 6</string>
     <string name="game_title_2">جي تي إيه 5</string>
     <string name="game_title_3">ريد ديد ريدمبشن 2</string>
@@ -972,4 +972,44 @@
     <string name="beta_channel_active">قناة التجربة مفعّلة</string>
     <string name="rescue_body">تعذّر تشغيل هذه النسخة. جارٍ البحث عن تحديث…</string>
     <string name="rescue_update">تحديث</string>
+    <!-- 1.0.48 SubTV: account, free trial and subscription (begin) -->
+    <string name="account_title">حسابك</string>
+    <string name="account_loading">بنجهّز حسابك…</string>
+    <string name="account_status_trial">تجربة مجانية: فاضل %1$d يوم</string>
+    <string name="account_status_trial_not_started">التجربة لسه مبدأتش، هتبدأ مع أول ترجمة</string>
+    <string name="account_status_subscribed">مشترك لحد %1$s</string>
+    <string name="account_status_permanent">دايم</string>
+    <string name="account_status_ended">التجربة خلصت</string>
+    <string name="account_number">رقم حسابك: %1$s</string>
+    <string name="account_number_copy">نسخ</string>
+    <string name="account_number_copied">اتنسخ</string>
+    <string name="account_access_ended">التجربة أو الاشتراك خلص. فعّل اشتراك عشان الترجمة ترجع.</string>
+    <string name="account_cap_reached">وصلت لحد النهارده، كمّل بكره</string>
+    <string name="account_maintenance">السيرفر في صيانة دلوقتي. جرّب بعد شوية.</string>
+    <string name="account_problem">في مشكلة في حسابك. اقفل التطبيق وافتحه تاني.</string>
+    <string name="account_unreachable">مقدرناش نوصل للسيرفر. اتأكد من النت وجرّب تاني.</string>
+    <string name="account_settings_title">الحساب والاشتراك</string>
+    <string name="subscribe_title">الاشتراك</string>
+    <string name="subscribe_body">التجربة أو الاشتراك خلص، والترجمة واقفة لحد ما تشترك.</string>
+    <string name="subscribe_plans">الباقات</string>
+    <string name="subscribe_plan_line">%1$s · %2$s جنيه · %3$d يوم</string>
+    <string name="subscribe_contact_line">للاشتراك كلّمنا</string>
+    <string name="subscribe_contact">TODO_CONTACT</string>
+    <string name="subscribe_retry">حاول تاني</string>
+    <string name="subscribe_still_ended">لسه مفيش اشتراك شغّال. لما تكلّمنا ابعتلنا رقم حسابك.</string>
+    <string name="redeem_title">عندي كود</string>
+    <string name="redeem_field">الكود</string>
+    <string name="redeem_button">تفعيل</string>
+    <string name="redeem_working">بنفعّل…</string>
+    <string name="redeem_success">اتفعّل الاشتراك ✓</string>
+    <string name="redeem_invalid">الكود غلط</string>
+    <string name="redeem_expired">الكود ده انتهى</string>
+    <string name="redeem_exhausted">الكود ده اتستخدم لآخره</string>
+    <string name="redeem_already_used">إنت استخدمت الكود ده قبل كده</string>
+    <string name="redeem_already_permanent">حسابك دايم أصلاً</string>
+    <string name="redeem_inactive">الكود ده مش شغال</string>
+    <string name="redeem_failed">حصلت مشكلة، جرّب تاني بعد شوية</string>
+    <string name="update_required_title">لازم تحدّث التطبيق</string>
+    <string name="update_required_body">النسخة دي قديمة ومش هتكمّل شغل. حدّثها الأول.</string>
+    <!-- 1.0.48 SubTV: account, free trial and subscription (end) -->
 </resources>

@@ -210,7 +210,7 @@ class AppSettings(context: Context) : AreaStore {
 
     var engine: EngineChoice
         get() {
-            val serverAvailable = com.couchsubs.mobile.translation.TargamgiProxy.isAvailable()
+            val serverAvailable = com.couchsubs.mobile.translation.TargamgiGate.isAvailable()
             val defaultEngine = if (translationLanguage == "ar" && serverAvailable) EngineChoice.SERVER else EngineChoice.FREE
             val stored = enumOr(prefs.getString("engine", null), defaultEngine)
             return if (stored == EngineChoice.SERVER && !serverAvailable) EngineChoice.FREE else stored
@@ -344,7 +344,7 @@ class AppSettings(context: Context) : AreaStore {
             migrated = prefs.getBoolean("serverEngineMigrated", false),
             stored = stored,
             target = translationLanguage,
-            serverAvailable = com.couchsubs.mobile.translation.TargamgiProxy.isAvailable(),
+            serverAvailable = com.couchsubs.mobile.translation.TargamgiGate.isAvailable(),
         ) ?: return
         val edit = prefs.edit().putBoolean("serverEngineMigrated", true)
         step.engine?.let { edit.putString("engine", it.name) }

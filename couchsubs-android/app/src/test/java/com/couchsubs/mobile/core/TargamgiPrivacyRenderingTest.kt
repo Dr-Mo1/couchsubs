@@ -23,7 +23,7 @@ class TargamgiPrivacyRenderingTest {
         assertTrue(manifest.contains("FirebaseInitProvider"))
         assertTrue(manifest.contains("tools:node=\"remove\""))
         val arabic = File(app, "src/main/res/values/strings.xml").readText() // Arabic is the default locale now (values-ar is gone)
-        assertTrue(arabic.contains("ترجمجي"))
+        assertTrue(arabic.contains("SubTV")) // 1.0.48: the visible name
         val page = File(app, "src/main/assets/second-screen.html").readText()
         assertTrue(page.contains("unicode-bidi: plaintext"))
         assertTrue(page.contains("\u2068") || page.contains("\\u2068"))

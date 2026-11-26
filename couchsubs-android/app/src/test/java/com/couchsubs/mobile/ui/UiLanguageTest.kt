@@ -31,8 +31,9 @@ class UiLanguageTest {
     }
 
     @Test fun arabicUiHasNoLatinLabels() {
-        val offenders = strings("values").filterValues { value ->
-            val copy = address.replace(placeholder.replace(value, ""), "").replace("DrMo", "")
+        // "SubTV" is the product name (1.0.48); subscribe_contact is the owner's contact (a handle or number, so Latin).
+        val offenders = strings("values").filterKeys { it != "subscribe_contact" }.filterValues { value ->
+            val copy = address.replace(placeholder.replace(value, ""), "").replace("DrMo", "").replace("SubTV", "")
             copy.any { it.isLetter() && Character.UnicodeScript.of(it.code) == Character.UnicodeScript.LATIN }
         }.keys
         assertTrue("Latin letters in Arabic resources: ${offenders.joinToString()}", offenders.isEmpty())
@@ -57,10 +58,12 @@ class UiLanguageTest {
         assertTrue("Missing resource or changed placeholders: ${offenders.joinToString()}", offenders.isEmpty())
     }
 
-    @Test fun launcherKeepsItsOwnArabicLabel() {
-        assertEquals("ترجمجي", strings("values")["launcher_label"])
+    @Test fun launcherKeepsItsOwnLabel() {
+        // 1.0.48: the visible name is SubTV in both languages; the launcher label stays a single resource in the default locale.
+        assertEquals("SubTV", strings("values")["launcher_label"])
         assertFalse(strings("values-en").containsKey("launcher_label"))
-        assertEquals("Targamgi", strings("values-en")["app_name"])
+        assertEquals("SubTV", strings("values")["app_name"])
+        assertEquals("SubTV", strings("values-en")["app_name"])
         assertTrue(File(main, "AndroidManifest.xml").readText().contains("android:label=\"@string/launcher_label\""))
     }
 }

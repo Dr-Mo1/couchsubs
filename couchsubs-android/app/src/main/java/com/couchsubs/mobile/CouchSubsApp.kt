@@ -6,6 +6,7 @@ import android.content.Context
 import com.couchsubs.mobile.account.Backend
 import com.couchsubs.mobile.account.MeasurementPolicy
 import com.couchsubs.mobile.account.Meta
+import com.couchsubs.mobile.account.SubTvAccount
 import com.couchsubs.mobile.core.GamePackLibrary
 import com.couchsubs.mobile.core.Log
 import com.couchsubs.mobile.packs.HttpPackServer
@@ -156,6 +157,15 @@ object Services {
         Backend.init(app)
         Meta.init(app)
         applyMeasurement()
+        // 1.0.48 SubTV: the anonymous account and its free trial. Status at app start, then every 30 minutes while a translation session runs.
+        SubTvAccount.init(app)
+        scope.launch {
+            SubTvAccount.refreshStatus()
+            while (true) {
+                kotlinx.coroutines.delay(SubTvAccount.STATUS_INTERVAL_MS)
+                if (com.couchsubs.mobile.service.LiveState.status.value.running) SubTvAccount.refreshStatus()
+            }
+        }
         packStore = PackStore(File(app.filesDir, "packs-remote"), packServer, bundledHashes = { bundledPackHashes(app) })
         importedPacksDirectory = File(app.filesDir, "packs-imported")
         // Açılışta hemen, sonra uygulama açık kaldıkça günde bir yeni ve güncellenen paketlere bakılır (iPhone'daki gibi).

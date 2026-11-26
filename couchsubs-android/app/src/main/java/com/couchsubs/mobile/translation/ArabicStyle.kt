@@ -15,6 +15,14 @@ enum class TranslationStyle(val id: String) {
         fun of(value: String?): TranslationStyle =
             entries.firstOrNull { it.id.equals(value, ignoreCase = true) || it.name.equals(value, ignoreCase = true) }
                 ?: DEFAULT
+
+        /**
+         * Cache identity of an AI engine for this style. Clean Arabic gets its own cache ("<engine>:clean") so a line cached
+         * in street style (which may swear) is never served in clean style. Street, and every other language, keep the old
+         * id, so nobody loses the cache they already have.
+         */
+        fun cacheEngineId(engine: String, target: String, style: TranslationStyle): String =
+            if (target == "ar" && style == CLEAN) "$engine:clean" else engine
     }
 }
 

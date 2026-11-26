@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <!-- English UI text (device language English). The Arabic default is values/strings.xml; add new strings to both. -->
 <resources>
-    <string name="app_name">Targamgi</string>
+    <string name="app_name">SubTV</string>
     <string name="translation_language">Translation language</string>
     <string name="translation_language_code">Language code (ar, en, fr, de, es…)</string>
     <string name="translation_language_apply">Apply and stop translation</string>
@@ -72,7 +72,7 @@
     <string name="psn_create_title">Create a second account</string>
     <string name="psn_create_step1">1. Use an e-mail address other than your main account\'s.</string>
     <string name="psn_create_step2">2. Confirm the account from the e-mail Sony sends.</string>
-    <string name="psn_create_step3">3. Come back to Targamgi and tap Sign in with Sony.</string>
+    <string name="psn_create_step3">3. Come back to SubTV and tap Sign in with Sony.</string>
     <string name="psn_failed">Sign-in not completed: %1$s</string>
     <string name="psn_loading">Connecting to Sony…</string>
     <string name="psn_loading_hint">Use the browser sign-in option if the page does not load.</string>
@@ -414,7 +414,7 @@
     <string name="settings_passcode_field">4 digits</string>
     <string name="settings_passcode_note">Only needed if the second account has a login passcode on the PS5. the translation app enters it when the PS5 asks; it is stored encrypted on the phone.</string>
     <string name="settings_about">About</string>
-    <string name="settings_copyright">Targamgi is developed by DrMo.</string>
+    <string name="settings_copyright">SubTV is developed by DrMo.</string>
     <string name="about_body">Open-source software details are available on the licenses page.</string>
     <string name="about_source">Source code</string>
     <string name="main_packs_off">Off</string>
@@ -422,7 +422,7 @@
     <string name="packs_free_count">Free · %1$d games</string>
     <string name="main_paired">Paired</string>
     <string name="packs_switch_note">When off, all lines are translated with your chosen engine.</string>
-    <string name="profile_no_account">the translation app has no accounts: your settings stay only on this phone. The app and game packs are free.</string>
+    <string name="profile_no_account">Your account is created automatically, with no sign-up. Your settings stay on this phone, and game packs are free.</string>
     <string name="notify_disconnect">When the PS5 connection drops</string>
     <string name="settings_background_pip">Keep translating in the background (Picture in Picture)</string>
     <string name="settings_background_pip_short">When you leave the translation app while translating, the game picture and the live subtitle stay in a small window; reading and sending to the TV continue.</string>
@@ -636,7 +636,7 @@
     <string name="xbox_login_button">Sign in with Microsoft</string>
     <string name="xbox_login_code">Your code (tap to copy):</string>
     <string name="xbox_login_how">Enter the code on microsoft.com/link in your phone browser.</string>
-    <string name="xbox_login_steps">Open microsoft.com/link, paste the code, sign in with your Microsoft account and allow access before returning to Targamgi.</string>
+    <string name="xbox_login_steps">Open microsoft.com/link, paste the code, sign in with your Microsoft account and allow access before returning to SubTV.</string>
     <string name="xbox_login_copy">Copy the code</string>
     <string name="xbox_login_no_browser">Couldn\'t open a browser. Open %1$s on another device and enter the code there.</string>
     <string name="xbox_login_open">Open the Microsoft page</string>
@@ -746,7 +746,7 @@
     <!-- Over-the-air update (UpdateController) and the sturdier PSN browser sign-in (C24). -->
     <string name="psn_step_1">Sign in with the second account.</string>
     <string name="psn_step_2">After signing in, copy the redirect page link from the browser menu.</string>
-    <string name="psn_step_3">Come back to Targamgi; the app finishes signing in by itself.</string>
+    <string name="psn_step_3">Come back to SubTV; the app finishes signing in by itself.</string>
     <string name="psn_browser_open">Open the browser</string>
     <string name="psn_browser_paste">If the app does not pick up the link by itself, paste it here.</string>
     <string name="psn_use_inapp">Try inside the app</string>
@@ -761,7 +761,7 @@
     <string name="update_failed_corrupt">The downloaded file does not match the published release (size or SHA-256), so it was deleted. Try again.</string>
     <string name="update_failed_install">The update could not be installed.</string>
     <string name="update_retry">Try again</string>
-    <string name="update_permission">To install the update, allow Targamgi to install apps in Settings, then come back to the app.</string>
+    <string name="update_permission">To install the update, allow SubTV to install apps in Settings, then come back to the app.</string>
     <string name="update_open_settings">Open Settings</string>
     <string name="update_installing">Confirm the installation in the system window.</string>
     <string name="update_check">Check for updates</string>
@@ -820,7 +820,7 @@
     <string name="guide_lg_step4">Press the install button below, pick the TV, type the Passphrase exactly as shown, in capital letters, then press Install and open.</string>
     <string name="guide_lg_step5">The app opens on the TV. Start the translation from Home and accept, with the remote, the connection prompt that appears on the TV.</string>
     <string name="guide_lg_tip1">The TV does not answer: turn it on, and check that it is on the phone\'s network and Dev Mode Status is on.</string>
-    <string name="guide_lg_tip2">The developer session (up to 1000 hours) ended and the app was removed: turn Dev Mode Status on again and reinstall. Targamgi extends the session daily while it is connected to the TV.</string>
+    <string name="guide_lg_tip2">The developer session (up to 1000 hours) ended and the app was removed: turn Dev Mode Status on again and reinstall. SubTV extends the session daily while it is connected to the TV.</string>
     <string name="guide_lg_tip3">The Passphrase was refused: open Key Server again and type the code in capital letters as shown.</string>
     <string name="guide_lg_tip4">After the TV restarts, open the translation app from the app list if it does not open by itself.</string>
     <string name="guide_samsung_req1">A Samsung smart TV (Tizen) from 2016; 2016 to 2018 models are experimental.</string>
@@ -861,16 +861,16 @@
     <string name="language_english">English</string>
     <string name="display_tv_note">Display subtitles on the TV</string>
     <string name="display_phone_note">Finish setup on the phone</string>
-    <string name="engine_server">Targamgi Server (Gemini)</string>
-    <string name="engine_server_short">Targamgi</string>
-    <string name="settings_engine_server_note">Targamgi Server (Gemini): works out of the box with no API key, and falls back to the free engine if unreachable.</string>
+    <string name="engine_server">SubTV Server (Gemini)</string>
+    <string name="engine_server_short">SubTV</string>
+    <string name="settings_engine_server_note">SubTV Server (Gemini): works out of the box with no API key, and falls back to the free engine if unreachable.</string>
     <string name="engine_deepl">DeepL</string>
     <string name="engine_gemini">Gemini</string>
     <string name="engine_openai">OpenAI</string>
     <string name="engine_claude">Claude</string>
     <string name="pack_summary">GTA VI Arabic pack · %1$d lines</string>
     <string name="open_source_licenses">Open-source licenses</string>
-    <string name="licenses_intro">Targamgi is developed by DrMo and uses the following open-source software:</string>
+    <string name="licenses_intro">SubTV is developed by DrMo and uses the following open-source software:</string>
     <string name="license_couchsubs">CouchSubs — © 2026 Sinan Yorulmaz — GNU AGPL v3</string>
     <string name="license_chiaki">chiaki-ng — © chiaki and chiaki-ng contributors — GNU AGPL v3</string>
     <string name="licenses_notice">This is a modified version (2026-11-23), provided without any warranty; you may redistribute it under the license terms. Source code and license text: github.com/Dr-Mo1/targamgi</string>
@@ -962,4 +962,44 @@
     <string name="beta_channel_active">Test channel is on</string>
     <string name="rescue_body">This version failed to start. Checking for an update…</string>
     <string name="rescue_update">Update</string>
+    <!-- 1.0.48 SubTV: account, free trial and subscription (begin) -->
+    <string name="account_title">Your account</string>
+    <string name="account_loading">Setting up your account…</string>
+    <string name="account_status_trial">Free trial: %1$d days left</string>
+    <string name="account_status_trial_not_started">Your free trial has not started yet; it starts with your first translation</string>
+    <string name="account_status_subscribed">Subscribed until %1$s</string>
+    <string name="account_status_permanent">Permanent</string>
+    <string name="account_status_ended">Your trial has ended</string>
+    <string name="account_number">Your account number: %1$s</string>
+    <string name="account_number_copy">Copy</string>
+    <string name="account_number_copied">Copied</string>
+    <string name="account_access_ended">Your trial or subscription has ended. Activate a subscription to get translation back.</string>
+    <string name="account_cap_reached">You have reached the limit for today. Come back tomorrow.</string>
+    <string name="account_maintenance">The server is under maintenance. Try again shortly.</string>
+    <string name="account_problem">There is a problem with your account. Close the app and open it again.</string>
+    <string name="account_unreachable">Could not reach the server. Check your internet and try again.</string>
+    <string name="account_settings_title">Account and subscription</string>
+    <string name="subscribe_title">Subscription</string>
+    <string name="subscribe_body">Your trial or subscription has ended, and translation is paused until you subscribe.</string>
+    <string name="subscribe_plans">Plans</string>
+    <string name="subscribe_plan_line">%1$s · %2$s EGP · %3$d days</string>
+    <string name="subscribe_contact_line">To subscribe, contact us</string>
+    <string name="subscribe_contact">TODO_CONTACT</string>
+    <string name="subscribe_retry">Try again</string>
+    <string name="subscribe_still_ended">No active subscription yet. When you contact us, send your account number.</string>
+    <string name="redeem_title">I have a code</string>
+    <string name="redeem_field">Code</string>
+    <string name="redeem_button">Activate</string>
+    <string name="redeem_working">Activating…</string>
+    <string name="redeem_success">Subscription activated ✓</string>
+    <string name="redeem_invalid">The code is wrong</string>
+    <string name="redeem_expired">This code has expired</string>
+    <string name="redeem_exhausted">This code has been used up</string>
+    <string name="redeem_already_used">You already used this code</string>
+    <string name="redeem_already_permanent">Your account is already permanent</string>
+    <string name="redeem_inactive">This code is not active</string>
+    <string name="redeem_failed">Something went wrong, try again in a moment</string>
+    <string name="update_required_title">Please update the app</string>
+    <string name="update_required_body">This version is too old to keep working. Update it first.</string>
+    <!-- 1.0.48 SubTV: account, free trial and subscription (end) -->
 </resources>

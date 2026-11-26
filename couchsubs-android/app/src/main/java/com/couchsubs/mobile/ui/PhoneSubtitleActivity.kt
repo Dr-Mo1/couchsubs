@@ -175,7 +175,7 @@ class PhoneSubtitleActivity : ComponentActivity() {
                                 style = style.copy(textDirection = androidx.compose.ui.text.style.TextDirection.Content, fontSize = style.fontSize * scale * 0.8f * wrapped.scale, lineHeight = style.lineHeight * scale * 0.8f * wrapped.scale),
                                 color = color.copy(alpha = 0.4f), textAlign = TextAlign.Center)
                         }
-                        val currentText = status.current.ifEmpty { if (status.running) "" else "Targamgi" }
+                        val currentText = status.current.ifEmpty { if (status.running) "" else "SubTV" }
                         val current = SubtitleWrap.fit(currentText)
                         if (com.couchsubs.mobile.core.ArabicSubtitle.isArabic(currentText)) ArabicSubtitleText(current.text,
                             style.copy(fontSize = style.fontSize * scale * current.scale, lineHeight = style.lineHeight * scale * current.scale),

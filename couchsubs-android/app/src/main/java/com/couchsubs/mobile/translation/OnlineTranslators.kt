@@ -46,6 +46,44 @@ enum class OnlineKeyState {
 /** [rateLimited]: hizmet 429 döndü (DeepL: çok sık istek); bekleme süresince istek gönderilmez. */
 class OnlineException(val state: OnlineKeyState, val rateLimited: Boolean = false) : IOException("online translation failed: $state")
 
+/** Why our server refused a translation. The UI shows the reason; the line is not quietly handed to the free engine. */
+enum class GateError {
+    /** 403 trial_expired / plan_expired / trial_used_on_device: the subscribe screen. */
+    ACCESS_ENDED,
+    /** 429 cap_reached: today's limit. */
+    CAP_REACHED,
+    /** 503 maintenance: the server's own message. */
+    MAINTENANCE,
+    /** 401 after the one refresh, 403 account_not_found or any other 403. */
+    ACCOUNT_PROBLEM,
+}
+
+/** A typed refusal from translate-gate; [code] is the server's `error` value, [serverMessage] its `message` (maintenance). */
+class GateException(val error: GateError, val code: String, val serverMessage: String? = null) :
+    IOException("translate-gate refused: $code") {
+    companion object {
+        private val ACCESS_CODES = setOf("trial_expired", "plan_expired", "trial_used_on_device")
+
+        /** The refusal for a gate reply (401, 403, 429, 503); null for every other status (those keep the usual error path). */
+        fun from(status: Int, body: String): GateException? {
+            val json = try {
+                JSONObject(body)
+            } catch (_: JSONException) {
+                null
+            }
+            val code = json?.takeUnless { it.isNull("error") }?.optString("error").orEmpty()
+            val message = json?.takeUnless { it.isNull("message") }?.optString("message")?.ifBlank { null }
+            return when (status) {
+                401 -> GateException(GateError.ACCOUNT_PROBLEM, code.ifEmpty { "unauthorized" }, message)
+                403 -> GateException(if (code in ACCESS_CODES) GateError.ACCESS_ENDED else GateError.ACCOUNT_PROBLEM, code, message)
+                429 -> GateException(GateError.CAP_REACHED, code.ifEmpty { "cap_reached" }, message)
+                503 -> GateException(GateError.MAINTENANCE, code.ifEmpty { "maintenance" }, message)
+                else -> null
+            }
+        }
+    }
+}
+
 /**
  * Hizmetin bildirdiği dakikalık istek sınırı aşımı (429; Windows: AiRateLimit). [retryAfterMs]: hizmetin önerdiği
  * bekleme ("retryDelay"), [requestsPerMinute]: bildirdiği dakikalık istek sınırı ("quotaValue"); yoksa null.
@@ -332,6 +370,9 @@ abstract class SentenceTranslator<C>(
             rateLimited(error.limit)
             noteFallback("dakikalık hizmet sınırı")
             return fallback(text, game)
+        } catch (error: GateException) {
+            // Our server refused (trial or plan ended, daily cap, maintenance): the typed error goes up so the UI can say why.
+            throw error
         } catch (error: IOException) {
             val state = OnlineKeyState.of(error)
             report(state)
@@ -631,8 +672,38 @@ object TargamgiProxy {
         token.isNotBlank()
 }
 
+/**
+ * Our server's gate (1.0.48 "SubTV"): every translation belongs to a signed-in account with an active trial or plan.
+ * The request body is the one [TargamgiProxy] takes; only the address and the headers differ (see [GateHeaders]).
+ */
+object TargamgiGate {
+    const val SUPABASE_URL = "https://bmbjlvbldyxkmxoinzdd.supabase.co"
+    /** Public by design (a publishable key only names the project; the account token is what authorizes). */
+    const val PUBLISHABLE_KEY = "sb_publishable_F3Bcwzd7StCILckukgSyJg_2h-bmuMC"
+    const val BASE_URL = "$SUPABASE_URL/functions/v1/translate-gate"
+    /** After a refusal the same refusal is replayed for this long instead of asking the server on every retry. */
+    const val REFUSAL_REPLAY_MS = 10_000L
+
+    /** No build-time token is needed any more: the account provides the credentials. */
+    fun isAvailable(): Boolean = true
+
+    /**
+     * What the translator needs from the account (a lambda pair, so the translator stays testable). [token] and [refresh]
+     * block; they run on the translation thread. [onRefusal] tells the account (and so the UI) why the server said no.
+     */
+    class Session(
+        val deviceId: String,
+        val token: () -> String?,
+        val refresh: () -> String?,
+        val onRefusal: (GateException) -> Unit = {},
+    )
+}
+
 /** Hizmete giden istek: adres, başlıklar ve gövde (Windows: AiRequest.Build, aynı biçim). */
 data class AiHttpRequest(val url: String, val headers: Map<String, String>, val body: String)
+
+/** Gate mode of the proxy request: the account's access token and the device id (headers replace `x-app-token`). */
+data class GateHeaders(val token: String, val deviceId: String)
 
 object AiRequest {
     const val MAX_OUTPUT_TOKENS = 1024
@@ -768,6 +839,8 @@ object AiRequest {
         playerCharacter: String? = null,
         proxyUrl: String? = null,
         arabicPrompt: String = ArabicPrompt.TEXT,
+        // Gate mode (with [proxyUrl]): account headers instead of the build-time app token.
+        gate: GateHeaders? = null,
     ): AiHttpRequest {
         val trimmed = key.trim()
         val user = userMessage(sentences, context, game, names, target, slang, speaker, playerCharacter)
@@ -783,7 +856,11 @@ object AiRequest {
                 if (proxyUrl != null) {
                     AiHttpRequest(
                         "${proxyUrl.trimEnd('/')}?model=${URLEncoder.encode(model.id, "UTF-8")}",
-                        mapOf("x-app-token" to trimmed, "Content-Type" to "application/json"), body.toString(),
+                        if (gate != null) mapOf(
+                            "Authorization" to "Bearer ${gate.token}", "apikey" to TargamgiGate.PUBLISHABLE_KEY,
+                            "x-device-id" to gate.deviceId, "Content-Type" to "application/json",
+                        ) else mapOf("x-app-token" to trimmed, "Content-Type" to "application/json"),
+                        body.toString(),
                     )
                 } else {
                     AiHttpRequest(
@@ -1011,6 +1088,8 @@ class AiTranslator(
     private val proxyUrl: String? = null,
     private val arabicPrompt: String = ArabicPrompt.TEXT,
     private val corrections: Map<String, String> = emptyMap(),
+    // Gate mode (with [proxyUrl] = TargamgiGate.BASE_URL): the account's token lambdas; null keeps the old x-app-token proxy.
+    private val gate: TargamgiGate.Session? = null,
 ) : SentenceTranslator<List<AiRequest.ContextLine>>(fallback, cache, clock, budget ?: if (proxyUrl != null) null else RequestBudget.shared(provider, model)) {
     companion object {
         /** Kalıcı önbellek dosyasındaki motor adı (iPhone ile aynı: "gemini:<model>"). */
@@ -1065,12 +1144,13 @@ class AiTranslator(
             val sentences = chunk.map { texts[it] }
             countRequest()
             try {
-                val request = AiRequest.build(provider, key, model, sentences, emptyList(), AiRequest.SCREEN_OUTPUT_TOKENS, game,
-                    instruction = scope.instruction, server = server, thinkingOff = thinkingOff, target = target,
-                    slang = if (target == "ar") ArabicGlossary.inLines(slang, sentences) else emptyList(),
-                    playerCharacter = TranslationDialogue.currentPlayerCharacter,
-                    proxyUrl = proxyUrl, arabicPrompt = arabicPrompt)
-                val (status, body) = http.send("POST", request.url, request.headers, request.body, SCREEN_TIMEOUT_MS)
+                val (status, body) = post(SCREEN_TIMEOUT_MS) { gateHeaders ->
+                    AiRequest.build(provider, key, model, sentences, emptyList(), AiRequest.SCREEN_OUTPUT_TOKENS, game,
+                        instruction = scope.instruction, server = server, thinkingOff = thinkingOff, target = target,
+                        slang = if (target == "ar") ArabicGlossary.inLines(slang, sentences) else emptyList(),
+                        playerCharacter = TranslationDialogue.currentPlayerCharacter,
+                        proxyUrl = proxyUrl, arabicPrompt = arabicPrompt, gate = gateHeaders)
+                }
                 if (status !in 200..299) throw AiRequest.error(status, body)
                 val translated = AiRequest.translations(AiRequest.text(provider, body), sentences.size)
                 succeeded()
@@ -1078,6 +1158,9 @@ class AiTranslator(
                     results[index] = translation
                     cache.store(cacheKey(texts[index], game), translation)
                 }
+            } catch (error: GateException) {
+                // Refused by our server: the reason goes up instead of the rest being translated by the free engine.
+                throw error
             } catch (error: IOException) {
                 failed(error)
                 stopped = true
@@ -1091,6 +1174,29 @@ class AiTranslator(
 
     override val translationLanguage: String get() = target
     private val key = key.trim()
+    private val nowMs = clock
+
+    /** The last gate refusal and when it stops being replayed (the pipeline retries a line every second). */
+    @Volatile private var refusal: Pair<Long, GateException>? = null
+
+    /**
+     * Sends one request. Without a gate it is the plain call. In gate mode the account token goes in the headers; after a 401
+     * the token is refreshed once and the call retried once; 401, 403, 429 and 503 come out as a typed [GateException]
+     * (never a silent fall back to the free engine), and the account is told why.
+     */
+    private fun post(timeoutMs: Int, build: (GateHeaders?) -> AiHttpRequest): Pair<Int, String> {
+        val session = gate ?: return build(null).let { http.send("POST", it.url, it.headers, it.body, timeoutMs) }
+        val replay = refusal
+        if (replay != null && nowMs() < replay.first) throw replay.second
+        fun attempt(token: String) =
+            build(GateHeaders(token, session.deviceId)).let { http.send("POST", it.url, it.headers, it.body, timeoutMs) }
+        var reply = attempt(session.token() ?: throw IOException("no account session"))
+        if (reply.first == 401) session.refresh()?.let { reply = attempt(it) }
+        val refused = GateException.from(reply.first, reply.second) ?: return reply
+        refusal = nowMs() + TargamgiGate.REFUSAL_REPLAY_MS to refused
+        session.onRefusal(refused)
+        throw refused
+    }
 
     /** Geçerli ek talimat ve önbellek etiketi; etiket yalnız talimat değişince yeniden hesaplanır. */
     private class InstructionScope(val instruction: String?, val tag: String?)
@@ -1153,12 +1259,13 @@ class AiTranslator(
             provider == AiProvider.LOCAL -> LocalAiServer.TIMEOUT_MS
             else -> 5000
         }
-        fun send() = AiRequest.build(provider, key, model, sentences, context, game = game, names = names, instruction = scope.instruction,
-            server = server, thinkingOff = thinkingOff, target = target,
-            slang = if (target == "ar") ArabicGlossary.inLines(slang, sentences) else emptyList(),
-            speaker = TranslationDialogue.currentSpeaker, playerCharacter = TranslationDialogue.currentPlayerCharacter,
-            proxyUrl = proxyUrl, arabicPrompt = arabicPrompt)
-            .let { http.send("POST", it.url, it.headers, it.body, timeout) }
+        fun send() = post(timeout) { gateHeaders ->
+            AiRequest.build(provider, key, model, sentences, context, game = game, names = names, instruction = scope.instruction,
+                server = server, thinkingOff = thinkingOff, target = target,
+                slang = if (target == "ar") ArabicGlossary.inLines(slang, sentences) else emptyList(),
+                speaker = TranslationDialogue.currentSpeaker, playerCharacter = TranslationDialogue.currentPlayerCharacter,
+                proxyUrl = proxyUrl, arabicPrompt = arabicPrompt, gate = gateHeaders)
+        }
         var (status, body) = send()
         if (status == 400 && thinkingOff && server?.disablesThinking == true) {
             thinkingOff = false

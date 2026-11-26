@@ -736,8 +736,10 @@ class TranslationService : Service() {
                 pair.packId?.let { id -> if (packsUsed.add(id)) Telemetry.event(Telemetry.PACK_HIT, "pack" to id) }
             }
             onTranslationResult = { error ->
-                if (error != null) com.couchsubs.mobile.reporting.ProblemReporter.error("translation.engine", error.toString())
-                LiveState.update { it.copy(error = error?.let { getString(R.string.error_translation) }) }
+                // A refusal from our server (trial ended, daily cap, maintenance) is not an engine fault: say why, do not report it.
+                if (error != null && error !is com.couchsubs.mobile.translation.GateException)
+                    com.couchsubs.mobile.reporting.ProblemReporter.error("translation.engine", error.toString())
+                LiveState.update { it.copy(error = error?.let { cause -> gateMessage(cause) ?: getString(R.string.error_translation) }) }
             }
         }
         // Ek alanlar aynı paketlerle ve aynı motorla (ayrı bir örnekle; altyazının bağlamına karışmasın) çevrilir; satırları
@@ -1196,9 +1198,19 @@ class TranslationService : Service() {
                 Log.w(TAG, "screen", error)
                 // İzlemenin yenilemesi başarısızsa eski kart kalır; aynı görüntü yeniden denenmez.
                 if (refresh) followPhone(pixels, generation)
-                else failScreen(generation, getString(R.string.screen_failed, getString(R.string.error_translation)))
+                else failScreen(generation, getString(R.string.screen_failed, gateMessage(error) ?: getString(R.string.error_translation)))
             }
         })
+    }
+
+    /** The line the user reads when our server refused the translation (see GateException); null for any other error. */
+    private fun gateMessage(error: Throwable): String? = (error as? com.couchsubs.mobile.translation.GateException)?.let {
+        when (it.error) {
+            com.couchsubs.mobile.translation.GateError.ACCESS_ENDED -> getString(R.string.account_access_ended)
+            com.couchsubs.mobile.translation.GateError.CAP_REACHED -> getString(R.string.account_cap_reached)
+            com.couchsubs.mobile.translation.GateError.MAINTENANCE -> it.serverMessage ?: getString(R.string.account_maintenance)
+            com.couchsubs.mobile.translation.GateError.ACCOUNT_PROBLEM -> getString(R.string.account_problem)
+        }
     }
 
     private fun failScreen(generation: Int, message: String) {
@@ -1286,26 +1298,33 @@ class TranslationService : Service() {
     private fun onlineTranslator(free: TextTranslator): TextTranslator? {
         val engine = settings.engine
         if (engine == EngineChoice.SERVER) {
-            val token = BuildConfig.TRANSLATE_APP_TOKEN.trim()
-            if (token.isEmpty()) return null
             val model = com.couchsubs.mobile.translation.TargamgiProxy.MODEL
+            val account = com.couchsubs.mobile.account.SubTvAccount
+            // 1.0.48 SubTV: the same translator, prompt, pack and corrections; only the address and the headers change
+            // (the account's token and device id instead of the build-time app token).
             return AiTranslator(
-                AiProvider.GEMINI, token, model, free,
-                cache = cache(AiTranslator.proxyEngineId(model)),
+                AiProvider.GEMINI, "", model, free,
+                cache = styledCache(AiTranslator.proxyEngineId(model)),
                 playedGame = { PlayedGame.sense.current?.name },
                 instruction = { settings.aiInstruction },
                 target = settings.translationLanguage,
                 slang = arabicSlang,
-                proxyUrl = com.couchsubs.mobile.translation.TargamgiProxy.BASE_URL,
+                proxyUrl = com.couchsubs.mobile.translation.TargamgiGate.BASE_URL,
                 arabicPrompt = arabicPrompt,
                 corrections = arabicCorrections,
+                gate = com.couchsubs.mobile.translation.TargamgiGate.Session(
+                    deviceId = account.deviceId(),
+                    token = account::accessTokenBlocking,
+                    refresh = account::refreshTokenBlocking,
+                    onRefusal = account::onGateError,
+                ),
             )
         }
         if (engine == EngineChoice.LOCAL) {
             // Yerel model: anahtar isteğe bağlıdır; adres ya da model geçersizse ücretsiz çeviri kullanılır.
             val server = settings.localAiServer ?: return null
             val model = AiModel(server.model, server.model)
-            return AiTranslator(AiProvider.LOCAL, settings.apiKey(engine).orEmpty(), model, free, cache = cache(server.engineId),
+            return AiTranslator(AiProvider.LOCAL, settings.apiKey(engine).orEmpty(), model, free, cache = styledCache(server.engineId),
                 playedGame = { PlayedGame.sense.current?.name }, instruction = { settings.aiInstruction }, server = server,
                 target = settings.translationLanguage, slang = arabicSlang, arabicPrompt = arabicPrompt, corrections = arabicCorrections)
         }
@@ -1323,7 +1342,7 @@ class TranslationService : Service() {
                 }
                 // Seçilen model (Ayarlar); dakikalık hakkı da modelin kendi sınırıdır (RequestBudget.shared).
                 val model = AiModel.selected(aiModels()[provider.id].orEmpty(), settings.aiModel(provider)) ?: return null
-                AiTranslator(provider, key, model, free, cache = cache(AiTranslator.engineId(provider, model)),
+                AiTranslator(provider, key, model, free, cache = styledCache(AiTranslator.engineId(provider, model)),
                     // Kararlı oyun (GameSense.current), son eşleşen paket değil: tek satır adı başka oyuna geçirmez (#27).
                     playedGame = { PlayedGame.sense.current?.name }, instruction = { settings.aiInstruction },
                     target = settings.translationLanguage, slang = arabicSlang, arabicPrompt = arabicPrompt, corrections = arabicCorrections)
@@ -1335,6 +1354,14 @@ class TranslationService : Service() {
 
     /** Motorun kalıcı önbelleği: files/Translations/v1-<motor>-en-tr.jsonl (iPhone'daki Translations klasörüyle aynı biçim). */
     private fun cache(engine: String) = TranslationCache.shared(File(filesDir, "Translations"), engine, target = settings.translationLanguage)
+
+    /**
+     * Cache of an AI engine that writes in the chosen Arabic style: clean style has its own cache, so a line cached in street
+     * style never comes back in clean style. The free engine (raw output, cleaned afterwards by [wrapFree]) and DeepL (one
+     * wording whatever the style) keep [cache].
+     */
+    private fun styledCache(engine: String) = cache(
+        com.couchsubs.mobile.translation.TranslationStyle.cacheEngineId(engine, settings.translationLanguage, settings.translationStyle))
 
     @Volatile private var glossaryInUse = Glossary.Empty
     @Volatile private var arabicSlang: List<Pair<String, String>> = emptyList()
