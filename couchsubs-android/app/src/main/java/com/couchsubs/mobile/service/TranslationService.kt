@@ -625,9 +625,17 @@ class TranslationService : Service() {
     }
 
     private fun setup(console: RegisteredConsole?, accountId: ByteArray?, replacement: FrameSourceFactory?) {
+        // Anti-tamper check: refuse to run translation on re-signed/modded/cloned release APKs.
+        if (!com.couchsubs.mobile.account.AppIntegrity.verify(applicationContext)) {
+            SecureData.wipe(applicationContext)
+            LiveState.update { it.copy(error = getString(R.string.integrity_blocked_body)) }
+            stopSelf()
+            return
+        }
         // 1.0.48 part B: no subscription = no translation at all. Refresh status if not loaded yet.
         if (SubTvAccount.status.value == null) kotlinx.coroutines.runBlocking { SubTvAccount.refreshStatus() }
         if (!isAccessAllowed()) {
+            SecureData.wipe(applicationContext)
             stopForInactiveAccess()
             return
         }

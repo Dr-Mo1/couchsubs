@@ -980,6 +980,9 @@
     <string name="account_status_subscribed">مشترك حتى %1$s</string>
     <string name="account_status_permanent">اشتراك دائم</string>
     <string name="account_status_ended">انتهت التجربة</string>
+    <string name="account_countdown">الوقت المتبقي: %1$d يوم · %2$s</string>
+    <string name="integrity_blocked_title">نسخة غير رسمية</string>
+    <string name="integrity_blocked_body">تعذّر التحقق من سلامة هذا الإصدار. يُرجى تثبيت النسخة الرسمية من التطبيق.</string>
     <string name="account_number">رقم حسابك: %1$s</string>
     <string name="account_number_copy">نسخ</string>
     <string name="account_number_copied">تم النسخ</string>

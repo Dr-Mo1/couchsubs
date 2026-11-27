@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -46,10 +47,13 @@ import com.couchsubs.mobile.account.AccountRules
 import com.couchsubs.mobile.account.AccountScreen
 import com.couchsubs.mobile.account.AccountStatus
 import com.couchsubs.mobile.account.ActivityLog
+import com.couchsubs.mobile.account.AppIntegrity
 import com.couchsubs.mobile.account.RedeemProblem
 import com.couchsubs.mobile.account.RedeemReply
+import com.couchsubs.mobile.account.SecureData
 import com.couchsubs.mobile.account.SubTvAccount
 import com.couchsubs.mobile.update.UpdateController
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** The status line of the card and of the settings tile. */
@@ -86,7 +90,37 @@ private fun AccountNumberRow() {
     }
 }
 
-/** Home screen card: where the account stands, and the account number. */
+/** Live 1-second ticking countdown for active trial or paid/code subscription; triggers refresh when hitting 0. */
+@Composable
+private fun RemainingCountdownLine(status: AccountStatus?) {
+    if (status == null) return
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val rem = AccountRules.remainingTime(status, nowMs) ?: return
+    LaunchedEffect(status.planUntil, status.trialStartedAt, status.plan) {
+        var refreshedAtZero = false
+        while (true) {
+            nowMs = System.currentTimeMillis()
+            val cur = AccountRules.remainingTime(status, nowMs)
+            if (cur == null) break
+            if (cur.totalMs <= 0L) {
+                if (!refreshedAtZero) {
+                    refreshedAtZero = true
+                    SubTvAccount.refreshStatus()
+                }
+                break
+            }
+            delay(1_000L)
+        }
+    }
+    val clockText = String.format(java.util.Locale.US, "%02d:%02d:%02d", rem.hours, rem.minutes, rem.seconds)
+    Text(
+        text = stringResource(R.string.account_countdown, rem.days, "\u2068$clockText\u2069"),
+        style = Tokens.Type.captionNumeric,
+        color = Tokens.Color.accentText,
+    )
+}
+
+/** Home screen card: where the account stands, live countdown, and the account number. */
 @Composable
 fun AccountStatusCard() {
     val status by SubTvAccount.status.collectAsState()
@@ -96,6 +130,7 @@ fun AccountStatusCard() {
         TileLabel(stringResource(R.string.account_title))
         val ended = status?.let { AccountRules.kind(it) == AccessKind.ENDED } == true
         Text(statusLine(status), style = Tokens.Type.headline, color = if (ended) Tokens.Color.danger else Tokens.Color.text)
+        RemainingCountdownLine(status)
         AccountNumberRow()
     }
 }
@@ -172,6 +207,7 @@ fun AccountSettingsTile() {
     Tile(Modifier.fillMaxWidth()) {
         TileLabel(stringResource(R.string.account_settings_title))
         Text(statusLine(status), style = Tokens.Type.headline, color = Tokens.Color.text)
+        RemainingCountdownLine(status)
         AccountNumberRow()
         RedeemCodeBox()
     }
@@ -234,15 +270,33 @@ fun UpdateRequiredScreen() {
     }
 }
 
+/** Blocking screen shown if the release APK was tampered with or re-signed with a non-official key. */
+@Composable
+fun IntegrityBlockedScreen() {
+    ScreenScaffold(top = { TopBar() }) {
+        Heading(stringResource(R.string.integrity_blocked_title), stringResource(R.string.integrity_blocked_body))
+    }
+}
+
 /** Shown above every screen (MainActivity / PhoneSubtitleActivity), under the update dialog; nothing is drawn while access is fine. */
 @Composable
 fun AccountHost() {
+    val context = LocalContext.current
+    val intact = remember { AppIntegrity.verify(context) }
+    if (!intact) {
+        LaunchedEffect(Unit) { SecureData.wipe(context) }
+        Blocking { IntegrityBlockedScreen() }
+        return
+    }
     val status by SubTvAccount.status.collectAsState()
     val gate by SubTvAccount.gateBlock.collectAsState()
     when (AccountRules.screen(status, gate, BuildConfig.VERSION_NAME)) {
         AccountScreen.NONE -> Unit
         AccountScreen.UPDATE_REQUIRED -> Blocking { UpdateRequiredScreen() }
-        AccountScreen.SUBSCRIBE -> Blocking { SubscribeScreen() }
+        AccountScreen.SUBSCRIBE -> {
+            LaunchedEffect(Unit) { SecureData.wipe(context) }
+            Blocking { SubscribeScreen() }
+        }
     }
 }
 

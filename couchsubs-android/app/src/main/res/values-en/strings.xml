@@ -970,6 +970,9 @@
     <string name="account_status_subscribed">Subscribed until %1$s</string>
     <string name="account_status_permanent">Permanent</string>
     <string name="account_status_ended">Your trial has ended</string>
+    <string name="account_countdown">Time left: %1$d d · %2$s</string>
+    <string name="integrity_blocked_title">Unofficial build</string>
+    <string name="integrity_blocked_body">Could not verify this build. Please install the official app.</string>
     <string name="account_number">Your account number: %1$s</string>
     <string name="account_number_copy">Copy</string>
     <string name="account_number_copied">Copied</string>

@@ -331,6 +331,13 @@ object SecureData {
     fun packFile(context: Context, style: TranslationStyle): File =
         File(directory(context), SecureDataRules.packFileFor(style))
 
+    /** Deletes all locally cached dictionary/prompt files (called when access expires or tampering is detected). */
+    fun wipe(context: Context) {
+        val dir = directory(context)
+        runCatching { dir.listFiles()?.forEach { it.delete() } }
+        stateFlow.value = SyncState.ACCESS_INACTIVE
+    }
+
     fun syncBlocking(force: Boolean = false): SecureDataSyncResult {
         if (!::store.isInitialized) return SecureDataSyncResult.Failed(null)
         stateFlow.value = SyncState.SYNCING
@@ -349,8 +356,9 @@ object SecureData {
                 if (result.downloaded.isNotEmpty()) onDataUpdated?.invoke()
             }
             SecureDataSyncResult.AccessInactive -> {
+                runCatching { store.directory.listFiles()?.forEach { it.delete() } }
                 stateFlow.value = SyncState.ACCESS_INACTIVE
-                Log.i(TAG, "pack-gate refused: access_inactive")
+                Log.i(TAG, "pack-gate refused: access_inactive (cached packs wiped)")
             }
             is SecureDataSyncResult.Failed -> {
                 stateFlow.value = if (store.isReadyAll()) SyncState.READY else SyncState.FAILED

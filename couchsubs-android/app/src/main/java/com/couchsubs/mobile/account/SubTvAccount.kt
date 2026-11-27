@@ -128,6 +128,24 @@ object AccountRules {
         return ((end - nowMs + DAY_MS - 1) / DAY_MS).toInt().coerceAtLeast(0)
     }
 
+    /** Exact countdown components remaining until `plan_until` (or trial start + trialDays), or null if permanent/unstarted/expired. */
+    data class RemainingTime(val days: Int, val hours: Int, val minutes: Int, val seconds: Int, val totalMs: Long)
+
+    fun remainingTime(status: AccountStatus, nowMs: Long): RemainingTime? {
+        val k = kind(status)
+        if (k != AccessKind.TRIAL && k != AccessKind.SUBSCRIBED) return null
+        val end = (epochMs(status.planUntil)
+            ?: if (k == AccessKind.TRIAL) epochMs(status.trialStartedAt)?.plus(status.trialDays * DAY_MS) else null)
+            ?: return null
+        val diff = (end - nowMs).coerceAtLeast(0L)
+        val totalSec = diff / 1000L
+        val days = (totalSec / 86_400L).toInt()
+        val hours = ((totalSec % 86_400L) / 3600L).toInt()
+        val minutes = ((totalSec % 3600L) / 60L).toInt()
+        val seconds = (totalSec % 60L).toInt()
+        return RemainingTime(days, hours, minutes, seconds, diff)
+    }
+
     fun epochMs(iso: String?): Long? = try {
         iso?.trim()?.let { OffsetDateTime.parse(it).toInstant().toEpochMilli() }
     } catch (_: DateTimeParseException) {
