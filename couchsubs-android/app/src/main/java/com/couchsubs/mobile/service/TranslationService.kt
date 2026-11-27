@@ -554,7 +554,7 @@ class TranslationService : Service() {
     }
 
     private fun isAccessAllowed(): Boolean =
-        AccountRules.canTranslate(SubTvAccount.status.value, SubTvAccount.gateBlock.value)
+        AccountRules.canTranslate(SubTvAccount.status.value, SubTvAccount.gateBlock.value, SubTvAccount.effectiveNowMs())
 
     private fun stopForInactiveAccess() {
         LiveState.update { it.copy(running = false, error = getString(R.string.account_access_ended)) }
@@ -632,10 +632,12 @@ class TranslationService : Service() {
             stopSelf()
             return
         }
-        // 1.0.48 part B: no subscription = no translation at all. Refresh status if not loaded yet.
-        if (SubTvAccount.status.value == null) kotlinx.coroutines.runBlocking { SubTvAccount.refreshStatus() }
-        if (!isAccessAllowed()) {
-            SecureData.wipe(applicationContext)
+        // 1.0.52: verify subscription status online when uncached or offline grace expired (closes firewall/offline local-pack bypass).
+        if (SubTvAccount.needsOnlineVerification()) kotlinx.coroutines.runBlocking { SubTvAccount.refreshStatus() }
+        if (!SubTvAccount.canTranslateVerifiedNow()) {
+            if (AccountRules.blocksTranslation(SubTvAccount.status.value, SubTvAccount.gateBlock.value, SubTvAccount.effectiveNowMs())) {
+                SecureData.wipe(applicationContext)
+            }
             stopForInactiveAccess()
             return
         }

@@ -165,6 +165,16 @@ class SecureDataStoreTest {
             val store403 = SecureDataStore(dir, http403, token = { "tok" }, refresh = { null }, ensureAccount = { ensured++; true })
             assertEquals(SecureDataSyncResult.AccessInactive, store403.sync(force = true))
             assertEquals(1, ensured)
+
+            val seenDeviceHeaders = mutableListOf<String?>()
+            val httpDev = BinaryHttp { url, headers, _ ->
+                seenDeviceHeaders += headers["x-device-id"]
+                if (url.endsWith("?list=1")) 200 to listJson(remote)
+                else 200 to remote.getValue(SecureDataRules.PROMPT_LIVE)
+            }
+            val storeDev = SecureDataStore(dir, httpDev, token = { "tok" }, refresh = { null }, deviceId = { "dev-bound-123" })
+            assertTrue(storeDev.sync(force = true) is SecureDataSyncResult.Ok)
+            assertEquals(listOf("dev-bound-123"), seenDeviceHeaders.distinct())
         } finally {
             dir.deleteRecursively()
         }

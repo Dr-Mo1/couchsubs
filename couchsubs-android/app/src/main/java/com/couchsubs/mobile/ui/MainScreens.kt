@@ -126,7 +126,7 @@ fun MainScreen(
             // Başlatınca ve durdurunca boşta ve çeviri ekranları solarak yer değiştirir.
             AnimatedContent(status.running, transitionSpec = { fadeIn(tween(MOTION_MS)) togetherWith fadeOut(tween(MOTION_MS)) },
                 label = "running") { running ->
-                if (running) RunningScreen(status, topBar, if (status.demo) onExitDemo else onStop, onPhoneView, onTvUpdate)
+                if (running) RunningScreen(status, topBar, if (status.demo) onExitDemo else onStop, onPhoneView, onTvUpdate, onPacks)
                 else ScreenScaffold(top = topBar, bottom = {
                     // PS5 eşlenmemişse (kurulum atlandı) başlatmak yerine eşleme açılır.
                     if (!paired) {
@@ -214,7 +214,7 @@ private fun DemoHeader(onExit: () -> Unit) {
 /** Çeviri sürerken (tuval Telefon-Calisiyor): süre, paket, canlı satır ve önceki satırlar, sayılar. */
 @Composable
 private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, onStop: () -> Unit, onPhoneView: () -> Unit,
-                          onTvInstall: (InstalledTv) -> Unit = {}) {
+                          onTvInstall: (InstalledTv) -> Unit = {}, onPacks: () -> Unit = {}) {
     val context = LocalContext.current
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -245,7 +245,7 @@ private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, on
             StatusLabel(stringResource(R.string.running_pill, DateUtils.formatElapsedTime(elapsed)), live = true,
                 style = Tokens.Type.captionNumeric)
         }
-        PackSummaryTile()
+        PackSummaryTile(onPacks = onPacks)
         // Görüntü gelirken durum metni ("Altyazılar okunuyor") üstteki "Çeviri sürüyor" satırını tekrarlar; yalnız
         // bağlanırken ve bağlantı sorunlarında gösterilir.
         if (!status.streaming && status.phase.isNotEmpty()) Text(status.phase, style = Tokens.Type.caption, color = Tokens.Color.secondary)

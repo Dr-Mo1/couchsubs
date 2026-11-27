@@ -322,4 +322,28 @@ class SubTvAccountTest {
         assertEquals("generated" to true, AccountRules.deviceId(null, null) { "generated" })
         assertEquals("generated" to true, AccountRules.deviceId("abc", "xy") { "generated" })
     }
+
+    @Test
+    fun offlineClockExpiryAndGraceBlockFirewallBypassWhileAllowingRecentOrPermanentAccounts() {
+        val t0 = OffsetDateTime.parse("2026-11-27T10:00:00+00:00").toInstant().toEpochMilli()
+        val activeTrial = status(plan = "trial", active = true, until = "2026-11-30T10:00:00+00:00")
+        val permanent = status(plan = "permanent", active = true, started = null)
+
+        // Before planUntil and verified recently -> allowed.
+        assertFalse(AccountRules.blocksTranslation(activeTrial, null, nowMs = t0))
+        assertFalse(AccountRules.blocksTranslationStrict(activeTrial, null, nowMs = t0 + 2 * 3_600_000L, lastVerifiedAtMs = t0))
+
+        // Offline > 24h without server verification -> strict check blocks trial/code, but permanent stays open.
+        assertTrue(AccountRules.blocksTranslationStrict(activeTrial, null, nowMs = t0 + AccountRules.OFFLINE_GRACE_MS + 1L, lastVerifiedAtMs = t0))
+        assertFalse(AccountRules.blocksTranslationStrict(permanent, null, nowMs = t0 + AccountRules.OFFLINE_GRACE_MS + 1L, lastVerifiedAtMs = t0))
+
+        // Cached snapshot says active=true, but wall clock passed planUntil -> blocked even offline.
+        val afterExpiry = OffsetDateTime.parse("2026-11-30T10:00:01+00:00").toInstant().toEpochMilli()
+        assertTrue(AccountRules.blocksTranslation(activeTrial, null, nowMs = afterExpiry))
+        assertTrue(AccountRules.blocksTranslationStrict(activeTrial, null, nowMs = afterExpiry, lastVerifiedAtMs = afterExpiry - 1_000L))
+
+        // Unverified / null status is blocked in strict mode; turning system clock backward cannot defeat storedMaxMs.
+        assertTrue(AccountRules.blocksTranslationStrict(null, null, nowMs = t0, lastVerifiedAtMs = 0L))
+        assertEquals(afterExpiry, AccountRules.effectiveNowMs(systemNowMs = t0, storedMaxMs = afterExpiry))
+    }
 }

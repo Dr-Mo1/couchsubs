@@ -185,7 +185,7 @@ object Services {
         // and sync secure-data as soon as an inactive account becomes active (e.g. after redeeming a code).
         scope.launch {
             combine(SubTvAccount.status, SubTvAccount.gateBlock) { s, g -> s to g }.collect { (s, g) ->
-                if (AccountRules.blocksTranslation(s, g)) {
+                if (AccountRules.blocksTranslation(s, g, SubTvAccount.effectiveNowMs())) {
                     if (com.couchsubs.mobile.service.LiveState.status.value.running) {
                         com.couchsubs.mobile.service.TranslationService.stop(app)
                     }

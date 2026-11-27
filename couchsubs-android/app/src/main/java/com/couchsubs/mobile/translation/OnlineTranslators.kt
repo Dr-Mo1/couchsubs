@@ -62,7 +62,7 @@ enum class GateError {
 class GateException(val error: GateError, val code: String, val serverMessage: String? = null) :
     IOException("translate-gate refused: $code") {
     companion object {
-        private val ACCESS_CODES = setOf("trial_expired", "plan_expired", "trial_used_on_device")
+        private val ACCESS_CODES = setOf("trial_expired", "plan_expired", "trial_used_on_device", "device_mismatch")
 
         /** The refusal for a gate reply (401, 403, 429, 503); null for every other status (those keep the usual error path). */
         fun from(status: Int, body: String): GateException? {

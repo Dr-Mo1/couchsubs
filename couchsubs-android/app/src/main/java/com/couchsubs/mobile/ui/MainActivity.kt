@@ -341,7 +341,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startTranslation() {
-        if (!AccountRules.canTranslate(SubTvAccount.status.value, SubTvAccount.gateBlock.value)) return
+        if (!AccountRules.canTranslate(SubTvAccount.status.value, SubTvAccount.gateBlock.value, SubTvAccount.effectiveNowMs())) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)

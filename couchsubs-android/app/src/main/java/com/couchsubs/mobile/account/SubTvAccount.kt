@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import com.couchsubs.mobile.core.Log
+import com.couchsubs.mobile.settings.SecretStore
 import com.couchsubs.mobile.translation.GateError
 import com.couchsubs.mobile.translation.GateException
 import com.couchsubs.mobile.translation.Http
@@ -95,34 +96,66 @@ object AccountRules {
 
     fun needsRefresh(expiresAtMs: Long, nowMs: Long): Boolean = expiresAtMs - nowMs < REFRESH_MARGIN_MS
 
+    /** Offline snapshots of non-permanent plans require at least one live server check per 24 hours. */
+    const val OFFLINE_GRACE_MS = 24 * 3_600_000L
+
+    fun effectiveNowMs(systemNowMs: Long, storedMaxMs: Long): Long = maxOf(systemNowMs, storedMaxMs)
+
+    private fun isPlanClockExpired(status: AccountStatus, nowMs: Long): Boolean {
+        if (status.plan == "permanent") return false
+        val endMs = epochMs(status.planUntil) ?: return false
+        return endMs <= nowMs
+    }
+
     /**
      * The trial starts at the first translation, so a fresh account has `access_active == false` before then. A "trial" plan
      * that never started, on a device whose trial was not used elsewhere, is allowed (the first translation starts it).
      */
-    fun kind(status: AccountStatus): AccessKind = when {
+    @JvmOverloads
+    fun kind(status: AccountStatus, nowMs: Long = System.currentTimeMillis()): AccessKind = when {
         status.plan == "trial" && status.trialStartedAt == null && !status.deviceTrialUsedElsewhere -> AccessKind.TRIAL_NOT_STARTED
         !status.accessActive -> AccessKind.ENDED
         status.plan == "permanent" -> AccessKind.PERMANENT
+        isPlanClockExpired(status, nowMs) -> AccessKind.ENDED
         status.plan == "trial" -> AccessKind.TRIAL
         else -> AccessKind.SUBSCRIBED
     }
 
     /** Our server will refuse translations: the status says so, or the server just refused one ([gate]). */
-    fun blocksTranslation(status: AccountStatus?, gate: GateError?): Boolean =
-        gate == GateError.ACCESS_ENDED || (status != null && kind(status) == AccessKind.ENDED)
+    @JvmOverloads
+    fun blocksTranslation(status: AccountStatus?, gate: GateError?, nowMs: Long = System.currentTimeMillis()): Boolean =
+        gate == GateError.ACCESS_ENDED || (status != null && kind(status, nowMs) == AccessKind.ENDED)
+
+    /** Strict check when starting translation: blocks firewall/clock-backdate bypasses on cached local packs. */
+    fun blocksTranslationStrict(status: AccountStatus?, gate: GateError?, nowMs: Long, lastVerifiedAtMs: Long): Boolean {
+        if (blocksTranslation(status, gate, nowMs)) return true
+        val current = status ?: return true
+        if (kind(current, nowMs) == AccessKind.PERMANENT) return false
+        if (lastVerifiedAtMs <= 0L) return true
+        return nowMs - lastVerifiedAtMs > OFFLINE_GRACE_MS
+    }
 
     /**
      * The full screen to show. An old app version blocks everything. When access has ended (1.0.48 part B: no
      * subscription = no translation at all), the subscribe screen covers the app regardless of the selected engine.
      */
-    fun screen(status: AccountStatus?, gate: GateError?, appVersion: String, serverEngine: Boolean = true): AccountScreen = when {
+    @JvmOverloads
+    fun screen(
+        status: AccountStatus?,
+        gate: GateError?,
+        appVersion: String,
+        serverEngine: Boolean = true,
+        nowMs: Long = System.currentTimeMillis(),
+    ): AccountScreen = when {
         status != null && updateRequired(status.minAppVersion, appVersion) -> AccountScreen.UPDATE_REQUIRED
-        blocksTranslation(status, gate) -> AccountScreen.SUBSCRIBE
+        blocksTranslation(status, gate, nowMs) -> AccountScreen.SUBSCRIBE
         else -> AccountScreen.NONE
     }
 
     /** True when translation (including local packs and corrections) is allowed to run. */
-    fun canTranslate(status: AccountStatus?, gate: GateError?): Boolean = !blocksTranslation(status, gate)
+    @JvmOverloads
+    fun canTranslate(status: AccountStatus?, gate: GateError?, nowMs: Long = System.currentTimeMillis()): Boolean =
+        !blocksTranslation(status, gate, nowMs)
 
     /** Whole days of the trial left (rounded up, never below 0): from `plan_until`, else the start plus the trial length. */
     fun trialDaysLeft(status: AccountStatus, nowMs: Long): Int {
@@ -224,7 +257,7 @@ class PrefsSessionStore(private val prefs: SharedPreferences) : SessionStore {
 }
 
 sealed interface StatusReply {
-    data class Ok(val status: AccountStatus) : StatusReply
+    data class Ok(val status: AccountStatus, val rawJson: String = "") : StatusReply
     /** [http] is the status code, null when the server was not reached. */
     data class Failed(val http: Int?) : StatusReply
 }
@@ -273,7 +306,7 @@ class SubTvAccountClient(
         val reply = authed("/functions/v1/account-status", JSONObject().put("device_id", deviceId).toString())
             ?: return StatusReply.Failed(null)
         if (reply.first !in 200..299) return StatusReply.Failed(reply.first)
-        return AccountStatus.parse(reply.second)?.let { StatusReply.Ok(it) } ?: StatusReply.Failed(reply.first)
+        return AccountStatus.parse(reply.second)?.let { StatusReply.Ok(it, reply.second) } ?: StatusReply.Failed(reply.first)
     }
 
     fun redeem(code: String): RedeemReply {
@@ -344,13 +377,17 @@ object SubTvAccount {
     /** While a translation session runs the status is read again this often. */
     const val STATUS_INTERVAL_MS = 30 * 60 * 1000L
     private const val GATE_REFRESH_GAP_MS = 10_000L
+    private const val KEY_STATUS_JSON = "subtv_status_json"
+    private const val KEY_VERIFIED_MS = "subtv_status_verified_ms"
+    private const val KEY_MAX_CLOCK_MS = "subtv_max_clock_ms"
 
     private lateinit var prefs: SharedPreferences
     private lateinit var client: SubTvAccountClient
+    private var secrets: SecretStore? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val statusFlow = MutableStateFlow<AccountStatus?>(null)
-    /** The last account-status reply; null until the first one arrives. */
+    /** The last account-status reply; loaded from encrypted cache until the fresh one arrives. */
     val status: StateFlow<AccountStatus?> = statusFlow
 
     private val gateFlow = MutableStateFlow<GateError?>(null)
@@ -365,11 +402,23 @@ object SubTvAccount {
     val accountNumber: StateFlow<String?> = numberFlow
 
     @Volatile private var lastRefreshAt = 0L
+    @Volatile private var lastVerifiedAtMs = 0L
 
     fun init(context: Context) {
         if (::client.isInitialized) return
         val app = context.applicationContext
         prefs = app.getSharedPreferences("subtv_account", Context.MODE_PRIVATE)
+        val vault = runCatching { SecretStore(app) }.getOrNull()
+        secrets = vault
+        val cachedJson = runCatching { vault?.get(KEY_STATUS_JSON) }.getOrNull()
+        val cachedVerified = runCatching { vault?.get(KEY_VERIFIED_MS)?.toLongOrNull() }.getOrNull() ?: 0L
+        if (!cachedJson.isNullOrBlank()) {
+            AccountStatus.parse(cachedJson)?.let {
+                statusFlow.value = it
+                lastVerifiedAtMs = cachedVerified
+            }
+        }
+        effectiveNowMs()
         val (id, save) = AccountRules.deviceId(
             Settings.Secure.getString(app.contentResolver, Settings.Secure.ANDROID_ID), prefs.getString("device_id", null),
         ) { UUID.randomUUID().toString() }
@@ -377,6 +426,22 @@ object SubTvAccount {
         client = SubTvAccountClient(Http.Default, PrefsSessionStore(prefs), id)
         numberFlow.value = AccountRules.accountNumber(client.userId())
     }
+
+    /** Current wall time bounded below by the monotonic encrypted clock watermark. */
+    fun effectiveNowMs(): Long {
+        val sys = System.currentTimeMillis()
+        val stored = runCatching { secrets?.get(KEY_MAX_CLOCK_MS)?.toLongOrNull() }.getOrNull() ?: 0L
+        val best = AccountRules.effectiveNowMs(sys, stored)
+        if (best > stored) runCatching { secrets?.put(KEY_MAX_CLOCK_MS, best.toString()) }
+        return best
+    }
+
+    /** Strict gate for running translation (closes firewall + clock-backdate bypasses on local packs). */
+    fun canTranslateVerifiedNow(): Boolean =
+        !AccountRules.blocksTranslationStrict(statusFlow.value, gateFlow.value, effectiveNowMs(), lastVerifiedAtMs)
+
+    fun needsOnlineVerification(): Boolean =
+        statusFlow.value == null || !canTranslateVerifiedNow()
 
     fun deviceId(): String = client.deviceId
 
@@ -394,8 +459,16 @@ object SubTvAccount {
         try {
             when (val reply = client.fetchStatus()) {
                 is StatusReply.Ok -> {
+                    val now = effectiveNowMs()
+                    lastVerifiedAtMs = now
                     statusFlow.value = reply.status
                     gateFlow.value = null
+                    if (reply.rawJson.isNotBlank()) {
+                        runCatching {
+                            secrets?.put(KEY_STATUS_JSON, reply.rawJson)
+                            secrets?.put(KEY_VERIFIED_MS, now.toString())
+                        }
+                    }
                     true
                 }
                 is StatusReply.Failed -> {
