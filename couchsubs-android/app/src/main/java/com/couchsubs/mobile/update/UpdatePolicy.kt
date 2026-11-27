@@ -72,6 +72,34 @@ object UpdateChannel {
             if (error.httpStatus == 404) fetch(stableUrl) else throw error
         }
     }
+
+    /**
+     * Fetches and parses the manifest for [channel], trying [primaryUrl] (GitHub Releases) first and falling back to
+     * [fallbackUrl] (Cloudflare Worker) if [primaryUrl] fails (network/timeout/HTTP error or unparseable response such
+     * as an ISP block page). GitHub goes first because releases publish directly there (authoritative, zero cache lag)
+     * and trying it first avoids unnecessary Worker traffic when GitHub is reachable, while still recovering
+     * automatically when GitHub is blocked or throttled.
+     */
+    fun fetchInfo(
+        primaryUrl: String,
+        fallbackUrl: String,
+        channel: String,
+        fetch: (String) -> String = { UpdateDownload.fetchText(it) },
+    ): UpdateInfo? {
+        val urls = listOf(primaryUrl.trim(), fallbackUrl.trim()).filter { it.isNotEmpty() }.distinct()
+        var lastError: UpdateException? = null
+        for (baseUrl in urls) {
+            try {
+                val parsed = UpdatePolicy.parse(fetchManifest(baseUrl, channel, fetch))
+                if (parsed != null) return parsed
+                lastError = null
+            } catch (error: UpdateException) {
+                lastError = error
+            }
+        }
+        if (lastError != null) throw lastError
+        return null
+    }
 }
 
 object BetaChannelToggle {
@@ -189,6 +217,13 @@ object UpdatePolicy {
      */
     fun shouldShow(info: UpdateInfo, installedCode: Int, dismissedCode: Int): Boolean =
         isNewer(info, installedCode) && info.versionCode > dismissedCode
+
+    /**
+     * Dismissal rule when closing the update dialog: closing an error ([failed] = true) must never suppress the next
+     * prompt for that release; only explicit "Later" / "Cancel" records [versionCode] until the next cold start.
+     */
+    fun dismissAfterClose(currentDismissed: Int, versionCode: Int, failed: Boolean): Int =
+        if (failed) currentDismissed else maxOf(currentDismissed, versionCode)
 
     fun sha256Hex(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")

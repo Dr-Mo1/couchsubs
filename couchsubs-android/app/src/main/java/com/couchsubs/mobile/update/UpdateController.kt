@@ -83,7 +83,7 @@ object UpdateController {
         dismissedCode = 0
         scope.launch(Dispatchers.IO) {
             // A download or install already under way (activity recreated, process alive) must not lose its file.
-            if (current.value is UpdateState.Idle || current.value is UpdateState.Available) cleanup(app)
+            if (current.value is UpdateState.Idle || current.value is UpdateState.Available || current.value is UpdateState.Failed) cleanup(app)
             check(app, manual = false)
         }
     }
@@ -108,7 +108,7 @@ object UpdateController {
         return checkLock.withLock {
             withContext(Dispatchers.IO) {
                 try {
-                    val info = UpdatePolicy.parse(UpdateChannel.fetchManifest(BuildConfig.UPDATE_URL, channel(context)))
+                    val info = UpdateChannel.fetchInfo(BuildConfig.UPDATE_URL, BuildConfig.UPDATE_FALLBACK_URL, channel(context))
                     when {
                         info == null -> {
                             Log.i(TAG, "update.json is missing a field or invalid")
@@ -123,8 +123,11 @@ object UpdateController {
                         else -> {
                             availableFlow.value = true
                             if (UpdatePolicy.shouldShow(info, BuildConfig.VERSION_CODE, dismissedCode)) {
-                                // A download, install or error already on screen is not replaced.
-                                current.update { if (it is UpdateState.Idle || it is UpdateState.Available) UpdateState.Available(info) else it }
+                                // An active download, permission prompt, or install is not replaced; an earlier Failed screen can be replaced.
+                                current.update {
+                                    if (it is UpdateState.Idle || it is UpdateState.Available || it is UpdateState.Failed) UpdateState.Available(info)
+                                    else it
+                                }
                             }
                             com.couchsubs.mobile.account.ActivityLog.updateCheck(manual, "available")
                             CheckResult.AVAILABLE
@@ -150,11 +153,12 @@ object UpdateController {
         work = scope.launch(Dispatchers.IO) { downloadAndInstall(app, info) }
     }
 
-    /** "Later" / "Close" / "Cancel": hides this release until the next cold start; a running download stops and its file is deleted. */
+    /** "Later" / "Close" / "Cancel": hides this release until the next cold start unless closing a failure; a running download stops and its file is deleted. */
     fun later() {
-        val info = infoOf(current.value) ?: return
+        val shown = current.value
+        val info = infoOf(shown) ?: return
         work?.cancel()
-        dismissedCode = maxOf(dismissedCode, info.versionCode)
+        dismissedCode = UpdatePolicy.dismissAfterClose(dismissedCode, info.versionCode, failed = shown is UpdateState.Failed)
         current.value = UpdateState.Idle
     }
 

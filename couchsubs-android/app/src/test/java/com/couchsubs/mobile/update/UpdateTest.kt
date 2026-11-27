@@ -142,6 +142,25 @@ class UpdateTest {
     }
 
     @Test
+    fun failedDownloadCloseNeverSuppressesTheNextPrompt() {
+        val v47 = UpdatePolicy.parse(manifest(code = 47))!!
+        // Closing an error dialog (failed = true) keeps dismissedCode untouched, so the next check still prompts.
+        val afterFailure = UpdatePolicy.dismissAfterClose(currentDismissed = 0, versionCode = v47.versionCode, failed = true)
+        assertEquals(0, afterFailure)
+        assertTrue(UpdatePolicy.shouldShow(v47, installedCode = 42, dismissedCode = afterFailure))
+
+        // Even if an older release (46) had been deferred earlier, failing on 47 does not suppress 47.
+        val afterFailureWithOlder = UpdatePolicy.dismissAfterClose(currentDismissed = 46, versionCode = v47.versionCode, failed = true)
+        assertEquals(46, afterFailureWithOlder)
+        assertTrue(UpdatePolicy.shouldShow(v47, installedCode = 42, dismissedCode = afterFailureWithOlder))
+
+        // Explicit "Later" (failed = false) suppresses that version until cold start.
+        val afterLater = UpdatePolicy.dismissAfterClose(currentDismissed = 0, versionCode = v47.versionCode, failed = false)
+        assertEquals(47, afterLater)
+        assertFalse(UpdatePolicy.shouldShow(v47, installedCode = 42, dismissedCode = afterLater))
+    }
+
+    @Test
     fun progressText() {
         assertEquals(0, UpdatePolicy.percent(5, 0))
         assertEquals(50, UpdatePolicy.percent(50, 100))
@@ -182,6 +201,22 @@ class UpdateTest {
     fun oversizedManifestIsRefused() {
         server.routes["/huge"] = Triple(200, null, ByteArray(UpdatePolicy.MAX_MANIFEST_BYTES + 10) { 'a'.code.toByte() })
         assertEquals(UpdateFailureKind.NETWORK, assertThrows(UpdateException::class.java) { UpdateDownload.fetchText("$base/huge") }.kind)
+    }
+
+    @Test
+    fun manifestFallsBackOverHttpWhenPrimaryFailsOrReturnsNonJson() {
+        server.routes["/html"] = Triple(200, null, "<html>blocked</html>".toByteArray())
+        // Primary HTTP 404 -> falls back to /update.json over real HTTP.
+        val from404 = UpdateChannel.fetchInfo("$base/gone", "$base/update.json", UpdateChannel.STABLE)
+        assertEquals(38, from404?.versionCode)
+
+        // Primary HTTP 200 HTML block page -> falls back to /update.json over real HTTP.
+        val fromHtml = UpdateChannel.fetchInfo("$base/html", "$base/update.json", UpdateChannel.STABLE)
+        assertEquals(38, fromHtml?.versionCode)
+
+        // Primary works -> returns without failing.
+        val fromPrimary = UpdateChannel.fetchInfo("$base/update.json", "$base/gone", UpdateChannel.STABLE)
+        assertEquals(38, fromPrimary?.versionCode)
     }
 
     @Test
