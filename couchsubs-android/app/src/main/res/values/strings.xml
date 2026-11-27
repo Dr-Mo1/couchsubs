@@ -1042,7 +1042,7 @@
     <string name="supported_games_subtitle">جي تي إيه 6 (%1$d سطرًا) + قائمة الألعاب الكاملة</string>
     <string name="supported_games_all_note">تعمل حزمة جي تي إيه 6 فورًا (فصحى وعامية)، بينما تُترجم جميع الألعاب الأخرى لحظيًا بالفصحى السينمائية النظيفة.</string>
     <string name="referral_share_button">دعوة صديق (اكسب أيامًا مجانية)</string>
-    <string name="referral_progress">الدعوات الناجحة: %1$d (10 دعوات = +3 أيام · 20 دعوة = +15 يومًا)</string>
+    <string name="referral_progress">الدعوات الناجحة: %1$d (10 دعوات = أسبوع مجاني · 20 دعوة = +15 يومًا)</string>
     <string name="referral_share_text">جرّب تطبيق تَرْجَمْجِي (SubTV) لترجمة ألعاب البلايستيشن فوريًا إلى العربية على التلفزيون أو الهاتف:&#10;https://dl.subtv.app/SubTV.apk&#10;استخدم رمز دعوتي داخل التطبيق: %1$s</string>
     <string name="referral_redeem_success">تم احتساب رمز الدعوة بنجاح ✓</string>
     <!-- 1.0.51 SubTV: supported games list + friend referrals (end) -->

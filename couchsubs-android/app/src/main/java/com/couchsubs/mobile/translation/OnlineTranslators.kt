@@ -698,14 +698,15 @@ object TargamgiGate {
         val token: () -> String?,
         val refresh: () -> String?,
         val onRefusal: (GateException) -> Unit = {},
+        val hardwareId: String? = null,
     )
 }
 
 /** Hizmete giden istek: adres, başlıklar ve gövde (Windows: AiRequest.Build, aynı biçim). */
 data class AiHttpRequest(val url: String, val headers: Map<String, String>, val body: String)
 
-/** Gate mode of the proxy request: the account's access token and the device id (headers replace `x-app-token`). */
-data class GateHeaders(val token: String, val deviceId: String)
+/** Gate mode of the proxy request: the account's access token, device id, and hardware fingerprint. */
+data class GateHeaders(val token: String, val deviceId: String, val hardwareId: String? = null)
 
 object AiRequest {
     const val MAX_OUTPUT_TOKENS = 1024
@@ -861,10 +862,13 @@ object AiRequest {
                 if (proxyUrl != null) {
                     AiHttpRequest(
                         "${proxyUrl.trimEnd('/')}?model=${URLEncoder.encode(model.id, "UTF-8")}",
-                        if (gate != null) mapOf(
-                            "Authorization" to "Bearer ${gate.token}", "apikey" to TargamgiGate.PUBLISHABLE_KEY,
-                            "x-device-id" to gate.deviceId, "Content-Type" to "application/json",
-                        ) else mapOf("x-app-token" to trimmed, "Content-Type" to "application/json"),
+                        if (gate != null) buildMap {
+                            put("Authorization", "Bearer ${gate.token}")
+                            put("apikey", TargamgiGate.PUBLISHABLE_KEY)
+                            put("x-device-id", gate.deviceId)
+                            gate.hardwareId?.let { put("x-hardware-id", it) }
+                            put("Content-Type", "application/json")
+                        } else mapOf("x-app-token" to trimmed, "Content-Type" to "application/json"),
                         body.toString(),
                     )
                 } else {
@@ -1200,7 +1204,7 @@ class AiTranslator(
         val replay = refusal
         if (replay != null && nowMs() < replay.first) throw replay.second
         fun attempt(token: String) =
-            build(GateHeaders(token, session.deviceId)).let { http.send("POST", it.url, it.headers, it.body, timeoutMs) }
+            build(GateHeaders(token, session.deviceId, session.hardwareId)).let { http.send("POST", it.url, it.headers, it.body, timeoutMs) }
         var reply = attempt(session.token() ?: throw IOException("no account session"))
         if (reply.first == 401) session.refresh()?.let { reply = attempt(it) }
         val refused = GateException.from(reply.first, reply.second) ?: return reply

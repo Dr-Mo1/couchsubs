@@ -280,6 +280,7 @@ class SubTvAccountClient(
     private val clock: () -> Long = System::currentTimeMillis,
     private val baseUrl: String = TargamgiGate.SUPABASE_URL,
     private val apiKey: String = TargamgiGate.PUBLISHABLE_KEY,
+    val hardwareId: String? = null,
 ) {
     companion object {
         const val TIMEOUT_MS = 15_000
@@ -304,15 +305,18 @@ class SubTvAccountClient(
     }
 
     fun fetchStatus(): StatusReply {
-        val reply = authed("/functions/v1/account-status", JSONObject().put("device_id", deviceId).toString())
+        val payload = JSONObject().put("device_id", deviceId)
+        hardwareId?.let { payload.put("hardware_id", it) }
+        val reply = authed("/functions/v1/account-status", payload.toString())
             ?: return StatusReply.Failed(null)
         if (reply.first !in 200..299) return StatusReply.Failed(reply.first)
         return AccountStatus.parse(reply.second)?.let { StatusReply.Ok(it, reply.second) } ?: StatusReply.Failed(reply.first)
     }
 
     fun redeem(code: String): RedeemReply {
-        val body = JSONObject().put("code", code.trim()).put("device_id", deviceId).toString()
-        val reply = authed("/functions/v1/redeem-code", body) ?: return RedeemReply.Failure("network")
+        val payload = JSONObject().put("code", code.trim()).put("device_id", deviceId)
+        hardwareId?.let { payload.put("hardware_id", it) }
+        val reply = authed("/functions/v1/redeem-code", payload.toString()) ?: return RedeemReply.Failure("network")
         val json = try {
             JSONObject(reply.second)
         } catch (_: JSONException) {
@@ -363,7 +367,10 @@ class SubTvAccountClient(
 
     private fun post(path: String, body: String, bearer: String?): Pair<Int, String>? {
         val headers = mutableMapOf("apikey" to apiKey, "Content-Type" to "application/json")
-        if (bearer != null) headers["Authorization"] = "Bearer $bearer"
+        if (bearer != null) {
+            headers["Authorization"] = "Bearer $bearer"
+            hardwareId?.let { headers["x-hardware-id"] = it }
+        }
         return try {
             http.send("POST", baseUrl + path, headers, body, TIMEOUT_MS)
         } catch (_: IOException) {
@@ -381,6 +388,7 @@ object SubTvAccount {
     private const val KEY_STATUS_JSON = "subtv_status_json"
     private const val KEY_VERIFIED_MS = "subtv_status_verified_ms"
     private const val KEY_MAX_CLOCK_MS = "subtv_max_clock_ms"
+    private const val KEY_HARDWARE_ID = "subtv_hardware_id"
 
     private lateinit var prefs: SharedPreferences
     private lateinit var client: SubTvAccountClient
@@ -424,7 +432,11 @@ object SubTvAccount {
             Settings.Secure.getString(app.contentResolver, Settings.Secure.ANDROID_ID), prefs.getString("device_id", null),
         ) { UUID.randomUUID().toString() }
         if (save) prefs.edit().putString("device_id", id).apply()
-        client = SubTvAccountClient(Http.Default, PrefsSessionStore(prefs), id)
+        val liveHw = DeviceFingerprint.readHardwareId()
+        val cachedHw = runCatching { vault?.get(KEY_HARDWARE_ID) }.getOrNull()?.takeIf { it.length == 64 }
+        val hwId = liveHw ?: cachedHw
+        if (liveHw != null && liveHw != cachedHw) runCatching { vault?.put(KEY_HARDWARE_ID, liveHw) }
+        client = SubTvAccountClient(Http.Default, PrefsSessionStore(prefs), id, hardwareId = hwId)
         numberFlow.value = AccountRules.accountNumber(client.userId())
     }
 
@@ -445,6 +457,8 @@ object SubTvAccount {
         statusFlow.value == null || !canTranslateVerifiedNow()
 
     fun deviceId(): String = client.deviceId
+
+    fun hardwareId(): String? = client.hardwareId
 
     /** For the translator (it runs on its own thread): a valid access token, signing in or refreshing when needed. */
     fun accessTokenBlocking(): String? = client.accessToken().also { syncNumber() }

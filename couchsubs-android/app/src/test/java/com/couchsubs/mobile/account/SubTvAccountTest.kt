@@ -353,4 +353,37 @@ class SubTvAccountTest {
         assertEquals(AccountScreen.SUBSCRIBE, AccountRules.screen(activeTrial, null, "1.0.52", nowMs = afterExpiry))
         assertEquals(RedeemProblem.RATE_LIMITED, AccountRules.redeemProblem("rate_limited"))
     }
+
+    @Test
+    fun hardwareFingerprintHashesDeterministicallyAndSendsHeaderAndBody() {
+        assertNull(DeviceFingerprint.hashWidevineBytes(null))
+        assertNull(DeviceFingerprint.hashWidevineBytes(ByteArray(0)))
+        val h1 = DeviceFingerprint.hashWidevineBytes(byteArrayOf(1, 2, 3, 4))
+        val h2 = DeviceFingerprint.hashWidevineBytes(byteArrayOf(1, 2, 3, 4))
+        val h3 = DeviceFingerprint.hashWidevineBytes(byteArrayOf(1, 2, 3, 5))
+        assertNotNull(h1)
+        assertEquals(64, h1!!.length)
+        assertEquals(h1, h2)
+        assertFalse(h1 == h3)
+
+        val calls = mutableListOf<Call>()
+        val client = SubTvAccountClient(
+            Http { m, u, h, b, _ ->
+                calls.add(Call(m, u, h, b))
+                if (u.endsWith("/account-status")) 200 to statusJson(active = true)
+                else 200 to """{"ok":true,"kind":"referral","plan":"trial","plan_until":null}"""
+            },
+            MemoryStore(Session("A1", "R1", now + 3_600_000, "u")),
+            deviceId = "dev-hw-test",
+            clock = { now },
+            hardwareId = h1,
+        )
+        assertTrue(client.fetchStatus() is StatusReply.Ok)
+        assertTrue(client.redeem("ABCDEF12") is RedeemReply.Success)
+        assertEquals(2, calls.size)
+        assertEquals(h1, calls[0].headers["x-hardware-id"])
+        assertEquals(h1, JSONObject(calls[0].body!!).getString("hardware_id"))
+        assertEquals(h1, calls[1].headers["x-hardware-id"])
+        assertEquals(h1, JSONObject(calls[1].body!!).getString("hardware_id"))
+    }
 }

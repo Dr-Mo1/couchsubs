@@ -152,6 +152,7 @@ class SecureDataStore(
     private val refresh: () -> String?,
     private val ensureAccount: () -> Boolean = { false },
     private val deviceId: () -> String? = { null },
+    private val hardwareId: () -> String? = { null },
     private val clock: () -> Long = System::currentTimeMillis,
     private val baseUrl: String = TargamgiGate.SUPABASE_URL,
     private val apiKey: String = TargamgiGate.PUBLISHABLE_KEY,
@@ -267,6 +268,7 @@ class SecureDataStore(
         headers["apikey"] = apiKey
         headers["Authorization"] = "Bearer $bearer"
         deviceId()?.trim()?.takeIf { it.isNotEmpty() }?.let { headers["x-device-id"] = it }
+        hardwareId()?.trim()?.takeIf { it.isNotEmpty() }?.let { headers["x-hardware-id"] = it }
         http.get(
             baseUrl.trimEnd('/') + path,
             headers,
@@ -326,6 +328,7 @@ object SecureData {
             refresh = SubTvAccount::refreshTokenBlocking,
             ensureAccount = { runBlocking { SubTvAccount.refreshStatus() } },
             deviceId = SubTvAccount::deviceId,
+            hardwareId = SubTvAccount::hardwareId,
         )
         if (store.isReadyAll()) stateFlow.value = SyncState.READY
     }

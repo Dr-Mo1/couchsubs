@@ -1466,6 +1466,7 @@ class TranslationService : Service() {
                     token = account::accessTokenBlocking,
                     refresh = account::refreshTokenBlocking,
                     onRefusal = account::onGateError,
+                    hardwareId = account.hardwareId(),
                 ),
             )
         }
