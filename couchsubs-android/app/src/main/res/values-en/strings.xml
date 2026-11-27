@@ -1026,4 +1026,13 @@
     <string name="subtitle_place_tv_configured">Configured TV: %1$s</string>
     <string name="subtitle_place_tv_change">Change TV</string>
     <!-- 1.0.48 part C: subtitle place (phone only / TV + phone) (end) -->
+    <!-- 1.0.51 SubTV: supported games list + friend referrals (begin) -->
+    <string name="supported_games_title">Supported games</string>
+    <string name="supported_games_subtitle">GTA 6 (%1$d lines) + full games list</string>
+    <string name="supported_games_all_note">GTA 6 packs translate instantly (MSA &amp; dialect), while all other games translate live in clean cinema Arabic.</string>
+    <string name="referral_share_button">Invite a friend (earn free days)</string>
+    <string name="referral_progress">Successful invites: %1$d (10 invites = +3 days · 20 invites = +15 days)</string>
+    <string name="referral_share_text">Try SubTV for instant Arabic subtitles on your PlayStation TV or phone:&#10;https://dl.subtv.app/SubTV.apk&#10;Enter my invite code in the app: %1$s</string>
+    <string name="referral_redeem_success">Invite code applied ✓</string>
+    <!-- 1.0.51 SubTV: supported games list + friend referrals (end) -->
 </resources>

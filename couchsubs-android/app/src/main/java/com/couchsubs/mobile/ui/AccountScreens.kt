@@ -8,6 +8,7 @@ import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -203,12 +204,23 @@ fun RedeemCodeBox() {
 @Composable
 fun AccountSettingsTile() {
     val status by SubTvAccount.status.collectAsState()
+    val number by SubTvAccount.accountNumber.collectAsState()
+    val context = LocalContext.current
     LaunchedEffect(Unit) { if (SubTvAccount.status.value == null) SubTvAccount.refreshStatus() }
     Tile(Modifier.fillMaxWidth()) {
         TileLabel(stringResource(R.string.account_settings_title))
         Text(statusLine(status), style = Tokens.Type.headline, color = Tokens.Color.text)
         RemainingCountdownLine(status)
         AccountNumberRow()
+        val refCount = status?.referralCount ?: 0
+        Text(stringResource(R.string.referral_progress, refCount), style = Tokens.Type.caption, color = Tokens.Color.secondary)
+        if (!number.isNullOrBlank()) {
+            SecondaryButton(stringResource(R.string.referral_share_button)) {
+                val shareMsg = context.getString(R.string.referral_share_text, number)
+                val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, shareMsg)
+                runCatching { context.startActivity(Intent.createChooser(send, null)) }
+            }
+        }
         RedeemCodeBox()
     }
 }

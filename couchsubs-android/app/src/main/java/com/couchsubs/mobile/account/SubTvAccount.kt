@@ -45,6 +45,7 @@ data class AccountStatus(
     val announcement: String,
     val minAppVersion: String,
     val paidPlans: List<Plan>,
+    val referralCount: Int = 0,
 ) {
     companion object {
         /** Null when the reply is not the expected JSON. */
@@ -67,6 +68,7 @@ data class AccountStatus(
                 paidPlans = (0 until (plans?.length() ?: 0)).mapNotNull { plans?.optJSONObject(it) }.map {
                     Plan(it.text("id").orEmpty(), it.text("name").orEmpty(), it.optDouble("price_egp", 0.0), it.optInt("duration_days", 0))
                 },
+                referralCount = account.optInt("referral_count", 0),
             )
         } catch (_: JSONException) {
             null

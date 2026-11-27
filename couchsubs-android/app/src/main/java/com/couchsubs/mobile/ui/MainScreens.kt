@@ -352,6 +352,8 @@ fun PacksScreen(onBack: () -> Unit, packInUse: String?) {
                 SecondaryButton(stringResource(if (busy) R.string.packs_updating_short else R.string.packs_refresh),
                     enabled = !busy) { updateNow() }
             }) {
+                GameSection(com.couchsubs.mobile.service.LiveState.status.collectAsState().value)
+                NoteTile(stringResource(R.string.supported_games_all_note), Tokens.Color.secondary)
                 Text(stringResource(R.string.packs_auto), style = Tokens.Type.body, color = Tokens.Color.secondary)
                 RowList(listOf({
                     RowItem(stringResource(R.string.settings_packs), stringResource(R.string.packs_switch_note)) {
@@ -537,7 +539,13 @@ internal fun PackSummaryTile(
         val installed = pack
         if (installed != null) {
             Tile(Modifier.fillMaxWidth(), onClick = onPacks) {
-                Text(stringResource(R.string.pack_summary, installed.entries), style = Tokens.Type.body, color = Tokens.Color.text)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
+                        TileLabel(stringResource(R.string.supported_games_title))
+                        Text(stringResource(R.string.supported_games_subtitle, installed.entries), style = Tokens.Type.body, color = Tokens.Color.text)
+                    }
+                    if (onPacks != null) Chevron()
+                }
             }
         } else if (secureState == com.couchsubs.mobile.account.SecureData.SyncState.SYNCING) {
             Tile(Modifier.fillMaxWidth()) {
