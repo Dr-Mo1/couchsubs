@@ -229,13 +229,15 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
         }), onBack = { if (section != 0) section = 0 else onBack() }) }) {
             if (section == 0) {
                     AppLanguageRow(settings)
+                    HomeUpdateButton()
+                    AccountSettingsTile()
+                    PackSummaryTile(onPacks, style = translationStyle)
                     RowList(listOf(
                         { RowItem(stringResource(R.string.targamgi_appearance), onClick = { section = 1 }) },
                         { RowItem(stringResource(R.string.targamgi_content), onClick = { section = 2 }) },
                         { RowItem(stringResource(R.string.targamgi_devices), onClick = { section = 3 }) },
                         { RowItem(stringResource(R.string.profile), onClick = onProfile) },
                     ))
-                    AccountSettingsTile()
                     SubtitlePlaceTile(
                         settings = settings,
                         connectedTvs = com.couchsubs.mobile.service.LiveState.status.collectAsState().value.connectedTvs,
@@ -246,7 +248,6 @@ fun SettingsScreen(onBack: () -> Unit, onPacks: () -> Unit, onTarget: () -> Unit
                         translationStyle = it
                         settings.translationStyle = it
                     }
-                    PackSummaryTile(onPacks, style = translationStyle)
             }
             if (section == 2) {
                     GameSection(com.couchsubs.mobile.service.LiveState.status.collectAsState().value)

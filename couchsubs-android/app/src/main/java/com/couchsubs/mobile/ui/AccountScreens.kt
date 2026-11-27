@@ -168,6 +168,7 @@ fun RedeemCodeBox() {
 @Composable
 fun AccountSettingsTile() {
     val status by SubTvAccount.status.collectAsState()
+    LaunchedEffect(Unit) { if (SubTvAccount.status.value == null) SubTvAccount.refreshStatus() }
     Tile(Modifier.fillMaxWidth()) {
         TileLabel(stringResource(R.string.account_settings_title))
         Text(statusLine(status), style = Tokens.Type.headline, color = Tokens.Color.text)

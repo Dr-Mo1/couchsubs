@@ -108,6 +108,9 @@ fun MainScreen(
     LaunchedEffect(Unit) {
         androidx.compose.runtime.withFrameNanos { }
         com.couchsubs.mobile.reporting.ProblemReporter.start(settings.updateChannel)
+        if (com.couchsubs.mobile.account.SubTvAccount.status.value == null) {
+            com.couchsubs.mobile.account.SubTvAccount.refreshStatus()
+        }
     }
     val xbox = settings.xbox
     val paired = if (xbox) settings.xboxConsole != null && Services.xboxAuth.signedIn else settings.console != null
@@ -150,10 +153,7 @@ fun MainScreen(
                                 Modifier.weight(1f), onTarget)
                         }
                     }
-                    HomeUpdateButton()
                     SubtitlePlaceTile(settings = settings, connectedTvs = status.connectedTvs, onSetupTv = onTarget)
-                    PackSummaryTile(onPacks)
-                    AccountStatusCard()
                     if (paired) TranslationStartDisc(onStart = onStart)
                     if (!paired) Spacer(Modifier.height(Tokens.Space.screen))
                     status.recent.firstOrNull()?.let { line ->
