@@ -228,13 +228,13 @@ private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, on
         // dene" TV'ye çevirirken, "Ekranı çevir" yalnız görüntü gelirken.
         val target = Services.settings.target
         if (target.showsOnPhone || status.demo || target.showsOnTv || status.streaming)
-            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
                 if (target.showsOnPhone || status.demo)
-                    SecondaryButton(stringResource(R.string.main_phone_view), Modifier.weight(1f), onClick = onPhoneView)
-                if (target.showsOnTv) SecondaryButton(stringResource(R.string.settings_test_subtitle), Modifier.weight(1f)) {
+                    SecondaryButton(stringResource(R.string.main_phone_view), Modifier.weight(1f).fillMaxHeight(), onClick = onPhoneView)
+                if (target.showsOnTv) SecondaryButton(stringResource(R.string.settings_test_subtitle), Modifier.weight(1f).fillMaxHeight()) {
                     com.couchsubs.mobile.service.TranslationService.sendTestSubtitle(context.getString(R.string.test_subtitle_text))
                 }
-                if (status.streaming) ScreenTranslateButton(status, Modifier.weight(1f))
+                if (status.streaming) ScreenTranslateButton(status, Modifier.weight(1f).fillMaxHeight())
             }
         DestructiveButton(stringResource(if (status.demo) R.string.demo_mode_exit else R.string.stop), onClick = onStop)
     }) {

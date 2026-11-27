@@ -15,13 +15,13 @@
     <string name="selected">محدّد</string>
     
     <string name="phase_preparing">جارٍ التجهيز…</string>
-    <string name="phase_connecting">جارٍ الاتصال بـبلايستيشن 5…</string>
+    <string name="phase_connecting">جارٍ الاتصال بجهاز بلايستيشن 5…</string>
     <string name="phase_streaming">قراءة الحوار</string>
     <string name="phase_reconnecting">انقطع الاتصال، جارٍ إعادة الاتصال…</string>
     <string name="reconnect">إعادة الاتصال</string>
     <string name="phase_in_use">بلايستيشن 5 متصل بجلسة تشغيل عن بُعد أخرى. أغلق الاتصال من الجهاز الآخر.</string>
     <string name="phase_not_found_host">لم يظهر بلايستيشن 5 على %1$s ولا في الشبكة. تأكد أن الجهاز يعمل (وليس في وضع الراحة)، وأنه على شبكة واي فاي نفسها التي يتصل بها هاتفك، وأن «التشغيل عن بُعد» مفعّل في إعداداته. جارٍ البحث وإعادة المحاولة…</string>
-    <string name="phase_network">انقطع الاتصال بـبلايستيشن 5. جارٍ إعادة المحاولة. إذا تكرر ذلك، صِل الجهاز بالراوتر بكابل.</string>
+    <string name="phase_network">انقطع الاتصال بجهاز بلايستيشن 5. جارٍ إعادة المحاولة. إذا تكرر ذلك، صِل الجهاز بالراوتر بكابل.</string>
     <string name="phase_remote_play_disabled">التشغيل عن بُعد متوقف على بلايستيشن 5 (الرمز %1$s). فعّله من الإعدادات ← النظام ← التشغيل عن بُعد.</string>
     <string name="phase_rejected_code">رفض بلايستيشن 5 الاتصال (الرمز %1$s). أغلق جلسات التشغيل عن بُعد الأخرى وأعد تشغيل الجهاز ثم حاول مجددًا.</string>
     <string name="phase_rejected">لم يبدأ بلايستيشن 5 الجلسة. أغلق جلسات التشغيل عن بُعد الأخرى وأعد تشغيل الجهاز وحاول مجددًا.</string>
@@ -72,7 +72,7 @@
     <string name="psn_create_step2">2. فعّل الحساب من رسالة التأكيد في بريدك.</string>
     <string name="psn_create_step3">3. عُد إلى SubTV واضغط «تسجيل الدخول عبر سوني».</string>
     <string name="psn_failed">لم يكتمل تسجيل الدخول: %1$s</string>
-    <string name="psn_loading">جارٍ الاتصال بـسوني…</string>
+    <string name="psn_loading">جارٍ الاتصال بسوني…</string>
     <string name="psn_loading_hint">إن لم تظهر الصفحة، افتح تسجيل الدخول في المتصفح أدناه.</string>
     <string name="psn_page_failed">تعذّر فتح صفحة تسجيل الدخول</string>
     <string name="psn_page_failed_hint">أعد المحاولة، أو سجّل الدخول في المتصفح والصق العنوان هنا.</string>
@@ -152,9 +152,9 @@
     <string name="packs_result_updated_many">حُدّثت %1$d حزم: %2$s.</string>
     <string name="packs_result_added_one">أُضيفت حزمة: %1$s.</string>
     <string name="packs_result_added_many">أُضيفت %1$d حزم: %2$s.</string>
-    <string name="packs_result_item_lines">%1$s (%2$s سطر)</string>
-    <string name="packs_result_item_more">%1$s (+%2$s سطر)</string>
-    <string name="packs_result_item_fewer">%1$s (أقل بـ%2$s سطر)</string>
+    <string name="packs_result_item_lines">%1$s (%2$s سطرًا)</string>
+    <string name="packs_result_item_more">%1$s (+%2$s سطرًا)</string>
+    <string name="packs_result_item_fewer">%1$s (أقل بمقدار %2$s سطرًا)</string>
     <string name="packs_result_item_revised">%1$s (ترجمات منقّحة)</string>
     <string name="packs_result_total">إجمالي السطور الجديدة: %1$s.</string>
     <string name="packs_error_offline">تعذّر الوصول إلى الإنترنت أو خادم الحزم.</string>
@@ -371,7 +371,7 @@
     <string name="subtitle_waiting">جارٍ الاتصال</string>
     <string name="subtitle_screen_note">تبقى الشاشة مضاءة · يخفت السطوع تلقائيًا</string>
     <string name="subtitle_screen_gesture_hint">حرّك الترجمة لأعلى أو لأسفل بإصبعك، وغيّر حجم الخط بإصبعين.</string>
-    <string name="packs_auto">تُختار الحزمة تلقائيًا بحسب اللعبة. يترجم المحرك السطور غير الموجودة فيها. الحزمة العربية مدمجة مع التطبيق.</string>
+    <string name="packs_auto">تُختار الحزمة تلقائيًا بحسب اللعبة، ويترجم المحرك السطور غير الموجودة فيها.</string>
     <string name="packs_now">الآن</string>
     <string name="packs_off">متوقفة</string>
     <string name="packs_next">حزم إضافية</string>
@@ -419,7 +419,7 @@
     <string name="settings_about">عن التطبيق</string>
     <string name="settings_copyright">SubTV من تطوير DrMo.</string>
     <string name="about_body">تفاصيل البرامج مفتوحة المصدر متاحة في صفحة التراخيص.</string>
-    <string name="about_source">الكود المصدري</string>
+    <string name="about_source">الشيفرة المصدرية</string>
     <string name="main_packs_off">متوقفة</string>
     <string name="packs_free">مجانية</string>
     <string name="packs_free_count">مجانية · %1$d ألعاب</string>
@@ -471,10 +471,10 @@
     <string name="tvinstall_step_uninstalling">جارٍ إزالة النسخة السابقة…</string>
     <string name="tvinstall_step_launching">جارٍ فتح التطبيق على التلفزيون…</string>
     <string name="tvinstall_step_play">فتحت صفحة جوجل بلاي على التلفزيون. اضغط تثبيت أو تحديث بجهاز التحكم؛ يفتح التطبيق بعد التثبيت.</string>
-    <string name="tvinstall_done">تم التثبيت. جارٍ فتح تطبيق الترجمة على التلفزيون %1$s على التلفزيون.</string>
-    <string name="tvinstall_next">يفتح تطبيق الترجمة على التلفزيون شاشة الانتظار على التلفزيون. ابدأ الترجمة من الرئيسية ليتصل بالهاتف، حتى لو أشارت شاشة التلفزيون إلى كمبيوتر.</string>
+    <string name="tvinstall_done">تم التثبيت. جارٍ فتح تطبيق التلفزيون %1$s.</string>
+    <string name="tvinstall_next">سيفتح تطبيق التلفزيون شاشة الانتظار. ابدأ الترجمة من الشاشة الرئيسية ليتصل بالهاتف، حتى لو أشارت شاشة التلفزيون إلى كمبيوتر.</string>
     <string name="tvinstall_go_home">الانتقال للرئيسية</string>
-    <string name="tvinstall_up_to_date">تطبيق الترجمة على التلفزيون %1$s مثبت بالفعل. جارٍ فتحه.</string>
+    <string name="tvinstall_up_to_date">تطبيق التلفزيون %1$s مثبّت بالفعل. جارٍ فتحه.</string>
     <string name="tvinstall_details">التفاصيل: %1$s</string>
     <string name="tvinstall_share_log">مشاركة سجل التثبيت</string>
     <string name="tvinstall_signin_title">تسجيل الدخول إلى سامسونج</string>
@@ -494,10 +494,10 @@
     <string name="tvinstall_err_login">لم يكتمل تسجيل الدخول إلى سامسونج. أعد المحاولة وأكمل الصفحة التي تظهر.</string>
     <string name="tvinstall_err_certificate">لم تُصدر سامسونج شهادة التوقيع. أعد المحاولة بعد قليل.</string>
     <string name="tvinstall_err_space">مساحة التلفزيون غير كافية. احذف تطبيقًا غير مستخدم وأعد المحاولة.</string>
-    <string name="tvinstall_err_mismatch">توجد نسخة موقّعة من جهاز آخر. احذف تطبيق الترجمة على التلفزيون من تطبيقات التلفزيون وأعد المحاولة.</string>
+    <string name="tvinstall_err_mismatch">توجد نسخة موقّعة من جهاز آخر. احذف تطبيق التلفزيون من قائمة التطبيقات وأعد المحاولة.</string>
     <string name="tvinstall_err_rejected">رفض التلفزيون الشهادة. تحقق من الإنترنت والوقت والتاريخ وأعد المحاولة. سيُطلب تسجيل الدخول إلى سامسونج مجددًا.</string>
     <string name="tvinstall_err_clock">وقت التلفزيون غير صحيح. اضبط التاريخ والوقت ثم أعد المحاولة.</string>
-    <string name="tvinstall_err_blocked">يرفض التلفزيون نسخة تطبيق الترجمة على التلفزيون السابقة. احذفها من التطبيقات وأعد المحاولة. إذا استمر الخطأ فقد يلزم ضبط المركز الذكي من إعدادات الدعم؛ هذا يحذف التطبيقات المنزّلة أيضًا.</string>
+    <string name="tvinstall_err_blocked">يرفض التلفزيون النسخة السابقة من تطبيق التلفزيون. احذفها من التطبيقات وأعد المحاولة. إذا استمر الخطأ فقد يلزم ضبط المركز الذكي من إعدادات الدعم؛ هذا يحذف التطبيقات المنزّلة أيضًا.</string>
     <string name="tvinstall_err_connection">انقطع الاتصال أثناء التثبيت. اترك التلفزيون والهاتف على الشبكة نفسها وشاشة الهاتف مضاءة.</string>
     <string name="tvinstall_err_failed">تعذّر تثبيت تطبيق التلفزيون. أعد المحاولة أو شارك سجل التثبيت.</string>
     <string name="tvinstall_err_package_missing">حزمة التلفزيون غير مدمجة في هذا الإصدار. حدّث تطبيق الهاتف.</string>
@@ -547,7 +547,7 @@
     <string name="tvinstall_android_step2">2. فعّل تصحيح يو إس بي من خيارات المطوّر، وكذلك تصحيح الشبكة إن وُجد.</string>
     <string name="tvinstall_android_step3">3. اضغط تثبيت وفتح. وافق على تصحيح يو إس بي على التلفزيون. إذا تعذّر الاتصال، جرّب التصحيح اللاسلكي.</string>
     <string name="tvinstall_android_wireless_step2">2. فعّل التصحيح اللاسلكي وافتحه. أدخل عنوان الشبكة والمنفذ الظاهرين أعلى الشاشة.</string>
-    <string name="tvinstall_android_wireless_step3">3. اختر الربط برمز، وأدخل عنوان الشبكة والمنفذ والرمز ذي الستة أرقام. اضغط تثبيت وفتح قبل إغلاق النافذة.</string>
+    <string name="tvinstall_android_wireless_step3">3. اختر الربط برمز، وأدخل عنوان الشبكة والمنفذ والرمز المكوّن من 6 أرقام. اضغط تثبيت وفتح قبل إغلاق النافذة.</string>
     <string name="tvinstall_android_replace">حذف نسخة التلفزيون والتثبيت</string>
     <string name="tvinstall_android_err_unreachable">لم يستجب التلفزيون. تحقق من الشبكة وتفعيل التصحيح. منفذ التصحيح اللاسلكي قد يتغيّر؛ أدخل المنفذ الحالي.</string>
     <string name="tvinstall_android_try_wireless">تجربة التصحيح اللاسلكي</string>
@@ -557,7 +557,7 @@
     <string name="tvinstall_android_err_pairing">تعذّر الربط. افتح نافذة رمز جديدة، وأدخل الرمز والمنفذ الجديدين.</string>
     <string name="tvinstall_android_err_play_copy">النسخة المثبتة من جوجل بلاي لا تقبل هذا التحديث. يمكنك انتظار تحديث المتجر، أو حذفها وإعداداتها بالزر أدناه وتثبيت هذه النسخة.</string>
     <string name="tvinstall_android_err_other_copy">توجد نسخة بتوقيع مختلف أو إصدار أحدث. الزر أدناه يحذف نسخة التلفزيون وإعداداتها ثم يثبّت الجديدة. أو احذفها يدويًا من إعدادات التطبيقات.</string>
-    <string name="tvinstall_android_err_remove_manually">تعذّر حذف النسخة السابقة. احذف تطبيق الترجمة على التلفزيون من إعدادات التطبيقات على التلفزيون، ثم أعد التثبيت.</string>
+    <string name="tvinstall_android_err_remove_manually">تعذّر حذف النسخة السابقة. احذف تطبيق التلفزيون من إعدادات التطبيقات على التلفزيون، ثم أعد التثبيت.</string>
     <string name="history">سجل الترجمة</string>
     <string name="history_note">تُحفظ على هذا الهاتف آخر %1$d من السطور المترجمة.</string>
     <string name="history_empty">لا توجد ترجمات بعد. تظهر هنا السطور المترجمة في هذه الجلسة والجلسات السابقة.</string>
@@ -599,10 +599,10 @@
     <string name="settings_key_remove">حذف المفتاح</string>
     <string name="settings_key_rejected">لم يعمل المفتاح. تحقّق منه وأعد المحاولة.</string>
     <string name="settings_key_not_stored">تعذّر حفظ المفتاح في التخزين الآمن للهاتف.</string>
-    <string name="deepl_usage">هذا الشهر: %1$s من %2$s حرف.</string>
+    <string name="deepl_usage">هذا الشهر: %1$s من %2$s حرفًا.</string>
     <string name="deepl_quota_used_up">انتهى حد ديب إل الشهري. تعتمد الترجمة المتاحة على المحرك البديل والحزم المثبتة.</string>
     <string name="deepl_key_not_accepted">لم يقبل ديب إل المفتاح. انسخه مجددًا من حسابك.</string>
-    <string name="deepl_unreachable">تعذّر الاتصال بـديب إل. تحقّق من الإنترنت.</string>
+    <string name="deepl_unreachable">تعذّر الاتصال بخدمة ديب إل. تحقّق من الإنترنت.</string>
     <string name="metrics_ocr">قراءة النص %1$d مللي ثانية</string>
     <string name="metrics_pack">حزمة جاهزة</string>
     <string name="metrics_translation">الترجمة %1$d مللي ثانية</string>
@@ -620,7 +620,7 @@
     <string name="xbox_error_console">تحقق من تشغيل إكس بوكس وتفعيل الميزات عن بُعد من إعدادات الأجهزة والاتصالات.</string>
     <string name="xbox_error_busy">إكس بوكس في جلسة تشغيل عن بُعد أخرى. أغلقها؛ جارٍ إعادة المحاولة…</string>
     <string name="xbox_error_timeout">لم يستجب إكس بوكس. جارٍ إعادة المحاولة…</string>
-    <string name="xbox_error_network">انقطع الاتصال بـإكس بوكس. جارٍ إعادة الاتصال…</string>
+    <string name="xbox_error_network">انقطع الاتصال بجهاز إكس بوكس. جارٍ إعادة الاتصال…</string>
     <string name="xbox_error_service">أرسلت خدمة إكس بوكس ردًا غير متوقع. جارٍ إعادة المحاولة…</string>
     <string name="xbox_error_no_picture">لا تصل صورة من إكس بوكس. جارٍ إعادة الاتصال…</string>
     <string name="xbox_error_no_first_frame">لم تصل صورة من إكس بوكس. جارٍ المحاولة مرة أخرى…</string>
@@ -668,7 +668,7 @@
     <string name="dubbing_voice_male_2">رجل 2 (حيوي)</string>
     <string name="dubbing_voice_male_3">رجل 3 (واضح)</string>
     <string name="channel_connection">الاتصال</string>
-    <string name="connection_lost_title">انقطع الاتصال بـبلايستيشن 5</string>
+    <string name="connection_lost_title">انقطع الاتصال بجهاز بلايستيشن 5</string>
     <string name="connection_lost_body">توقفت الترجمة. افتح SubTV لإعادة الاتصال.</string>
     <string name="psn_sign_out">تسجيل الخروج من حساب بلايستيشن</string>
     <string name="psn_sign_out_title">تسجيل الخروج</string>
@@ -712,9 +712,9 @@
     <string name="tv_open_not_paired">تعذّر الفتح تلقائيًا: لم يحصل هذا الجهاز على إذن من التلفزيون بعد. أعد الاتصال بالتلفزيون ووافق على الطلب على شاشته.</string>
     <string name="tv_open_debug_off">تعذّر الفتح تلقائيًا: لا يمكن الوصول إلى التلفزيون عبر تصحيح الأخطاء. هل هو قيد التشغيل، وهل تصحيح الأخطاء عبر الشبكة مفعّل في خيارات المطوّر؟</string>
     <string name="tv_open_debug_not_approved">تعذّر الفتح تلقائيًا: لم يوافق التلفزيون على تصحيح الأخطاء من هذا الجهاز. أعد تثبيت تطبيق التلفزيون ووافق على الطلب على شاشة التلفزيون.</string>
-    <string name="tv_open_not_opened">تعذّر الفتح تلقائيًا: استلم التلفزيون أمر الفتح لكنه لم يفتح تطبيق الترجمة على التلفزيون. افتحه من التلفزيون بجهاز التحكم.</string>
+    <string name="tv_open_not_opened">تعذّر الفتح تلقائيًا: استلم التلفزيون أمر الفتح لكنه لم يفتح تطبيق التلفزيون. افتحه يدويًا بجهاز التحكم.</string>
     <string name="tv_open_try">محاولة الفتح تلقائيًا</string>
-    <string name="tv_open_wizard_note">يحاول SubTV فتح تطبيق التلفزيون عند بدء الترجمة. إن لم يفتح، افتح تطبيق الترجمة على التلفزيون بجهاز التحكم.</string>
+    <string name="tv_open_wizard_note">يحاول SubTV فتح تطبيق التلفزيون عند بدء الترجمة. إن لم يفتح، افتح تطبيق التلفزيون يدويًا بجهاز التحكم.</string>
     <string name="engine_local">نموذج محلي</string>
     <string name="local_ai_address">عنوان الخادم</string>
     <string name="local_ai_model">اسم النموذج</string>
@@ -733,7 +733,7 @@
     <string name="local_ai_lmstudio_model">النموذج %1$s غير متاح في إل إم ستوديو. حمّله أو تحقّق من اسمه.</string>
     <string name="local_ai_ollama_model">نزّل النموذج %1$s من أولاما، ثم اختر %1$s في إعدادات الخادم.</string>
     <string name="local_ai_ollama_down">تعذّر الاتصال بأولاما على %1$s؛ شغّله ونزّل النموذج %2$s.</string>
-    <string name="local_ai_lmstudio_down">تعذّر الاتصال بـإل إم ستوديو على %1$s. حمّل النموذج وشغّل الخادم المحلي.</string>
+    <string name="local_ai_lmstudio_down">تعذّر الاتصال بخادم إل إم ستوديو على %1$s. حمّل النموذج وشغّل الخادم المحلي.</string>
     <string name="local_ai_other_down">تعذّر الاتصال بالخادم %1$s، أو انتهت مهلة الاستجابة. تحقّق من العنوان وتشغيل الخادم.</string>
     <string name="app_name">SubTV</string>
     <string name="translation_language">لغة الترجمة</string>
@@ -764,7 +764,7 @@
     <string name="update_now">تحديث الآن</string>
     <string name="update_later">لاحقًا</string>
     <string name="update_downloading">جارٍ تنزيل التحديث…</string>
-    <string name="update_progress">%1$d%% — %2$s من %3$s ميغابايت</string>
+    <string name="update_progress">%1$d%% — %2$s من %3$s ميجابايت</string>
     <string name="update_failed_title">تعذّر التحديث</string>
     <string name="update_failed_network">انقطع تنزيل التحديث. تحقق من اتصالك بالإنترنت ثم أعد المحاولة.</string>
     <string name="update_failed_corrupt">حُذف الملف لعدم تطابق الحجم أو بصمة التحقق؛ أعد المحاولة.</string>
@@ -825,7 +825,7 @@
     <string name="guide_lg_req3">يتطلب التثبيت حساب مطوّر إل جي مجانيًا وتطبيق وضع المطوّر من متجر التلفزيون.</string>
     <string name="guide_lg_step1">أنشئ حساب مطوّر مجانيًا على webostv.developer.lge.com.</string>
     <string name="guide_lg_step2">ثبّت تطبيق وضع المطوّر من متجر إل جي وسجّل الدخول وفعّل حالة وضع المطوّر لإعادة تشغيل التلفزيون.</string>
-    <string name="guide_lg_step3">افتح تطبيق وضع المطوّر وفعّل خادم المفاتيح، ثم انسخ رمز التثبيت ذي 6 أحرف أسفل الشاشة.</string>
+    <string name="guide_lg_step3">افتح تطبيق وضع المطوّر وفعّل خادم المفاتيح، ثم انسخ رمز التثبيت المكوّن من 6 أحرف أسفل الشاشة.</string>
     <string name="guide_lg_step4">اضغط زر التثبيت أدناه، واختر التلفزيون، واكتب الرمز كما يظهر بالأحرف الكبيرة، ثم اضغط «تثبيت وفتح».</string>
     <string name="guide_lg_step5">يُفتح التطبيق على التلفزيون. ابدأ الترجمة من الشاشة الرئيسية ووافق بجهاز التحكم على طلب الاتصال الذي يظهر على التلفزيون.</string>
     <string name="guide_lg_tip1">لم يستجب التلفزيون: شغّله، وتأكد أنه على شبكة الهاتف نفسها وأن «حالة وضع المطوّر» مفعّل.</string>
@@ -987,7 +987,7 @@
     <string name="account_number_copy">نسخ</string>
     <string name="account_number_copied">تم النسخ</string>
     <string name="account_access_ended">انتهت التجربة أو الاشتراك. فعّل اشتراكًا لاستئناف الترجمة.</string>
-    <string name="account_cap_reached">لقد وصلت إلى الحد اليومي، يمكنك المتابعة غدًا</string>
+    <string name="account_cap_reached">لقد وصلت إلى الحد اليومي، يمكنك المتابعة غدًا.</string>
     <string name="account_maintenance">الخادم قيد الصيانة الآن. حاول مرة أخرى بعد قليل.</string>
     <string name="account_problem">حدثت مشكلة في حسابك. أغلق التطبيق ثم افتحه مرة أخرى.</string>
     <string name="account_unreachable">تعذّر الاتصال بالخادم. تأكد من اتصالك بالإنترنت وحاول مرة أخرى.</string>

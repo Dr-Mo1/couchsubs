@@ -173,14 +173,14 @@ fun GameProfilesTile() {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
             Field(name, { name = it }, stringResource(R.string.game_profiles_name))
             problem?.let { Text(it, style = Tokens.Type.caption, color = Tokens.Color.secondary) }
-            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
                 val mode = editing
                 val title = when {
                     mode?.key == null -> R.string.game_profiles_save_current
                     mode.duplicate -> R.string.game_profiles_duplicate
                     else -> R.string.game_profiles_rename
                 }
-                SecondaryButton(stringResource(title), enabled = name.isNotBlank()) { commit() }
+                SecondaryButton(stringResource(title), Modifier.weight(1f), enabled = name.isNotBlank()) { commit() }
                 GhostButton(stringResource(R.string.cancel), color = Tokens.Color.secondary) { editing = null }
             }
         }

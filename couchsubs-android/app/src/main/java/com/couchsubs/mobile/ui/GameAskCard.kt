@@ -58,8 +58,8 @@ private fun GameAreasRow(status: LiveStatus) {
     if (offered != null) {
         Tile(Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.area_profile_offer, gameLabel(context, offered)), style = Tokens.Type.body, color = Tokens.Color.text)
-            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
-                SecondaryButton(stringResource(R.string.area_profile_use)) { PlayedGame.areas.useOffered() }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.inline)) {
+                SecondaryButton(stringResource(R.string.area_profile_use), Modifier.weight(1f)) { PlayedGame.areas.useOffered() }
                 GhostButton(stringResource(R.string.area_profile_no), color = Tokens.Color.secondary) { PlayedGame.areas.declineOffered() }
             }
         }

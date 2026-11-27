@@ -201,21 +201,21 @@ fun TwoColumns(left: @Composable (Modifier) -> Unit, right: @Composable (Modifie
 @Composable
 fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
     val base = if (options.size >= 3) Tokens.Type.caption else Tokens.Type.body
-    Row(Modifier.fillMaxWidth().background(Tokens.Color.surface2, RoundedCornerShape(Tokens.Radius.control)).padding(Tokens.Space.hair)
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).background(Tokens.Color.surface2, RoundedCornerShape(Tokens.Radius.control)).padding(Tokens.Space.hair)
         .selectableGroup(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.hair)) {
         options.forEachIndexed { index, option ->
             val on = index == selected
             val shape = RoundedCornerShape(Tokens.Radius.inner)
             Box(
-                Modifier.weight(1f).heightIn(min = Tokens.Control.segment).clip(shape)
+                Modifier.weight(1f).fillMaxHeight().heightIn(min = Tokens.Control.segment).clip(shape)
                     .background(if (on) Tokens.Color.accent else Color.Transparent)
                     .border(1.dp, if (on) Tokens.Color.accent else Color.Transparent, shape)
                     .selectable(selected = on, role = Role.Tab) { onSelect(index) }
-                    .padding(Tokens.Space.hair),
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(option, style = base.copy(fontWeight = if (on) FontWeight.Bold else FontWeight.Normal),
-                    color = if (on) Tokens.Color.onAccent else Tokens.Color.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                Text(option, style = base.copy(fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, lineHeight = base.fontSize * 1.25f),
+                    color = if (on) Tokens.Color.onAccent else Tokens.Color.secondary, maxLines = 2, softWrap = true, overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center)
             }
         }

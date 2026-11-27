@@ -74,6 +74,7 @@ fun LocalAiSection(settings: AppSettings) {
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.gap)) {
         SecondaryButton(stringResource(if (checking) R.string.local_ai_testing else R.string.local_ai_test),
+            Modifier.weight(1f),
             enabled = !checking && LocalAiServer.normalize(address) != null) {
             val server = settings.localAiServer ?: return@SecondaryButton
             val typed = key.trim()

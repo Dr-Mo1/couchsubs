@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -277,12 +278,16 @@ fun SectionTitle(text: String) = Text(text, style = Tokens.Type.headline, color 
  * Birincil düğme: düz sarı, gölgesiz; basılıyken accentHi ve %97 ölçek. Devre dışıyken surface2 zemin ve ikincil yazı
  * (soldurulmuş sarı kullanılmaz). Ekranda bir tane. Yükseklik en az 52; büyük yazıda uzar.
  */
+private val ButtonContentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+private val GhostContentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+
 @Composable
 fun PrimaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     Button(
         onClick, enabled = enabled, interactionSource = interaction, shape = RoundedCornerShape(Tokens.Radius.control), elevation = null,
+        contentPadding = ButtonContentPadding,
         colors = ButtonDefaults.buttonColors(containerColor = if (pressed) Tokens.Color.accentHi else Tokens.Color.accent,
             contentColor = Tokens.Color.onAccent, disabledContainerColor = Tokens.Color.surface2,
             disabledContentColor = Tokens.Color.secondary),
@@ -293,33 +298,50 @@ fun PrimaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean 
 @Composable
 fun SecondaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
     Button(onClick, enabled = enabled, shape = RoundedCornerShape(Tokens.Radius.control), border = BorderStroke(1.dp, Tokens.Color.borderStrong),
+        contentPadding = ButtonContentPadding,
         colors = ButtonDefaults.buttonColors(containerColor = Tokens.Color.surface2, contentColor = Tokens.Color.text), elevation = null,
         modifier = modifier.fillMaxWidth().heightIn(min = Tokens.Control.button)) { ButtonLabel(text) }
 }
 
 @Composable
 fun GhostButton(text: String, modifier: Modifier = Modifier, color: Color = Tokens.Color.accentText, onClick: () -> Unit) {
-    TextButton(onClick, modifier = modifier.heightIn(min = Tokens.Control.buttonSmall)) { ButtonLabel(text, color) }
+    TextButton(onClick, contentPadding = GhostContentPadding, modifier = modifier.heightIn(min = Tokens.Control.buttonSmall)) { ButtonLabel(text, color) }
 }
 
 /**
- * Düğme yazısı tek satırda kalır (iki satıra bölünmez): sığmazsa %75'e kadar küçülür (iPhone'daki minimumScaleFactor gibi).
- * Sistem yazı boyu büyükken (1,3 ve üstü) küçültülmez, satıra bölünebilir.
+ * Button label: fits cleanly on 1 line when space allows, shrinks gently down to 0.80x on narrow multi-button rows,
+ * and wraps neatly to up to 2 centered lines (3 at large system font scale) so Arabic words are never clipped.
  */
 @Composable
 private fun ButtonLabel(text: String, color: Color = Color.Unspecified) {
     val style = Tokens.Type.headline
     val large = LocalDensity.current.fontScale >= 1.3f
     var scale by remember(text) { mutableFloatStateOf(1f) }
-    Text(text, style = style.copy(fontSize = style.fontSize * scale), color = color, textAlign = TextAlign.Center,
-        maxLines = if (large) 3 else 1, softWrap = large, overflow = if (large) TextOverflow.Ellipsis else TextOverflow.Clip,
-        onTextLayout = { if (!large && it.didOverflowWidth && scale > 0.75f) scale = (scale - 0.05f).coerceAtLeast(0.75f) })
+    Text(
+        text = text,
+        style = style.copy(fontSize = style.fontSize * scale, lineHeight = style.lineHeight * scale),
+        color = color,
+        textAlign = TextAlign.Center,
+        maxLines = if (large) 3 else 2,
+        softWrap = true,
+        overflow = TextOverflow.Ellipsis,
+        onTextLayout = {
+            if (!large) {
+                val needsShrink = it.didOverflowWidth || it.didOverflowHeight || (it.lineCount > 1 && scale > 0.82f)
+                val minScale = if (it.didOverflowWidth || it.didOverflowHeight) 0.72f else 0.82f
+                if (needsShrink && scale > minScale) {
+                    scale = (scale - 0.06f).coerceAtLeast(minScale)
+                }
+            }
+        },
+    )
 }
 
 /** Tehlikeli: kırmızı tonlu zemin, kırmızı yazı, çerçevesiz ("Çeviriyi durdur"). */
 @Composable
 fun DestructiveButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Button(onClick, shape = RoundedCornerShape(Tokens.Radius.control), elevation = null,
+        contentPadding = ButtonContentPadding,
         colors = ButtonDefaults.buttonColors(containerColor = Tokens.Color.dangerSoft, contentColor = Tokens.Color.danger),
         modifier = modifier.fillMaxWidth().heightIn(min = Tokens.Control.button)) { ButtonLabel(text) }
 }
