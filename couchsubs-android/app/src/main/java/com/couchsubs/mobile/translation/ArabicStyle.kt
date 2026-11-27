@@ -25,6 +25,20 @@ enum class TranslationStyle(val id: String) {
          */
         fun cacheEngineId(engine: String, target: String, style: TranslationStyle): String =
             if (target == "ar" && style == CLEAN) "$engine:clean" else engine
+
+        /**
+         * Street/profane translation is strictly limited to GTA games ("gta", "gta 6", "gta 5", "grand theft auto ...").
+         * Whenever any other game is known to be running, CLEAN style (zero profanity) is enforced automatically.
+         */
+        fun allowsStreet(gameName: String?): Boolean {
+            val clean = gameName?.trim().orEmpty()
+            if (clean.isEmpty()) return true
+            val key = com.couchsubs.mobile.core.GameName.key(clean)
+            return key.isEmpty() || key == "gta" || key.startsWith("gta ")
+        }
+
+        fun effective(chosen: TranslationStyle, gameName: String?): TranslationStyle =
+            if (chosen == STREET && !allowsStreet(gameName)) CLEAN else chosen
     }
 }
 

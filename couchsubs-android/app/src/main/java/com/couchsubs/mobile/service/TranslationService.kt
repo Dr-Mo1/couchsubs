@@ -775,7 +775,11 @@ class TranslationService : Service() {
                     null
                 } else if (packTitles != null && settings.packsEnabled) {
                     library.setDisabled(settings.disabledPacks)
-                    PackLookup.match(library, text)
+                    PackLookup.match(library, text)?.let { match ->
+                        if (settings.translationLanguage == "ar" && !com.couchsubs.mobile.translation.TranslationStyle.allowsStreet(playedGame))
+                            match.copy(text = com.couchsubs.mobile.translation.ArabicProfanityFilter.clean(match.text))
+                        else match
+                    }
                 } else null
             }
             translationLanguage = settings.translationLanguage
@@ -853,7 +857,11 @@ class TranslationService : Service() {
                     null
                 } else if (packTitles != null && settings.packsEnabled) {
                     library.setDisabled(settings.disabledPacks)
-                    PackLookup.match(library, text)
+                    PackLookup.match(library, text)?.let { match ->
+                        if (settings.translationLanguage == "ar" && !com.couchsubs.mobile.translation.TranslationStyle.allowsStreet(playedGame))
+                            match.copy(text = com.couchsubs.mobile.translation.ArabicProfanityFilter.clean(match.text))
+                        else match
+                    }
                 } else null
             }
         }
@@ -1385,10 +1393,25 @@ class TranslationService : Service() {
         }
     }
 
-    /** Wrap the FREE Arabic engine with the profanity filter only in clean style. */
+    /** Wrap the FREE Arabic engine with the profanity filter in clean style or whenever a non-GTA game is played. */
     private fun wrapFree(raw: TextTranslator): TextTranslator =
-        if (settings.translationLanguage == "ar" && settings.translationStyle == com.couchsubs.mobile.translation.TranslationStyle.CLEAN)
-            com.couchsubs.mobile.translation.CleanArabicTranslator(raw)
+        if (settings.translationLanguage == "ar")
+            object : TextTranslator {
+                override val translationLanguage: String get() = raw.translationLanguage
+                override val translatesTogether: Boolean get() = raw.translatesTogether
+                override fun noteSpeaker(name: String) = raw.noteSpeaker(name)
+                private fun shouldClean(): Boolean =
+                    settings.translationStyle == com.couchsubs.mobile.translation.TranslationStyle.CLEAN ||
+                        !com.couchsubs.mobile.translation.TranslationStyle.allowsStreet(playedGame)
+                override fun translate(text: String): String {
+                    val out = raw.translate(text)
+                    return if (shouldClean()) com.couchsubs.mobile.translation.ArabicProfanityFilter.clean(out) else out
+                }
+                override fun translateAll(texts: List<String>): List<String> {
+                    val out = raw.translateAll(texts)
+                    return if (shouldClean()) out.map(com.couchsubs.mobile.translation.ArabicProfanityFilter::clean) else out
+                }
+            }
         else raw
 
     /** Çevrimiçi motor seçilip anahtarı girildiyse o, hatada yerel motor; yoksa null. */
@@ -1406,8 +1429,15 @@ class TranslationService : Service() {
             }
             val engine = onlineTranslator(fallback) ?: fallback
             val wrapped = if (target == "ar") com.couchsubs.mobile.translation.PackFirstTranslator(engine) { text ->
-                arabicCorrections[com.couchsubs.mobile.core.PackKey.canon(text)]?.let { com.couchsubs.mobile.core.PackMatch(it) }
-                    ?: if (settings.packsEnabled) packs?.let { PackLookup.match(it, text) } else null
+                val allowStreet = com.couchsubs.mobile.translation.TranslationStyle.allowsStreet(playedGame)
+                val fromCorrections = if (allowStreet || settings.translationStyle == com.couchsubs.mobile.translation.TranslationStyle.CLEAN) {
+                    arabicCorrections[com.couchsubs.mobile.core.PackKey.canon(text)]?.let { com.couchsubs.mobile.core.PackMatch(it) }
+                } else null
+                val rawMatch = fromCorrections ?: if (settings.packsEnabled) packs?.let { PackLookup.match(it, text) } else null
+                rawMatch?.let { match ->
+                    if (!allowStreet) match.copy(text = com.couchsubs.mobile.translation.ArabicProfanityFilter.clean(match.text))
+                    else match
+                }
             } else if (demo && target == "tr") DemoTranslator(engine) else engine
             com.couchsubs.mobile.translation.AccessGatedTranslator(wrapped, ::isAccessAllowed) { stopForInactiveAccess() }
         }

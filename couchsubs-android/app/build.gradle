@@ -75,7 +75,7 @@ android {
         buildConfigField 'String', 'UPDATE_URL', "\"${findProperty('couchsubs.updateUrl') ?: 'https://github.com/Dr-Mo1/targamgi/releases/download/targamgi-latest/update.json'}\""
         // Fallback manifest on the Cloudflare Worker in case GitHub is blocked or throttled (same worker as apkUrl).
         // Override with -Pcouchsubs.updateFallbackUrl=...
-        buildConfigField 'String', 'UPDATE_FALLBACK_URL', "\"${findProperty('couchsubs.updateFallbackUrl') ?: 'https://subtv-dl.dr-mohamedhamdy2020.workers.dev/update.json'}\""
+        buildConfigField 'String', 'UPDATE_FALLBACK_URL', "\"${findProperty('couchsubs.updateFallbackUrl') ?: 'https://dl.subtv.app/update.json'}\""
         buildConfigField 'String', 'REPORTS_URL', groovy.json.JsonOutput.toJson((findProperty('couchsubs.reportsUrl') ?: 'https://bmbjlvbldyxkmxoinzdd.supabase.co').toString())
         buildConfigField 'String', 'REPORTS_KEY', groovy.json.JsonOutput.toJson((findProperty('couchsubs.reportsKey') ?: 'sb_publishable_F3Bcwzd7StCILckukgSyJg_2h-bmuMC').toString())
         buildConfigField 'String', 'TRANSLATE_APP_TOKEN', groovy.json.JsonOutput.toJson(translateAppToken)

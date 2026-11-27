@@ -845,8 +845,11 @@ object AiRequest {
         gate: GateHeaders? = null,
     ): AiHttpRequest {
         val trimmed = key.trim()
-        val user = userMessage(sentences, context, game, names, target, slang, speaker, playerCharacter)
-        val system = systemPrompt(instruction, target, arabicPrompt)
+        val forceCleanForGame = target == "ar" && !TranslationStyle.allowsStreet(game)
+        val effectiveSlang = if (forceCleanForGame) emptyList() else slang
+        val effectiveArabicPrompt = if (forceCleanForGame) ArabicPrompt.CLEAN_FALLBACK else arabicPrompt
+        val user = userMessage(sentences, context, game, names, target, effectiveSlang, speaker, playerCharacter)
+        val system = systemPrompt(instruction, target, effectiveArabicPrompt)
         return when (provider) {
             AiProvider.GEMINI -> {
                 val config = JSONObject().put("maxOutputTokens", maxOutputTokens)
@@ -1115,16 +1118,18 @@ class AiTranslator(
     override val retryAfterMs: Long get() = if (proxyUrl != null) TargamgiProxy.RETRY_AFTER_MS else super.retryAfterMs
 
     override fun translate(text: String): String {
-        if (target == "ar" && corrections.isNotEmpty()) {
+        val currentGame = game()
+        val allowStreet = TranslationStyle.allowsStreet(currentGame)
+        if (target == "ar" && allowStreet && corrections.isNotEmpty()) {
             val fixed = corrections[PackKey.canon(text)]
             if (fixed != null) {
-                val game = game()
-                context(text, game)
-                remember(text, fixed, game)
+                context(text, currentGame)
+                remember(text, fixed, currentGame)
                 return fixed
             }
         }
-        return super.translate(text)
+        val out = super.translate(text)
+        return if (target == "ar" && !allowStreet) ArabicProfanityFilter.clean(out) else out
     }
 
     /**
@@ -1134,8 +1139,9 @@ class AiTranslator(
      */
     override fun translateAll(texts: List<String>): List<String> {
         val game = game()
+        val allowStreet = TranslationStyle.allowsStreet(game)
         val results = texts.map { text ->
-            (if (target == "ar" && corrections.isNotEmpty()) corrections[PackKey.canon(text)] else null)
+            (if (target == "ar" && allowStreet && corrections.isNotEmpty()) corrections[PackKey.canon(text)] else null)
                 ?: cache.get(cacheKey(text, game))
         }.toMutableList()
         val missing = texts.indices.filter { results[it] == null }
@@ -1171,7 +1177,10 @@ class AiTranslator(
                 stopped = true
             }
         }
-        return texts.indices.map { results[it] ?: localTranslation(texts[it]) }
+        return texts.indices.map {
+            val raw = results[it] ?: localTranslation(texts[it])
+            if (target == "ar" && !allowStreet) ArabicProfanityFilter.clean(raw) else raw
+        }
     }
 
     override val translationLanguage: String get() = target

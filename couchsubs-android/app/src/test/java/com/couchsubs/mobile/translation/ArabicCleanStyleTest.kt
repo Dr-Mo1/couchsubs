@@ -81,4 +81,40 @@ class ArabicCleanStyleTest {
         assertTrue(bodies[0].contains("Egyptian"))
         assertTrue(bodies[1].contains(ArabicPrompt.CLEAN_FALLBACK))
     }
+
+    @Test
+    fun nonGtaGamesForceCleanPromptAndFilterProfanityEvenInStreetMode() {
+        org.junit.Assert.assertTrue(TranslationStyle.allowsStreet(null))
+        org.junit.Assert.assertTrue(TranslationStyle.allowsStreet(""))
+        org.junit.Assert.assertTrue(TranslationStyle.allowsStreet("Grand Theft Auto VI"))
+        org.junit.Assert.assertTrue(TranslationStyle.allowsStreet("GTA 6"))
+        org.junit.Assert.assertTrue(TranslationStyle.allowsStreet("Grand Theft Auto V"))
+        org.junit.Assert.assertFalse(TranslationStyle.allowsStreet("God of War Ragnarök"))
+        org.junit.Assert.assertFalse(TranslationStyle.allowsStreet("Resident Evil Requiem"))
+        org.junit.Assert.assertFalse(TranslationStyle.allowsStreet("Tomb Raider"))
+        assertEquals(TranslationStyle.CLEAN, TranslationStyle.effective(TranslationStyle.STREET, "God of War Ragnarök"))
+        assertEquals(TranslationStyle.STREET, TranslationStyle.effective(TranslationStyle.STREET, "Grand Theft Auto VI"))
+
+        val bodies = mutableListOf<String>()
+        val ok = 200 to JSONObject().put(
+            "candidates",
+            JSONArray().put(JSONObject().put("content", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", """["انزل يا ابن المتناكة!"]"""))))),
+        ).toString()
+        val http = Http { _, _, _, body, _ -> bodies.add(body.orEmpty()); ok }
+
+        var activeGame: String? = "God of War Ragnarök"
+        val translator = AiTranslator(
+            AiProvider.GEMINI, "tok", TargamgiProxy.MODEL, null,
+            http = http, cache = TranslationCache(), playedGame = { activeGame },
+            target = "ar", slang = listOf("get out" to "انزل يا سطى"),
+            proxyUrl = TargamgiProxy.BASE_URL, arabicPrompt = ArabicPrompt.TEXT,
+            corrections = mapOf("get out" to "انزل يا ابن المتناكة!"),
+        )
+
+        val nonGtaResult = translator.translate("Get out!")
+        assertEquals(1, bodies.size)
+        assertTrue(bodies[0].contains(ArabicPrompt.CLEAN_FALLBACK))
+        org.junit.Assert.assertFalse(bodies[0].contains("انزل يا سطى"))
+        org.junit.Assert.assertFalse(nonGtaResult.contains("المتناكة"))
+    }
 }
