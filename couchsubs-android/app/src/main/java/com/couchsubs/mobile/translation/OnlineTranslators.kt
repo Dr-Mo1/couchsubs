@@ -242,9 +242,11 @@ fun interface Http {
                 }
                 val status = connection.responseCode
                 val stream = if (status >= 400) connection.errorStream else connection.inputStream
+                // Reading and closing the stream without disconnect() returns the socket to Android's HTTP keep-alive pool.
                 status to (stream?.use { String(it.readBytes(), Charsets.UTF_8) } ?: "")
-            } finally {
+            } catch (error: Exception) {
                 connection.disconnect()
+                throw error
             }
         }
     }
