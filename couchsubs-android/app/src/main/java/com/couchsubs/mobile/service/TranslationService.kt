@@ -556,8 +556,10 @@ class TranslationService : Service() {
     private fun isAccessAllowed(): Boolean =
         AccountRules.canTranslate(SubTvAccount.status.value, SubTvAccount.gateBlock.value, SubTvAccount.effectiveNowMs())
 
-    private fun stopForInactiveAccess() {
-        LiveState.update { it.copy(running = false, error = getString(R.string.account_access_ended)) }
+    private fun stopForInactiveAccess(offlineUnverified: Boolean = false) {
+        if (!offlineUnverified) SecureData.wipe(applicationContext)
+        val msg = getString(if (offlineUnverified) R.string.account_unreachable else R.string.account_access_ended)
+        LiveState.update { it.copy(running = false, error = msg) }
         stopSelf()
     }
 
@@ -635,10 +637,8 @@ class TranslationService : Service() {
         // 1.0.52: verify subscription status online when uncached or offline grace expired (closes firewall/offline local-pack bypass).
         if (SubTvAccount.needsOnlineVerification()) kotlinx.coroutines.runBlocking { SubTvAccount.refreshStatus() }
         if (!SubTvAccount.canTranslateVerifiedNow()) {
-            if (AccountRules.blocksTranslation(SubTvAccount.status.value, SubTvAccount.gateBlock.value, SubTvAccount.effectiveNowMs())) {
-                SecureData.wipe(applicationContext)
-            }
-            stopForInactiveAccess()
+            val blocked = AccountRules.blocksTranslation(SubTvAccount.status.value, SubTvAccount.gateBlock.value, SubTvAccount.effectiveNowMs())
+            stopForInactiveAccess(offlineUnverified = !blocked)
             return
         }
         // 1.0.48 part B: Arabic data lives off the APK in filesDir/secure-data/. Never run translation without it.

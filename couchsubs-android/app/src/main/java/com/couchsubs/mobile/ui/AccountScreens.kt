@@ -61,9 +61,10 @@ import kotlinx.coroutines.launch
 @Composable
 private fun statusLine(status: AccountStatus?): String {
     if (status == null) return stringResource(R.string.account_loading)
-    return when (AccountRules.kind(status)) {
+    val nowMs = SubTvAccount.effectiveNowMs()
+    return when (AccountRules.kind(status, nowMs)) {
         AccessKind.TRIAL_NOT_STARTED -> stringResource(R.string.account_status_trial_not_started)
-        AccessKind.TRIAL -> stringResource(R.string.account_status_trial, AccountRules.trialDaysLeft(status, System.currentTimeMillis()))
+        AccessKind.TRIAL -> stringResource(R.string.account_status_trial, AccountRules.trialDaysLeft(status, nowMs))
         AccessKind.SUBSCRIBED -> stringResource(R.string.account_status_subscribed, dateText(status.planUntil))
         AccessKind.PERMANENT -> stringResource(R.string.account_status_permanent)
         AccessKind.ENDED -> stringResource(R.string.account_status_ended)
@@ -95,12 +96,12 @@ private fun AccountNumberRow() {
 @Composable
 private fun RemainingCountdownLine(status: AccountStatus?) {
     if (status == null) return
-    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var nowMs by remember { mutableLongStateOf(SubTvAccount.effectiveNowMs()) }
     val rem = AccountRules.remainingTime(status, nowMs) ?: return
     LaunchedEffect(status.planUntil, status.trialStartedAt, status.plan) {
         var refreshedAtZero = false
         while (true) {
-            nowMs = System.currentTimeMillis()
+            nowMs = SubTvAccount.effectiveNowMs()
             val cur = AccountRules.remainingTime(status, nowMs)
             if (cur == null) break
             if (cur.totalMs <= 0L) {
@@ -129,7 +130,7 @@ fun AccountStatusCard() {
     LaunchedEffect(Unit) { if (SubTvAccount.status.value == null) SubTvAccount.refreshStatus() }
     Tile(Modifier.fillMaxWidth()) {
         TileLabel(stringResource(R.string.account_title))
-        val ended = status?.let { AccountRules.kind(it) == AccessKind.ENDED } == true
+        val ended = status?.let { AccountRules.kind(it, SubTvAccount.effectiveNowMs()) == AccessKind.ENDED } == true
         Text(statusLine(status), style = Tokens.Type.headline, color = if (ended) Tokens.Color.danger else Tokens.Color.text)
         RemainingCountdownLine(status)
         AccountNumberRow()
@@ -164,6 +165,7 @@ private fun redeemText(context: Context, problem: RedeemProblem): String = conte
     RedeemProblem.ALREADY_REDEEMED -> R.string.redeem_already_used
     RedeemProblem.ALREADY_PERMANENT -> R.string.redeem_already_permanent
     RedeemProblem.CODE_INACTIVE -> R.string.redeem_inactive
+    RedeemProblem.RATE_LIMITED -> R.string.redeem_rate_limited
     RedeemProblem.NETWORK -> R.string.account_unreachable
     RedeemProblem.OTHER -> R.string.redeem_failed
 })
@@ -303,7 +305,17 @@ fun AccountHost() {
     }
     val status by SubTvAccount.status.collectAsState()
     val gate by SubTvAccount.gateBlock.collectAsState()
-    when (AccountRules.screen(status, gate, BuildConfig.VERSION_NAME)) {
+    var hostNowMs by remember { mutableLongStateOf(SubTvAccount.effectiveNowMs()) }
+    LaunchedEffect(status?.planUntil, status?.trialStartedAt, status?.plan) {
+        hostNowMs = SubTvAccount.effectiveNowMs()
+        if (status != null && status?.plan != "permanent") {
+            while (true) {
+                delay(30_000L)
+                hostNowMs = SubTvAccount.effectiveNowMs()
+            }
+        }
+    }
+    when (AccountRules.screen(status, gate, BuildConfig.VERSION_NAME, nowMs = hostNowMs)) {
         AccountScreen.NONE -> Unit
         AccountScreen.UPDATE_REQUIRED -> Blocking { UpdateRequiredScreen() }
         AccountScreen.SUBSCRIBE -> {

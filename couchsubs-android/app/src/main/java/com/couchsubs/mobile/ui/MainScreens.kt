@@ -246,6 +246,7 @@ private fun RunningScreen(status: LiveStatus, topBar: @Composable () -> Unit, on
                 style = Tokens.Type.captionNumeric)
         }
         PackSummaryTile(onPacks = onPacks)
+        if (status.askingGame) GameSection(status)
         // Görüntü gelirken durum metni ("Altyazılar okunuyor") üstteki "Çeviri sürüyor" satırını tekrarlar; yalnız
         // bağlanırken ve bağlantı sorunlarında gösterilir.
         if (!status.streaming && status.phase.isNotEmpty()) Text(status.phase, style = Tokens.Type.caption, color = Tokens.Color.secondary)

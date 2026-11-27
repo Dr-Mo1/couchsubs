@@ -1012,6 +1012,7 @@
     <string name="redeem_already_used">لقد استخدمت هذا الرمز من قبل</string>
     <string name="redeem_already_permanent">حسابك دائم بالفعل</string>
     <string name="redeem_inactive">هذا الرمز غير مفعّل</string>
+    <string name="redeem_rate_limited">محاولات كثيرة متكررة. انتظر قليلًا ثم أعد المحاولة.</string>
     <string name="redeem_failed">حدثت مشكلة، حاول مرة أخرى بعد قليل</string>
     <string name="update_required_title">يجب تحديث التطبيق</string>
     <string name="update_required_body">هذا الإصدار قديم ولن يستمر في العمل. يُرجى تحديثه أولًا.</string>

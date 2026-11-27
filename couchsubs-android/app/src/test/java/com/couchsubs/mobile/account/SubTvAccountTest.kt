@@ -345,5 +345,12 @@ class SubTvAccountTest {
         // Unverified / null status is blocked in strict mode; turning system clock backward cannot defeat storedMaxMs.
         assertTrue(AccountRules.blocksTranslationStrict(null, null, nowMs = t0, lastVerifiedAtMs = 0L))
         assertEquals(afterExpiry, AccountRules.effectiveNowMs(systemNowMs = t0, storedMaxMs = afterExpiry))
+
+        // remainingTime and screen respect the passed nowMs (closing monotonic-clock UI bypasses).
+        assertNotNull(AccountRules.remainingTime(activeTrial, nowMs = t0))
+        assertNull(AccountRules.remainingTime(activeTrial, nowMs = afterExpiry))
+        assertEquals(AccountScreen.NONE, AccountRules.screen(activeTrial, null, "1.0.52", nowMs = t0))
+        assertEquals(AccountScreen.SUBSCRIBE, AccountRules.screen(activeTrial, null, "1.0.52", nowMs = afterExpiry))
+        assertEquals(RedeemProblem.RATE_LIMITED, AccountRules.redeemProblem("rate_limited"))
     }
 }

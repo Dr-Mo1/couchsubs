@@ -78,7 +78,7 @@ object PlayedGame {
     /** Servis periyodik olarak sorar (15 saniyede bir): süre doldu ve oyun bilinmiyorsa kart açılır. */
     fun checkAsk(now: Long) {
         val settings = settings ?: return
-        if (!sense.shouldAsk(now - startedAt, settings.askGame && settings.sharePool)) return
+        if (!sense.shouldAsk(now - startedAt, settings.askGame)) return
         sense.markAsked()
         LiveState.update { it.copy(askingGame = true) }
     }

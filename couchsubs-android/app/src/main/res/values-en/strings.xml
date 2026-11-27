@@ -1002,6 +1002,7 @@
     <string name="redeem_already_used">You already used this code</string>
     <string name="redeem_already_permanent">Your account is already permanent</string>
     <string name="redeem_inactive">This code is not active</string>
+    <string name="redeem_rate_limited">Too many attempts. Wait a moment and try again.</string>
     <string name="redeem_failed">Something went wrong, try again in a moment</string>
     <string name="update_required_title">Please update the app</string>
     <string name="update_required_body">This version is too old to keep working. Update it first.</string>

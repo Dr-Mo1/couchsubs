@@ -87,7 +87,7 @@ enum class AccessKind { TRIAL_NOT_STARTED, TRIAL, SUBSCRIBED, PERMANENT, ENDED }
 enum class AccountScreen { NONE, UPDATE_REQUIRED, SUBSCRIBE }
 
 /** Why a code was not accepted, as the UI words it. */
-enum class RedeemProblem { INVALID_CODE, CODE_EXPIRED, CODE_EXHAUSTED, ALREADY_REDEEMED, ALREADY_PERMANENT, CODE_INACTIVE, NETWORK, OTHER }
+enum class RedeemProblem { INVALID_CODE, CODE_EXPIRED, CODE_EXHAUSTED, ALREADY_REDEEMED, ALREADY_PERMANENT, CODE_INACTIVE, RATE_LIMITED, NETWORK, OTHER }
 
 object AccountRules {
     /** The access token is renewed when fewer than this many ms are left. */
@@ -167,7 +167,7 @@ object AccountRules {
     data class RemainingTime(val days: Int, val hours: Int, val minutes: Int, val seconds: Int, val totalMs: Long)
 
     fun remainingTime(status: AccountStatus, nowMs: Long): RemainingTime? {
-        val k = kind(status)
+        val k = kind(status, nowMs)
         if (k != AccessKind.TRIAL && k != AccessKind.SUBSCRIBED) return null
         val end = (epochMs(status.planUntil)
             ?: if (k == AccessKind.TRIAL) epochMs(status.trialStartedAt)?.plus(status.trialDays * DAY_MS) else null)
@@ -225,6 +225,7 @@ object AccountRules {
         "already_redeemed" -> RedeemProblem.ALREADY_REDEEMED
         "already_permanent" -> RedeemProblem.ALREADY_PERMANENT
         "code_inactive" -> RedeemProblem.CODE_INACTIVE
+        "rate_limited" -> RedeemProblem.RATE_LIMITED
         "network" -> RedeemProblem.NETWORK
         else -> RedeemProblem.OTHER
     }
