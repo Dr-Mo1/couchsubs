@@ -35,6 +35,89 @@ class RegisteredConsole(val host: String, val name: String, val registKey: ByteA
 }
 
 /**
+ * Per-(PSN account, console) registration vault stored encrypted in [SecretStore].
+ * Each PSN account on a PS5 has its own one-time registration (`registKey` + `morning`); keeping them keyed by
+ * `accountId` + console identity ensures switching PSN accounts or updating the app never loses earlier pairings.
+ */
+object ConsoleVault {
+    private val b64Enc = java.util.Base64.getEncoder()
+    private val b64Dec = java.util.Base64.getDecoder()
+
+    data class Entry(val accountKey: String, val console: RegisteredConsole)
+
+    fun accountKey(accountId: ByteArray): String = b64Enc.encodeToString(accountId)
+
+    fun parse(json: String?): List<Entry> {
+        if (json.isNullOrBlank()) return emptyList()
+        return try {
+            val array = org.json.JSONArray(json)
+            (0 until array.length()).mapNotNull { index ->
+                val obj = array.optJSONObject(index) ?: return@mapNotNull null
+                val account = obj.optString("accountId", "")
+                val host = obj.optString("host", "")
+                val name = obj.optString("name", "")
+                val regist = obj.optString("registKey", "")
+                val morning = obj.optString("morning", "")
+                if (account.isEmpty() || host.isEmpty() || regist.isEmpty() || morning.isEmpty()) null
+                else Entry(account, RegisteredConsole(host, name, b64Dec.decode(regist), b64Dec.decode(morning)))
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun serialize(entries: List<Entry>): String {
+        val array = org.json.JSONArray()
+        for (entry in entries) {
+            array.put(
+                org.json.JSONObject()
+                    .put("accountId", entry.accountKey)
+                    .put("host", entry.console.host)
+                    .put("name", entry.console.name)
+                    .put("registKey", b64Enc.encodeToString(entry.console.registKey))
+                    .put("morning", b64Enc.encodeToString(entry.console.morning)),
+            )
+        }
+        return array.toString()
+    }
+
+    private fun sameConsole(a: RegisteredConsole, b: RegisteredConsole): Boolean =
+        if (a.name.isNotBlank() && b.name.isNotBlank()) a.name == b.name else a.host == b.host
+
+    /** Saves or updates [console] under [accountId] (most-recent entry first), preserving other accounts and consoles. */
+    fun save(vaultJson: String?, accountId: ByteArray, console: RegisteredConsole): String {
+        if (accountId.size != 8) return vaultJson.orEmpty()
+        val key = accountKey(accountId)
+        val filtered = parse(vaultJson).filterNot { it.accountKey == key && sameConsole(it.console, console) }
+        return serialize(listOf(Entry(key, console)) + filtered)
+    }
+
+    /** Finds a saved registration for [accountId], preferring matching [preferredName] or [preferredHost] if given. */
+    fun find(
+        vaultJson: String?,
+        accountId: ByteArray,
+        preferredName: String? = null,
+        preferredHost: String? = null,
+    ): RegisteredConsole? {
+        if (accountId.size != 8) return null
+        val key = accountKey(accountId)
+        val matches = parse(vaultJson).filter { it.accountKey == key }.map { it.console }
+        if (matches.isEmpty()) return null
+        if (!preferredName.isNullOrBlank()) matches.firstOrNull { it.name == preferredName }?.let { return it }
+        if (!preferredHost.isNullOrBlank()) matches.firstOrNull { it.host == preferredHost }?.let { return it }
+        return matches.first()
+    }
+
+    /** Seeds the vault with an existing single-slot [legacyConsole] when migrating an already-paired install. */
+    fun migrate(vaultJson: String?, accountId: ByteArray?, legacyConsole: RegisteredConsole?): String? {
+        if (accountId == null || accountId.size != 8 || legacyConsole == null) return vaultJson
+        val existing = find(vaultJson, accountId, legacyConsole.name, legacyConsole.host)
+        if (existing != null) return vaultJson
+        return save(vaultJson, accountId, legacyConsole)
+    }
+}
+
+/**
  * Kaydın kullanıcıya anlatılan sonucu (Windows: RegistrationFailure). [PAIRING_CLOSED]: PS5 ağda ama aramayı reddetti
  * (Cihazı Eşleştir ekranı kapalı ya da PS5 dinlenmede); [CONNECT_FAILED]: PS5 aramaya yanıt verdi ama eşleştirme
  * bağlantısı açılamadı; [NO_FREE_PORT]: telefonda boş port ya da soket kalmadı (GitHub #590).

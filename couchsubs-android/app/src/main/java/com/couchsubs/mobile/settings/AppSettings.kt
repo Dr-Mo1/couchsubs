@@ -656,25 +656,70 @@ class AppSettings(context: Context) : AreaStore {
     /** PSN hesap kimliği (8 bayt, base64). */
     var accountId: ByteArray?
         get() = secrets.get("accountId")?.let { Base64.decode(it, Base64.NO_WRAP) }?.takeIf { it.size == 8 }
-        set(value) = secrets.put("accountId", value?.let { Base64.encodeToString(it, Base64.NO_WRAP) })
-
-    var console: RegisteredConsole?
-        get() = secrets.get("console")?.let {
-            try {
-                val json = JSONObject(it)
-                RegisteredConsole(
-                    json.getString("host"), json.getString("name"),
-                    Base64.decode(json.getString("registKey"), Base64.NO_WRAP), Base64.decode(json.getString("morning"), Base64.NO_WRAP),
+        set(value) {
+            val previousId = accountId
+            val currentConsole = readRawConsole()
+            if (previousId != null && currentConsole != null) {
+                val migrated = com.couchsubs.mobile.remoteplay.ConsoleVault.migrate(
+                    secrets.get("consoleVault"), previousId, currentConsole,
                 )
-            } catch (error: Exception) {
-                null
+                if (migrated != null) secrets.put("consoleVault", migrated)
+            }
+            secrets.put("accountId", value?.let { Base64.encodeToString(it, Base64.NO_WRAP) })
+            if (value == null) {
+                writeRawConsole(null)
+            } else {
+                val restored = com.couchsubs.mobile.remoteplay.ConsoleVault.find(
+                    secrets.get("consoleVault"), value, currentConsole?.name, currentConsole?.host,
+                )
+                writeRawConsole(restored)
             }
         }
-        set(value) = secrets.put("console", value?.let {
+
+    private fun readRawConsole(): RegisteredConsole? = secrets.get("console")?.let {
+        try {
+            val json = JSONObject(it)
+            RegisteredConsole(
+                json.getString("host"), json.getString("name"),
+                Base64.decode(json.getString("registKey"), Base64.NO_WRAP), Base64.decode(json.getString("morning"), Base64.NO_WRAP),
+            )
+        } catch (error: Exception) {
+            null
+        }
+    }
+
+    private fun writeRawConsole(value: RegisteredConsole?) {
+        secrets.put("console", value?.let {
             JSONObject().put("host", it.host).put("name", it.name)
                 .put("registKey", Base64.encodeToString(it.registKey, Base64.NO_WRAP))
                 .put("morning", Base64.encodeToString(it.morning, Base64.NO_WRAP)).toString()
         })
+    }
+
+    var console: RegisteredConsole?
+        get() {
+            val currentId = accountId
+            val active = readRawConsole()
+            if (active != null) {
+                if (currentId != null) {
+                    val existing = secrets.get("consoleVault")
+                    val migrated = com.couchsubs.mobile.remoteplay.ConsoleVault.migrate(existing, currentId, active)
+                    if (migrated != null && migrated != existing) secrets.put("consoleVault", migrated)
+                }
+                return active
+            }
+            if (currentId == null) return null
+            val restored = com.couchsubs.mobile.remoteplay.ConsoleVault.find(secrets.get("consoleVault"), currentId)
+            if (restored != null) writeRawConsole(restored)
+            return restored
+        }
+        set(value) {
+            writeRawConsole(value)
+            val currentId = accountId
+            if (value != null && currentId != null) {
+                secrets.put("consoleVault", com.couchsubs.mobile.remoteplay.ConsoleVault.save(secrets.get("consoleVault"), currentId, value))
+            }
+        }
 
     /** Konsol türü; seçilmediyse null (kurulumda sorulur). Eski kurulumlar PlayStation sayılır. */
     var platformChoice: ConsolePlatform?
