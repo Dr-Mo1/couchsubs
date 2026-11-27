@@ -995,6 +995,7 @@
     <string name="subscribe_plan_line">%1$s · %2$s جنيهًا · %3$d يومًا</string>
     <string name="subscribe_contact_line">للاشتراك تواصل معنا</string>
     <string name="subscribe_contact">TODO_CONTACT</string>
+    <string name="subscribe_contact_pending">سيتم إضافة وسيلة التواصل قريبًا — يمكنك تفعيل الكود أدناه.</string>
     <string name="subscribe_retry">حاول مرة أخرى</string>
     <string name="subscribe_still_ended">لا يوجد اشتراك مفعّل بعد. عند التواصل معنا أرسل رقم حسابك.</string>
     <string name="redeem_title">لدي كود</string>
@@ -1017,7 +1018,7 @@
     <string name="privacy_notice_title">ملاحظة عن الخصوصية</string>
     <string name="privacy_notice_body">يسجّل التطبيق استخدامك داخله (فتحه وإغلاقه، ومدة الترجمة، والأخطاء، ونوع الجهاز) لتحسين الخدمة. لا نسجّل كلامك ولا حسابك على بلايستيشن ولا موقعك.</string>
     <string name="privacy_notice_ok">موافق</string>
-    <string name="home_update_button">تحديث التطبيق</string>
+    <string name="home_update_button">تحديث الآن</string>
     <string name="home_update_available">يتوفر تحديث جديد</string>
     <string name="home_update_up_to_date">أنت تستخدم أحدث إصدار</string>
     <!-- 1.0.48 part B: secure-data, privacy notice and home update button (end) -->

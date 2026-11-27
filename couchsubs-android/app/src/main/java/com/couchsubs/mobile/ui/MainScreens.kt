@@ -150,10 +150,10 @@ fun MainScreen(
                                 Modifier.weight(1f), onTarget)
                         }
                     }
+                    HomeUpdateButton()
                     SubtitlePlaceTile(settings = settings, connectedTvs = status.connectedTvs, onSetupTv = onTarget)
                     PackSummaryTile(onPacks)
                     AccountStatusCard()
-                    HomeUpdateButton()
                     if (paired) TranslationStartDisc(onStart = onStart)
                     if (!paired) Spacer(Modifier.height(Tokens.Space.screen))
                     status.recent.firstOrNull()?.let { line ->

@@ -208,7 +208,13 @@ fun SubscribeScreen() {
         }
         Tile(Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.subscribe_contact_line), style = Tokens.Type.headline, color = Tokens.Color.text)
-            Text(stringResource(R.string.subscribe_contact), style = Tokens.Type.title, color = Tokens.Color.accentText)
+            val contact = stringResource(R.string.subscribe_contact)
+            val shownContact = if (contact.equals("TODO_CONTACT", ignoreCase = true)) {
+                stringResource(R.string.subscribe_contact_pending)
+            } else {
+                contact
+            }
+            Text(shownContact, style = Tokens.Type.title, color = Tokens.Color.accentText)
             AccountNumberRow()
         }
         Tile(Modifier.fillMaxWidth()) { RedeemCodeBox() }
