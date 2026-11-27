@@ -191,7 +191,8 @@ fun RedeemCodeBox() {
                 when (reply) {
                     is RedeemReply.Success -> {
                         code = ""
-                        Toast.makeText(app, R.string.redeem_success, Toast.LENGTH_LONG).show()
+                        val msg = if (reply.kind == "referral") R.string.referral_redeem_success else R.string.redeem_success
+                        Toast.makeText(app, msg, Toast.LENGTH_LONG).show()
                     }
                     is RedeemReply.Failure -> problem = redeemText(app, AccountRules.redeemProblem(reply.code))
                 }

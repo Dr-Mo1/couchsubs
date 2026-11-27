@@ -230,7 +230,7 @@ sealed interface StatusReply {
 }
 
 sealed interface RedeemReply {
-    data class Success(val plan: String?, val planUntil: String?) : RedeemReply
+    data class Success(val plan: String?, val planUntil: String?, val kind: String? = null) : RedeemReply
     /** [code] is the server's `error`, "network" when it was not reached, or "http_<status>". */
     data class Failure(val code: String) : RedeemReply
 }
@@ -284,7 +284,7 @@ class SubTvAccountClient(
         } catch (_: JSONException) {
             null
         }
-        if (json != null && reply.first in 200..299 && json.optBoolean("ok", false)) return RedeemReply.Success(json.text("plan"), json.text("plan_until"))
+        if (json != null && reply.first in 200..299 && json.optBoolean("ok", false)) return RedeemReply.Success(json.text("plan"), json.text("plan_until"), json.text("kind"))
         return RedeemReply.Failure(json?.text("error") ?: "http_${reply.first}")
     }
 

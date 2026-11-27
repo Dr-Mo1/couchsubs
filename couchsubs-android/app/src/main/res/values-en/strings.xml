@@ -991,8 +991,8 @@
     <string name="subscribe_contact_pending">Contact link coming soon — you can activate a code below.</string>
     <string name="subscribe_retry">Try again</string>
     <string name="subscribe_still_ended">No active subscription yet. When you contact us, send your account number.</string>
-    <string name="redeem_title">I have a code</string>
-    <string name="redeem_field">Code</string>
+    <string name="redeem_title">I have a code or invite</string>
+    <string name="redeem_field">Activation or friend invite code</string>
     <string name="redeem_button">Activate</string>
     <string name="redeem_working">Activating…</string>
     <string name="redeem_success">Subscription activated ✓</string>

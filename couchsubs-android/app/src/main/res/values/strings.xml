@@ -1001,8 +1001,8 @@
     <string name="subscribe_contact_pending">ستُضاف وسيلة التواصل قريبًا — يمكنك إدخال رمز التفعيل أدناه.</string>
     <string name="subscribe_retry">حاول مرة أخرى</string>
     <string name="subscribe_still_ended">لا يوجد اشتراك مفعّل بعد. عند التواصل معنا أرسل رقم حسابك.</string>
-    <string name="redeem_title">لدي رمز تفعيل</string>
-    <string name="redeem_field">رمز التفعيل</string>
+    <string name="redeem_title">لدي رمز تفعيل أو دعوة</string>
+    <string name="redeem_field">رمز التفعيل أو رمز دعوة صديق</string>
     <string name="redeem_button">تفعيل</string>
     <string name="redeem_working">جارٍ التفعيل…</string>
     <string name="redeem_success">تم تفعيل الاشتراك ✓</string>
